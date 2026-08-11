@@ -1,0 +1,173 @@
+{
+  "dataset_id": "memory-lab-v1",
+  "status": "frozen-for-phase-1",
+  "normalization": {
+    "default_array_order": "canonical id lexical ascending unless the query defines temporal/decision order",
+    "decision_order": ["effective_at", "recorded_at", "decision_id"],
+    "omit_backend_fields": true,
+    "null_semantics": "preserve explicit null; do not replace UNKNOWN with null",
+    "test_now": "2026-08-21T00:00:00Z"
+  },
+  "expected": [
+    {
+      "id": "expected:q1:example-01:project-listings:current",
+      "query": "Q1",
+      "parameters": {"target":"example-01","capability":"project-listings","knowledge_time":"2026-08-21T00:00:00Z"},
+      "result": {
+        "capability_id": "cap:example-01:project-listings",
+        "accepted_claim_ids": [
+          "clm:example-01:project-listings:entrypoint:categoria-other-ui-slugs",
+          "clm:example-01:project-listings:entrypoint:categoria-tested",
+          "clm:example-01:project-listings:lifecycle:operational",
+          "clm:example-01:project-listings:transport:direct-read",
+          "clm:example-01:project-listings:unknown:multi-param"
+        ],
+        "provenance_decision_ids": [
+          "dec:example-01:project-listings:20260725T200000Z:01",
+          "dec:example-01:project-listings:20260725T210000Z:01"
+        ],
+        "pending_proposal_ids": [],
+        "epistemic_summary": {"OBSERVED":3,"INFERRED":1,"UNKNOWN":1}
+      }
+    },
+    {
+      "id": "expected:q3:example-01:project-listings:pre-promotion",
+      "query": "Q3",
+      "parameters": {"target":"example-01","capability":"project-listings","knowledge_time":"2026-07-25T20:59:59Z","domain_time":"2026-07-25T20:59:59Z"},
+      "result": {
+        "accepted_claim_ids": [
+          "clm:example-01:project-listings:lifecycle:operational",
+          "clm:example-01:project-listings:transport:direct-read"
+        ],
+        "pending_proposal_ids": ["prop:example-01:project-listings:categoria-extension"]
+      }
+    },
+    {
+      "id": "expected:q3:example-08:day1:as-known-day15",
+      "query": "Q3",
+      "parameters": {"target":"example-08","capability":"read","knowledge_time":"2026-08-15T00:00:00Z","domain_time":"2026-08-01T12:00:00Z"},
+      "result": {
+        "accepted_claim_ids": ["clm:example-08:read:entrypoint:route-x"],
+        "provenance_decision_ids": ["dec:example-08:read:20260810T100000Z:01"],
+        "excluded_later_decision_ids": ["dec:example-08:read:20260820T100000Z:01"]
+      }
+    },
+    {
+      "id": "expected:q4:example-08:day1:current-belief",
+      "query": "Q4",
+      "parameters": {"target":"example-08","capability":"read","domain_time":"2026-08-01T12:00:00Z"},
+      "result": {
+        "accepted_claim_ids": ["clm:example-08:read:unknown:route-x-day1-corrected"],
+        "provenance_decision_ids": ["dec:example-08:read:20260820T100000Z:01"],
+        "historical_belief_preserved": ["clm:example-08:read:entrypoint:route-x"]
+      }
+    },
+    {
+      "id": "expected:q11:example-06:s2-checkpoint",
+      "query": "Q11",
+      "checkpoint": {"records_with_recorded_at_lte":"2026-08-10T23:59:59Z"},
+      "parameters": {"target":"example-06","capability":"read"},
+      "result": {
+        "contradictions": [
+          {
+            "observation_id": "obs:example-06:read:20260810:01",
+            "contradicted_claim_id": "clm:example-06:read:entrypoint:old-route",
+            "context_comparability": "comparable",
+            "resolution": "unresolved",
+            "accepted_knowledge_changed": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "expected:q11:example-06:full-dataset",
+      "query": "Q11",
+      "parameters": {"target":"example-06","capability":"read","knowledge_time":"2026-08-21T00:00:00Z"},
+      "result": {"contradictions":[]}
+    },
+    {
+      "id": "expected:q12:example-06:validated",
+      "query": "Q12",
+      "parameters": {"target":"example-06"},
+      "result": {
+        "drifts": [
+          {
+            "capability_id": "cap:example-06:read",
+            "before_observation_id": "obs:example-06:read:20260801:01",
+            "confirming_failure_observation_ids": ["obs:example-06:read:20260810:01","obs:example-06:read:20260811:01"],
+            "replacement_observation_id": "obs:example-06:read:20260812:01",
+            "classification": "validated-temporal-drift",
+            "context_comparability": "comparable-for-old-route-failures",
+            "transition_time": "UNKNOWN",
+            "inferred_transition_bounds": {"after":"2026-08-01T10:00:00Z","on_or_before":"2026-08-10T10:00:00Z","epistemic":"INFERRED"},
+            "decision_ids": ["dec:example-06:read:20260811T120000Z:01","dec:example-06:read:20260812T120000Z:01"]
+          }
+        ]
+      }
+    },
+    {
+      "id": "expected:q13:example-02:search:transport-context",
+      "query": "Q13",
+      "parameters": {"target":"example-02","capability":"search","compared_observation_ids":["obs:example-02:search:20260725:01","obs:example-02:search:20260725:03"]},
+      "result": {
+        "classification": "contextual",
+        "material_differences": ["transport","executor/engine","javascript-capability"],
+        "temporal_drift": false,
+        "reason": "same-day results differ under materially different execution context"
+      }
+    },
+    {
+      "id": "expected:q13:example-05:false-drift",
+      "query": "Q13",
+      "parameters": {"target":"example-05","capability":"read","compared_observation_ids":["obs:example-05:read:20260805:01","obs:example-05:read:20260805:02"]},
+      "result": {
+        "classification": "contextual",
+        "material_differences": ["transport","engine"],
+        "temporal_drift": false
+      }
+    },
+    {
+      "id": "expected:q20:example-09:decision-order",
+      "query": "Q20",
+      "parameters": {"dataset_version":"memory-lab-v1","target":"example-09","capability":"read","knowledge_time":"2026-08-21T00:00:00Z"},
+      "result": {
+        "ordered_decision_ids": [
+          "dec:example-09:read:20260818T100000Z:01",
+          "dec:example-09:read:20260818T100000Z:02"
+        ],
+        "accepted_claim_ids": [
+          "clm:example-09:read:constraint:a",
+          "clm:example-09:read:constraint:b"
+        ],
+        "tie_break_used": "decision_id lexical ascending"
+      }
+    },
+    {
+      "id": "expected:q20:example-01:current-projection",
+      "query": "Q20",
+      "parameters": {"dataset_version":"memory-lab-v1","target":"example-01","capability":"project-listings","knowledge_time":"2026-08-21T00:00:00Z"},
+      "result": {
+        "accepted_claim_ids": [
+          "clm:example-01:project-listings:entrypoint:categoria-other-ui-slugs",
+          "clm:example-01:project-listings:entrypoint:categoria-tested",
+          "clm:example-01:project-listings:lifecycle:operational",
+          "clm:example-01:project-listings:transport:direct-read",
+          "clm:example-01:project-listings:unknown:multi-param"
+        ],
+        "ordered_decision_ids": [
+          "dec:example-01:project-listings:20260725T200000Z:01",
+          "dec:example-01:project-listings:20260725T210000Z:01"
+        ]
+      }
+    },
+    {
+      "id": "expected:q1:example-07:current",
+      "query": "Q1",
+      "parameters": {"target":"example-07","capability":"read","knowledge_time":"2026-08-21T00:00:00Z"},
+      "result": {
+        "accepted_claim_ids": ["clm:example-07:read:transport:direct-read-restored"],
+        "inactive_historical_claim_ids": ["clm:example-07:read:negative:blocked"]
+      }
+    }
+  ]
+}

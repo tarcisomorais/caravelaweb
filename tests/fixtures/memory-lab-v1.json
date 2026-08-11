@@ -1,0 +1,184 @@
+{
+  "dataset_id": "memory-lab-v1",
+  "status": "frozen",
+  "test_now": "2026-08-21T00:00:00Z",
+  "validity_interval": "[valid_from, valid_to)",
+  "decision_order": ["effective_at", "recorded_at", "decision_id"],
+  "claim_granularity": "one independently decidable operational proposition",
+  "real_time_rule": "date-only observed_at is normalized to 00:00:00Z with time_precision=day; this is not an asserted midnight observation",
+  "cases": [
+    {
+      "id":"case:example-01",
+      "target":{"id":"tgt:example-01","name":"Example Target 01"},
+      "hosts":[{"id":"host:example-01:www","hostname":"www.example-01.example"}],
+      "capabilities":[{"id":"cap:example-01:project-listings","name":"project-listings"}],
+      "evidence":[{"id":"ev:example-01:project-listings:01","source":"fixtures/example-info/example-01-20260725T203709.md","commit":"0000aaa4"}],
+      "validations":[{"id":"val:example-01:project-listings:20260725:01","capability_id":"cap:example-01:project-listings","host_id":"host:example-01:www","observed_at":"2026-07-25T00:00:00Z","time_precision":"day","recorded_at":"2026-07-25T20:37:09Z","transport":"DIRECT_READ","context":{"executor":"curl","javascript":false,"authentication":"PUBLIC"}}],
+      "observations":[
+        {"id":"obs:example-01:project-listings:20260725:01","validation_id":"val:example-01:project-listings:20260725:01","result":"success","value":{"route":"/projects"},"evidence_ids":["ev:example-01:project-listings:01"]},
+        {"id":"obs:example-01:project-listings:20260725:02","validation_id":"val:example-01:project-listings:20260725:01","result":"success","value":{"categoria":"escrita"},"evidence_ids":["ev:example-01:project-listings:01"]},
+        {"id":"obs:example-01:project-listings:20260725:03","validation_id":"val:example-01:project-listings:20260725:01","result":"success","value":{"categoria":"design-e-criacao"},"evidence_ids":["ev:example-01:project-listings:01"]},
+        {"id":"obs:example-01:project-listings:20260725:04","validation_id":"val:example-01:project-listings:20260725:01","result":"success","value":{"categoria":"vendas-e-marketing"},"evidence_ids":["ev:example-01:project-listings:01"]}
+      ],
+      "claims":[
+        {"id":"clm:example-01:project-listings:lifecycle:operational","family":"lifecycle","epistemic":"OBSERVED","value":"OPERATIONAL"},
+        {"id":"clm:example-01:project-listings:transport:direct-read","family":"transport","epistemic":"OBSERVED","value":"DIRECT_READ works"},
+        {"id":"clm:example-01:project-listings:entrypoint:categoria-tested","family":"entrypoint","epistemic":"OBSERVED","value":["escrita","design-e-criacao","vendas-e-marketing"],"proposal_id":"prop:example-01:project-listings:categoria-extension"},
+        {"id":"clm:example-01:project-listings:entrypoint:categoria-other-ui-slugs","family":"entrypoint","epistemic":"INFERRED","value":"17 other UI-exposed slugs generalize","proposal_id":"prop:example-01:project-listings:categoria-extension"},
+        {"id":"clm:example-01:project-listings:unknown:multi-param","family":"unknown","epistemic":"UNKNOWN","value":"multi-parameter combinations not established","proposal_id":"prop:example-01:project-listings:categoria-extension"}
+      ],
+      "proposals":[{"id":"prop:example-01:project-listings:categoria-extension","claim_ids":["clm:example-01:project-listings:entrypoint:categoria-tested","clm:example-01:project-listings:entrypoint:categoria-other-ui-slugs","clm:example-01:project-listings:unknown:multi-param"],"recorded_at":"2026-07-25T20:37:09Z"}],
+      "decisions":[
+        {"id":"dec:example-01:project-listings:20260725T200000Z:01","action":"ACCEPT","claim_ids":["clm:example-01:project-listings:lifecycle:operational","clm:example-01:project-listings:transport:direct-read"],"effective_at":"2026-07-25T20:00:00Z","recorded_at":"2026-07-25T20:00:00Z","validity":{"valid_from":"2026-07-25T00:00:00Z","valid_to":null}},
+        {"id":"dec:example-01:project-listings:20260725T210000Z:01","action":"ACCEPT","claim_ids":["clm:example-01:project-listings:entrypoint:categoria-tested","clm:example-01:project-listings:entrypoint:categoria-other-ui-slugs","clm:example-01:project-listings:unknown:multi-param"],"proposal_id":"prop:example-01:project-listings:categoria-extension","effective_at":"2026-07-25T21:00:00Z","recorded_at":"2026-07-25T21:00:00Z","validity":{"valid_from":"2026-07-25T00:00:00Z","valid_to":null}}
+      ]
+    },
+    {
+      "id":"case:example-12",
+      "target":{"id":"tgt:example-12","name":"Example Target 12"},
+      "hosts":[{"id":"host:example-12:www","hostname":"www.example-12.example"},{"id":"host:example-12:help","hostname":"help.example-12.example"}],
+      "capabilities":[{"id":"cap:example-12:static-public-content"},{"id":"cap:example-12:help-center"},{"id":"cap:example-12:freelancer-job-listing"}],
+      "evidence":[{"id":"ev:example-12:discovery:01","source":"fixtures/example-info/example-12.md","commit":"0000aaa2"}],
+      "validations":[
+        {"id":"val:example-12:static-public-content:20260725:01","capability_id":"cap:example-12:static-public-content","host_id":"host:example-12:www","observed_at":"2026-07-25T00:00:00Z","time_precision":"day","recorded_at":"2026-07-25T00:00:00Z","transport":"DIRECT_READ"},
+        {"id":"val:example-12:static-public-content:20260725:02","capability_id":"cap:example-12:static-public-content","host_id":"host:example-12:www","observed_at":"2026-07-25T00:00:00Z","time_precision":"day","recorded_at":"2026-07-25T00:00:00Z","transport":"CHROME","context":{"engine":"chrome"}},
+        {"id":"val:example-12:help-center:20260725:01","capability_id":"cap:example-12:help-center","host_id":"host:example-12:help","observed_at":"2026-07-25T00:00:00Z","time_precision":"day","recorded_at":"2026-07-25T00:00:00Z","transport":"DIRECT_READ"},
+        {"id":"val:example-12:freelancer-job-listing:20260725:01","capability_id":"cap:example-12:freelancer-job-listing","host_id":"host:example-12:www","observed_at":"2026-07-25T00:00:00Z","time_precision":"day","recorded_at":"2026-07-25T00:00:00Z","transport":"DIRECT_READ"}
+      ],
+      "observations":[
+        {"id":"obs:example-12:static-public-content:20260725:01","validation_id":"val:example-12:static-public-content:20260725:01","result":"success","evidence_ids":["ev:example-12:discovery:01"]},
+        {"id":"obs:example-12:static-public-content:20260725:02","validation_id":"val:example-12:static-public-content:20260725:02","result":"SITE_BLOCKING","evidence_ids":["ev:example-12:discovery:01"]},
+        {"id":"obs:example-12:help-center:20260725:01","validation_id":"val:example-12:help-center:20260725:01","result":"success","evidence_ids":["ev:example-12:discovery:01"]},
+        {"id":"obs:example-12:freelancer-job-listing:20260725:01","validation_id":"val:example-12:freelancer-job-listing:20260725:01","result":"HTTP 200 unrendered SPA shell","evidence_ids":["ev:example-12:discovery:01"]}
+      ],
+      "claims":[
+        {"id":"clm:example-12:static-public-content:lifecycle:operational","family":"lifecycle","epistemic":"OBSERVED","value":"OPERATIONAL"},
+        {"id":"clm:example-12:static-public-content:transport:direct-read","family":"transport","epistemic":"OBSERVED","value":"DIRECT_READ works on www"},
+        {"id":"clm:example-12:static-public-content:negative:browser-block-www","family":"negative","epistemic":"OBSERVED","value":"Chrome/Lightpanda blocked on www"},
+        {"id":"clm:example-12:static-public-content:negative:guessed-routes-404","family":"negative","epistemic":"OBSERVED","value":"guessed routes can 404; use observed hrefs"},
+        {"id":"clm:example-12:help-center:lifecycle:operational","family":"lifecycle","epistemic":"OBSERVED","value":"OPERATIONAL"},
+        {"id":"clm:example-12:help-center:transport:direct-read","family":"transport","epistemic":"OBSERVED","value":"DIRECT_READ works on help"},
+        {"id":"clm:example-12:help-center:unknown:browser-behavior","family":"unknown","epistemic":"UNKNOWN","value":"browser behavior on help untested"},
+        {"id":"clm:example-12:freelancer-job-listing:lifecycle:unknown","family":"lifecycle","epistemic":"UNKNOWN","value":"UNKNOWN"},
+        {"id":"clm:example-12:freelancer-job-listing:negative:direct-read-shell","family":"negative","epistemic":"OBSERVED","value":"HTTP 200 is not capability success"}
+      ],
+      "decisions":[
+        {"id":"dec:example-12:static-public-content:20260725T230000Z:01","action":"ACCEPT","claim_ids":["clm:example-12:static-public-content:lifecycle:operational","clm:example-12:static-public-content:transport:direct-read","clm:example-12:static-public-content:negative:browser-block-www","clm:example-12:static-public-content:negative:guessed-routes-404"],"effective_at":"2026-07-25T23:00:00Z","recorded_at":"2026-07-25T23:00:00Z","validity":{"valid_from":"2026-07-25T00:00:00Z","valid_to":null}},
+        {"id":"dec:example-12:help-center:20260725T230000Z:01","action":"ACCEPT","claim_ids":["clm:example-12:help-center:lifecycle:operational","clm:example-12:help-center:transport:direct-read","clm:example-12:help-center:unknown:browser-behavior"],"effective_at":"2026-07-25T23:00:00Z","recorded_at":"2026-07-25T23:00:00Z","validity":{"valid_from":"2026-07-25T00:00:00Z","valid_to":null}},
+        {"id":"dec:example-12:freelancer-job-listing:20260725T230000Z:01","action":"ACCEPT","claim_ids":["clm:example-12:freelancer-job-listing:lifecycle:unknown","clm:example-12:freelancer-job-listing:negative:direct-read-shell"],"effective_at":"2026-07-25T23:00:00Z","recorded_at":"2026-07-25T23:00:00Z","validity":{"valid_from":"2026-07-25T00:00:00Z","valid_to":null}}
+      ]
+    },
+    {
+      "id":"case:example-11",
+      "target":{"id":"tgt:example-11","name":"Example Target 11"},
+      "hosts":[{"id":"host:example-11:www","hostname":"www.example-11.example"}],
+      "capabilities":[{"id":"cap:example-11:public-buyer-feed"},{"id":"cap:example-11:feed-pagination"},{"id":"cap:example-11:request-detail"}],
+      "evidence":[{"id":"ev:example-11:profile:01","source":"fixtures/example-info/example-11.md","commit":"0000aaa4"}],
+      "validations":[
+        {"id":"val:example-11:public-buyer-feed:20260725:01","capability_id":"cap:example-11:public-buyer-feed","host_id":"host:example-11:www","observed_at":"2026-07-25T00:00:00Z","time_precision":"day","recorded_at":"2026-07-25T00:00:00Z","transport":"DIRECT_READ","context":{"authentication":"PUBLIC"}},
+        {"id":"val:example-11:feed-pagination:20260725:01","capability_id":"cap:example-11:feed-pagination","host_id":"host:example-11:www","observed_at":"2026-07-25T00:00:00Z","time_precision":"day","recorded_at":"2026-07-25T00:00:00Z","transport":"DIRECT_READ","context":{"authentication":"PUBLIC"}},
+        {"id":"val:example-11:request-detail:20260725:01","capability_id":"cap:example-11:request-detail","host_id":"host:example-11:www","observed_at":"2026-07-25T00:00:00Z","time_precision":"day","recorded_at":"2026-07-25T00:00:00Z","transport":"DIRECT_READ","context":{"authentication":"UNAUTHENTICATED"}}
+      ],
+      "observations":[
+        {"id":"obs:example-11:public-buyer-feed:20260725:01","validation_id":"val:example-11:public-buyer-feed:20260725:01","result":"success"},
+        {"id":"obs:example-11:feed-pagination:20260725:01","validation_id":"val:example-11:feed-pagination:20260725:01","result":"pages 1 and 2 differ"},
+        {"id":"obs:example-11:request-detail:20260725:01","validation_id":"val:example-11:request-detail:20260725:01","result":"redirect to login"}
+      ],
+      "claims":[
+        {"id":"clm:example-11:public-buyer-feed:lifecycle:operational","family":"lifecycle","epistemic":"OBSERVED","value":"OPERATIONAL"},
+        {"id":"clm:example-11:public-buyer-feed:transport:direct-read","family":"transport","epistemic":"OBSERVED","value":"DIRECT_READ works"},
+        {"id":"clm:example-11:feed-pagination:lifecycle:operational","family":"lifecycle","epistemic":"OBSERVED","value":"OPERATIONAL"},
+        {"id":"clm:example-11:request-detail:access:auth-required","family":"access","epistemic":"OBSERVED","value":"unauthenticated detail redirects to login"},
+        {"id":"clm:example-11:request-detail:unknown:authenticated-detail","family":"unknown","epistemic":"UNKNOWN","value":"authenticated detail behavior not established"}
+      ],
+      "decisions":[
+        {"id":"dec:example-11:public-buyer-feed:20260725T220000Z:01","action":"ACCEPT","claim_ids":["clm:example-11:public-buyer-feed:lifecycle:operational","clm:example-11:public-buyer-feed:transport:direct-read"],"effective_at":"2026-07-25T22:00:00Z","recorded_at":"2026-07-25T22:00:00Z","validity":{"valid_from":"2026-07-25T00:00:00Z","valid_to":null}},
+        {"id":"dec:example-11:feed-pagination:20260725T220000Z:01","action":"ACCEPT","claim_ids":["clm:example-11:feed-pagination:lifecycle:operational"],"effective_at":"2026-07-25T22:00:00Z","recorded_at":"2026-07-25T22:00:00Z","validity":{"valid_from":"2026-07-25T00:00:00Z","valid_to":null}},
+        {"id":"dec:example-11:request-detail:20260725T220000Z:01","action":"ACCEPT","claim_ids":["clm:example-11:request-detail:access:auth-required","clm:example-11:request-detail:unknown:authenticated-detail"],"effective_at":"2026-07-25T22:00:00Z","recorded_at":"2026-07-25T22:00:00Z","validity":{"valid_from":"2026-07-25T00:00:00Z","valid_to":null}}
+      ]
+    },
+    {
+      "id":"case:example-10",
+      "target":{"id":"tgt:example-10","name":"Example Target 10"},
+      "hosts":[{"id":"host:example-10:www","hostname":"www.example-10.example"}],
+      "capabilities":[{"id":"cap:example-10:listing"},{"id":"cap:example-10:detail"}],
+      "evidence":[{"id":"ev:example-10:discovery:01","source":"fixtures/example-info/example-10.md","commit":"0000aaa3"}],
+      "validations":[{"id":"val:example-10:listing:20260725:01","capability_id":"cap:example-10:listing","host_id":"host:example-10:www","observed_at":"2026-07-25T00:00:00Z","time_precision":"day","recorded_at":"2026-07-25T00:00:00Z","transport":"DIRECT_READ"},{"id":"val:example-10:detail:20260725:01","capability_id":"cap:example-10:detail","host_id":"host:example-10:www","observed_at":"2026-07-25T00:00:00Z","time_precision":"day","recorded_at":"2026-07-25T00:00:00Z","transport":"DIRECT_READ"}],
+      "observations":[{"id":"obs:example-10:listing:20260725:01","validation_id":"val:example-10:listing:20260725:01","result":"homepage + voxel listing success"},{"id":"obs:example-10:detail:20260725:01","validation_id":"val:example-10:detail:20260725:01","result":"one article detail success"}],
+      "claims":[{"id":"clm:example-10:listing:lifecycle:operational","family":"lifecycle","epistemic":"OBSERVED","value":"OPERATIONAL"},{"id":"clm:example-10:listing:transport:direct-read","family":"transport","epistemic":"OBSERVED","value":"DIRECT_READ works"},{"id":"clm:example-10:listing:entrypoint:voxel","family":"entrypoint","epistemic":"OBSERVED","value":"voxel category"},{"id":"clm:example-10:listing:entrypoint:other-categories","family":"entrypoint","epistemic":"INFERRED","value":"other category slugs generalize"},{"id":"clm:example-10:detail:lifecycle:operational","family":"lifecycle","epistemic":"OBSERVED","value":"OPERATIONAL"},{"id":"clm:example-10:detail:entrypoint:observed-href","family":"entrypoint","epistemic":"OBSERVED","value":"follow observed listing href"},{"id":"clm:example-10:detail:entrypoint:pattern-generalization","family":"entrypoint","epistemic":"INFERRED","value":"detail URL pattern generalizes"}],
+      "decisions":[{"id":"dec:example-10:listing:20260725T180000Z:01","action":"ACCEPT","claim_ids":["clm:example-10:listing:lifecycle:operational","clm:example-10:listing:transport:direct-read","clm:example-10:listing:entrypoint:voxel","clm:example-10:listing:entrypoint:other-categories"],"effective_at":"2026-07-25T18:00:00Z","recorded_at":"2026-07-25T18:00:00Z","validity":{"valid_from":"2026-07-25T00:00:00Z","valid_to":null}},{"id":"dec:example-10:detail:20260725T180000Z:01","action":"ACCEPT","claim_ids":["clm:example-10:detail:lifecycle:operational","clm:example-10:detail:entrypoint:observed-href","clm:example-10:detail:entrypoint:pattern-generalization"],"effective_at":"2026-07-25T18:00:00Z","recorded_at":"2026-07-25T18:00:00Z","validity":{"valid_from":"2026-07-25T00:00:00Z","valid_to":null}}]
+    },
+    {
+      "id":"case:example-02",
+      "target":{"id":"tgt:example-02","name":"Example Target 02"},
+      "hosts":[{"id":"host:example-02:www","hostname":"www.example-02.example"}],
+      "capabilities":[{"id":"cap:example-02:search"},{"id":"cap:example-02:detail"}],
+      "evidence":[{"id":"ev:example-02:profile:01","source":"fixtures/example-info/example-02.md","commit":"0000aaa1"}],
+      "validations":[{"id":"val:example-02:search:20260725:01","capability_id":"cap:example-02:search","host_id":"host:example-02:www","observed_at":"2026-07-25T00:00:00Z","time_precision":"day","recorded_at":"2026-07-25T00:00:00Z","transport":"DIRECT_READ","context":{"executor":"curl","javascript":false}},{"id":"val:example-02:search:20260725:02","capability_id":"cap:example-02:search","host_id":"host:example-02:www","observed_at":"2026-07-25T00:00:00Z","time_precision":"day","recorded_at":"2026-07-25T00:00:00Z","transport":"LIGHTPANDA","context":{"executor":"agent-browser","engine":"lightpanda"}},{"id":"val:example-02:search:20260725:03","capability_id":"cap:example-02:search","host_id":"host:example-02:www","observed_at":"2026-07-25T00:00:00Z","time_precision":"day","recorded_at":"2026-07-25T00:00:00Z","transport":"CHROME","context":{"executor":"agent-browser","engine":"chrome","readiness_wait_seconds_observed":2}},{"id":"val:example-02:detail:20260725:01","capability_id":"cap:example-02:detail","host_id":"host:example-02:www","observed_at":"2026-07-25T00:00:00Z","time_precision":"day","recorded_at":"2026-07-25T00:00:00Z","transport":"DIRECT_READ"}],
+      "observations":[{"id":"obs:example-02:search:20260725:01","validation_id":"val:example-02:search:20260725:01","result":"HTTP 200 empty shell"},{"id":"obs:example-02:search:20260725:02","validation_id":"val:example-02:search:20260725:02","result":"shell, zero results"},{"id":"obs:example-02:search:20260725:03","validation_id":"val:example-02:search:20260725:03","result":"rendered results success"},{"id":"obs:example-02:detail:20260725:01","validation_id":"val:example-02:detail:20260725:01","result":"server-rendered detail success"}],
+      "claims":[{"id":"clm:example-02:search:lifecycle:operational","family":"lifecycle","epistemic":"OBSERVED","value":"OPERATIONAL"},{"id":"clm:example-02:search:transport:chrome","family":"transport","epistemic":"OBSERVED","value":"CHROME works"},{"id":"clm:example-02:search:negative:direct-read","family":"negative","epistemic":"OBSERVED","value":"DIRECT_READ does not complete search"},{"id":"clm:example-02:search:negative:lightpanda","family":"negative","epistemic":"OBSERVED","value":"LIGHTPANDA does not complete search"},{"id":"clm:example-02:search:completion:readiness","family":"completion","epistemic":"OBSERVED","value":"rendered result list is semantic readiness"},{"id":"clm:example-02:search:unknown:pagination-facets","family":"unknown","epistemic":"UNKNOWN","value":"pagination/facets untested"},{"id":"clm:example-02:detail:lifecycle:operational","family":"lifecycle","epistemic":"OBSERVED","value":"OPERATIONAL"},{"id":"clm:example-02:detail:transport:direct-read","family":"transport","epistemic":"OBSERVED","value":"DIRECT_READ works"}],
+      "decisions":[{"id":"dec:example-02:search:20260725T160000Z:01","action":"ACCEPT","claim_ids":["clm:example-02:search:lifecycle:operational","clm:example-02:search:transport:chrome","clm:example-02:search:negative:direct-read","clm:example-02:search:negative:lightpanda","clm:example-02:search:completion:readiness","clm:example-02:search:unknown:pagination-facets"],"effective_at":"2026-07-25T16:00:00Z","recorded_at":"2026-07-25T16:00:00Z","validity":{"valid_from":"2026-07-25T00:00:00Z","valid_to":null}},{"id":"dec:example-02:detail:20260725T160000Z:01","action":"ACCEPT","claim_ids":["clm:example-02:detail:lifecycle:operational","clm:example-02:detail:transport:direct-read"],"effective_at":"2026-07-25T16:00:00Z","recorded_at":"2026-07-25T16:00:00Z","validity":{"valid_from":"2026-07-25T00:00:00Z","valid_to":null}}]
+    },
+    {
+      "id":"case:example-03",
+      "target":{"id":"tgt:example-03","name":"Example Target 03"},
+      "hosts":[{"id":"host:example-03:www","hostname":"www.example-03.example"}],
+      "capabilities":[{"id":"cap:example-03:search"},{"id":"cap:example-03:detail"}],
+      "evidence":[{"id":"ev:example-03:profile:01","source":"fixtures/example-info/example-03.md","commit":"0000aaa1"}],
+      "validations":[{"id":"val:example-03:search:20260725:01","capability_id":"cap:example-03:search","host_id":"host:example-03:www","observed_at":"2026-07-25T00:00:00Z","time_precision":"day","recorded_at":"2026-07-25T00:00:00Z","transport":"DIRECT_READ"},{"id":"val:example-03:detail:20260725:01","capability_id":"cap:example-03:detail","host_id":"host:example-03:www","observed_at":"2026-07-25T00:00:00Z","time_precision":"day","recorded_at":"2026-07-25T00:00:00Z","transport":"DIRECT_READ"}],
+      "observations":[{"id":"obs:example-03:search:20260725:01","validation_id":"val:example-03:search:20260725:01","result":"server-rendered search success"},{"id":"obs:example-03:detail:20260725:01","validation_id":"val:example-03:detail:20260725:01","result":"server-rendered detail success"}],
+      "claims":[{"id":"clm:example-03:search:lifecycle:operational","family":"lifecycle","epistemic":"OBSERVED","value":"OPERATIONAL"},{"id":"clm:example-03:search:transport:direct-read","family":"transport","epistemic":"OBSERVED","value":"DIRECT_READ works"},{"id":"clm:example-03:detail:lifecycle:operational","family":"lifecycle","epistemic":"OBSERVED","value":"OPERATIONAL"},{"id":"clm:example-03:detail:transport:direct-read","family":"transport","epistemic":"OBSERVED","value":"DIRECT_READ works"}],
+      "decisions":[{"id":"dec:example-03:search:20260725T160000Z:01","action":"ACCEPT","claim_ids":["clm:example-03:search:lifecycle:operational","clm:example-03:search:transport:direct-read"],"effective_at":"2026-07-25T16:00:00Z","recorded_at":"2026-07-25T16:00:00Z","validity":{"valid_from":"2026-07-25T00:00:00Z","valid_to":null}},{"id":"dec:example-03:detail:20260725T160000Z:01","action":"ACCEPT","claim_ids":["clm:example-03:detail:lifecycle:operational","clm:example-03:detail:transport:direct-read"],"effective_at":"2026-07-25T16:00:00Z","recorded_at":"2026-07-25T16:00:00Z","validity":{"valid_from":"2026-07-25T00:00:00Z","valid_to":null}}]
+    },
+    {
+      "id":"case:example-04",
+      "target":{"id":"tgt:example-04","name":"Example Target 04"},
+      "hosts":[{"id":"host:example-04:www","hostname":"www.example-04.example"},{"id":"host:example-04:rss","hostname":"rss.example-04.example"}],
+      "capabilities":[{"id":"cap:example-04:search"},{"id":"cap:example-04:detail"},{"id":"cap:example-04:recent-items-feed"}],
+      "evidence":[{"id":"ev:example-04:profile:01","source":"fixtures/example-info/example-04.md","commit":"0000aaa1"}],
+      "validations":[{"id":"val:example-04:search:20260725:01","capability_id":"cap:example-04:search","host_id":"host:example-04:www","observed_at":"2026-07-25T00:00:00Z","time_precision":"day","recorded_at":"2026-07-25T00:00:00Z","transport":"DIRECT_READ"},{"id":"val:example-04:search:20260725:02","capability_id":"cap:example-04:search","host_id":"host:example-04:www","observed_at":"2026-07-25T00:00:00Z","time_precision":"day","recorded_at":"2026-07-25T00:00:00Z","transport":"CHROME"},{"id":"val:example-04:detail:20260725:01","capability_id":"cap:example-04:detail","host_id":"host:example-04:www","observed_at":"2026-07-25T00:00:00Z","time_precision":"day","recorded_at":"2026-07-25T00:00:00Z","transport":"DIRECT_READ"},{"id":"val:example-04:recent-items-feed:20260725:01","capability_id":"cap:example-04:recent-items-feed","host_id":"host:example-04:rss","observed_at":"2026-07-25T00:00:00Z","time_precision":"day","recorded_at":"2026-07-25T00:00:00Z","transport":"DIRECT_READ"}],
+      "observations":[{"id":"obs:example-04:search:20260725:01","validation_id":"val:example-04:search:20260725:01","result":"HTTP 403 Cloudflare challenge"},{"id":"obs:example-04:search:20260725:02","validation_id":"val:example-04:search:20260725:02","result":"interactive Turnstile; no bypass"},{"id":"obs:example-04:detail:20260725:01","validation_id":"val:example-04:detail:20260725:01","result":"HTTP 403 challenge"},{"id":"obs:example-04:recent-items-feed:20260725:01","validation_id":"val:example-04:recent-items-feed:20260725:01","result":"RSS feeds readable"}],
+      "claims":[{"id":"clm:example-04:search:lifecycle:understood","family":"lifecycle","epistemic":"OBSERVED","value":"UNDERSTOOD"},{"id":"clm:example-04:search:negative:www-blocked","family":"negative","epistemic":"OBSERVED","value":"www blocked by SITE_BLOCKING in tested transports"},{"id":"clm:example-04:detail:lifecycle:understood","family":"lifecycle","epistemic":"OBSERVED","value":"UNDERSTOOD"},{"id":"clm:example-04:detail:negative:www-blocked","family":"negative","epistemic":"OBSERVED","value":"www detail blocked"},{"id":"clm:example-04:recent-items-feed:transport:direct-read","family":"transport","epistemic":"OBSERVED","value":"rss DIRECT_READ works"},{"id":"clm:example-04:recent-items-feed:negative:not-search","family":"negative","epistemic":"OBSERVED","value":"RSS recency feed is not arbitrary historical search"}],
+      "decisions":[{"id":"dec:example-04:search:20260725T160000Z:01","action":"ACCEPT","claim_ids":["clm:example-04:search:lifecycle:understood","clm:example-04:search:negative:www-blocked"],"effective_at":"2026-07-25T16:00:00Z","recorded_at":"2026-07-25T16:00:00Z","validity":{"valid_from":"2026-07-25T00:00:00Z","valid_to":null}},{"id":"dec:example-04:detail:20260725T160000Z:01","action":"ACCEPT","claim_ids":["clm:example-04:detail:lifecycle:understood","clm:example-04:detail:negative:www-blocked"],"effective_at":"2026-07-25T16:00:00Z","recorded_at":"2026-07-25T16:00:00Z","validity":{"valid_from":"2026-07-25T00:00:00Z","valid_to":null}},{"id":"dec:example-04:recent-items-feed:20260725T160000Z:01","action":"ACCEPT","claim_ids":["clm:example-04:recent-items-feed:transport:direct-read","clm:example-04:recent-items-feed:negative:not-search"],"effective_at":"2026-07-25T16:00:00Z","recorded_at":"2026-07-25T16:00:00Z","validity":{"valid_from":"2026-07-25T00:00:00Z","valid_to":null}}]
+    },
+    {
+      "id":"case:s1-retroactive-correction","synthetic_label":"SYNTHETIC MEMORY-LAB FIXTURE",
+      "target":{"id":"tgt:example-08"},"host":{"id":"host:example-08:www"},"capability":{"id":"cap:example-08:read"},
+      "evidence":[{"id":"ev:example-08:fixture:01","synthetic":true}],
+      "validations":[{"id":"val:example-08:read:20260801:01","host_id":"host:example-08:www","observed_at":"2026-08-01T09:00:00Z","recorded_at":"2026-08-10T10:00:00Z","time_precision":"fixture","transport":"DIRECT_READ"}],
+      "observations":[{"id":"obs:example-08:read:20260801:01","validation_id":"val:example-08:read:20260801:01","result":"route /x attributed as successful"}],
+      "claims":[{"id":"clm:example-08:read:entrypoint:route-x","family":"entrypoint","epistemic":"OBSERVED","value":"route /x operational on Day 1"},{"id":"clm:example-08:read:unknown:route-x-day1-corrected","family":"unknown","epistemic":"UNKNOWN","value":"route /x Day 1 status not established"}],
+      "decisions":[{"id":"dec:example-08:read:20260810T100000Z:01","action":"ACCEPT","claim_ids":["clm:example-08:read:entrypoint:route-x"],"effective_at":"2026-08-01T00:00:00Z","recorded_at":"2026-08-10T10:00:00Z","validity":{"valid_from":"2026-08-01T00:00:00Z","valid_to":"2026-08-02T00:00:00Z"}},{"id":"dec:example-08:read:20260820T100000Z:01","action":"RETROACTIVE_CORRECTION","claim_ids":["clm:example-08:read:unknown:route-x-day1-corrected"],"effective_at":"2026-08-01T00:00:00Z","recorded_at":"2026-08-20T10:00:00Z","validity":{"valid_from":"2026-08-01T00:00:00Z","valid_to":"2026-08-02T00:00:00Z"}}]
+    },
+    {
+      "id":"case:s2-s3-drift","synthetic_label":"SYNTHETIC MEMORY-LAB FIXTURE",
+      "target":{"id":"tgt:example-06"},"host":{"id":"host:example-06:www"},"capability":{"id":"cap:example-06:read"},
+      "validations":[{"id":"val:example-06:read:20260801:01","observed_at":"2026-08-01T10:00:00Z","recorded_at":"2026-08-01T10:00:00Z","time_precision":"fixture","host_id":"host:example-06:www","transport":"DIRECT_READ","context":{"executor":"fixture-http"}},{"id":"val:example-06:read:20260810:01","observed_at":"2026-08-10T10:00:00Z","recorded_at":"2026-08-10T10:00:00Z","time_precision":"fixture","host_id":"host:example-06:www","transport":"DIRECT_READ","context":{"executor":"fixture-http"}},{"id":"val:example-06:read:20260811:01","observed_at":"2026-08-11T10:00:00Z","recorded_at":"2026-08-11T10:00:00Z","time_precision":"fixture","host_id":"host:example-06:www","transport":"DIRECT_READ","context":{"executor":"fixture-http"}},{"id":"val:example-06:read:20260812:01","observed_at":"2026-08-12T10:00:00Z","recorded_at":"2026-08-12T10:00:00Z","time_precision":"fixture","host_id":"host:example-06:www","transport":"CHROME","context":{"executor":"fixture-browser","engine":"chrome"}}],
+      "observations":[{"id":"obs:example-06:read:20260801:01","validation_id":"val:example-06:read:20260801:01","result":"/old works"},{"id":"obs:example-06:read:20260810:01","validation_id":"val:example-06:read:20260810:01","result":"/old target-changed failure","contradicts_claim_ids":["clm:example-06:read:entrypoint:old-route"]},{"id":"obs:example-06:read:20260811:01","validation_id":"val:example-06:read:20260811:01","result":"/old target-changed failure","contradicts_claim_ids":["clm:example-06:read:entrypoint:old-route"]},{"id":"obs:example-06:read:20260812:01","validation_id":"val:example-06:read:20260812:01","result":"/new works via Chrome"}],
+      "claims":[{"id":"clm:example-06:read:entrypoint:old-route","family":"entrypoint","epistemic":"OBSERVED","value":"/old works"},{"id":"clm:example-06:read:entrypoint:new-route","family":"entrypoint","epistemic":"OBSERVED","value":"/new works via Chrome","proposal_id":"prop:example-06:read:replacement-path"}],
+      "proposals":[{"id":"prop:example-06:read:replacement-path","claim_ids":["clm:example-06:read:entrypoint:new-route"],"recorded_at":"2026-08-12T11:00:00Z"}],
+      "decisions":[{"id":"dec:example-06:read:20260801T110000Z:01","action":"ACCEPT","claim_ids":["clm:example-06:read:entrypoint:old-route"],"effective_at":"2026-08-01T11:00:00Z","recorded_at":"2026-08-01T11:00:00Z","validity":{"valid_from":"2026-08-01T00:00:00Z","valid_to":null}},{"id":"dec:example-06:read:20260811T120000Z:01","action":"DEGRADE","claim_ids":["clm:example-06:read:entrypoint:old-route"],"effective_at":"2026-08-11T12:00:00Z","recorded_at":"2026-08-11T12:00:00Z","validity":{"valid_from":"2026-08-01T00:00:00Z","valid_to":"2026-08-11T12:00:00Z"}},{"id":"dec:example-06:read:20260812T120000Z:01","action":"ACCEPT_SUPERSEDE","claim_ids":["clm:example-06:read:entrypoint:new-route"],"proposal_id":"prop:example-06:read:replacement-path","effective_at":"2026-08-12T12:00:00Z","recorded_at":"2026-08-12T12:00:00Z","validity":{"valid_from":"2026-08-12T12:00:00Z","valid_to":null}}]
+    },
+    {
+      "id":"case:s4-false-drift","synthetic_label":"SYNTHETIC MEMORY-LAB FIXTURE",
+      "target":{"id":"tgt:example-05"},"host":{"id":"host:example-05:www"},"capability":{"id":"cap:example-05:read"},
+      "validations":[{"id":"val:example-05:read:20260805:01","observed_at":"2026-08-05T10:00:00Z","recorded_at":"2026-08-05T10:00:00Z","time_precision":"fixture","host_id":"host:example-05:www","transport":"CHROME","context":{"engine":"chrome"}},{"id":"val:example-05:read:20260805:02","observed_at":"2026-08-05T10:01:00Z","recorded_at":"2026-08-05T10:01:00Z","time_precision":"fixture","host_id":"host:example-05:www","transport":"LIGHTPANDA","context":{"engine":"lightpanda"}}],
+      "observations":[{"id":"obs:example-05:read:20260805:01","validation_id":"val:example-05:read:20260805:01","result":"success"},{"id":"obs:example-05:read:20260805:02","validation_id":"val:example-05:read:20260805:02","result":"failure"}]
+    },
+    {
+      "id":"case:s5-negative-evolution","synthetic_label":"SYNTHETIC MEMORY-LAB FIXTURE",
+      "target":{"id":"tgt:example-07"},"host":{"id":"host:example-07:www"},"capability":{"id":"cap:example-07:read"},
+      "validations":[{"id":"val:example-07:read:20260801:01","observed_at":"2026-08-01T10:00:00Z","recorded_at":"2026-08-01T10:00:00Z","time_precision":"fixture","host_id":"host:example-07:www","transport":"DIRECT_READ","context":{"network":"fixture-a"}},{"id":"val:example-07:read:20260815:01","observed_at":"2026-08-15T10:00:00Z","recorded_at":"2026-08-15T10:00:00Z","time_precision":"fixture","host_id":"host:example-07:www","transport":"DIRECT_READ","context":{"network":"fixture-a"}}],
+      "observations":[{"id":"obs:example-07:read:20260801:01","validation_id":"val:example-07:read:20260801:01","result":"SITE_BLOCKING"},{"id":"obs:example-07:read:20260815:01","validation_id":"val:example-07:read:20260815:01","result":"success","contradicts_claim_ids":["clm:example-07:read:negative:blocked"]}],
+      "claims":[{"id":"clm:example-07:read:negative:blocked","family":"negative","epistemic":"OBSERVED","value":"blocked in network fixture-a"},{"id":"clm:example-07:read:transport:direct-read-restored","family":"transport","epistemic":"OBSERVED","value":"DIRECT_READ works in same context"}],
+      "decisions":[{"id":"dec:example-07:read:20260801T110000Z:01","action":"ACCEPT","claim_ids":["clm:example-07:read:negative:blocked"],"effective_at":"2026-08-01T11:00:00Z","recorded_at":"2026-08-01T11:00:00Z","validity":{"valid_from":"2026-08-01T11:00:00Z","valid_to":null}},{"id":"dec:example-07:read:20260815T110000Z:01","action":"ACCEPT_SUPERSEDE","claim_ids":["clm:example-07:read:transport:direct-read-restored"],"effective_at":"2026-08-15T11:00:00Z","recorded_at":"2026-08-15T11:00:00Z","validity":{"valid_from":"2026-08-15T11:00:00Z","valid_to":null}},{"id":"dec:example-07:read:20260815T110000Z:02","action":"SUPERSEDE","claim_ids":["clm:example-07:read:negative:blocked"],"effective_at":"2026-08-15T11:00:00Z","recorded_at":"2026-08-15T11:00:00Z","validity":{"valid_from":"2026-08-01T11:00:00Z","valid_to":"2026-08-15T11:00:00Z"}}]
+    },
+    {
+      "id":"case:decision-tie","synthetic_label":"SYNTHETIC MEMORY-LAB FIXTURE",
+      "target":{"id":"tgt:example-09"},"host":{"id":"host:example-09:www"},"capability":{"id":"cap:example-09:read"},
+      "claims":[{"id":"clm:example-09:read:constraint:a","family":"constraint","epistemic":"OBSERVED","value":"A"},{"id":"clm:example-09:read:constraint:b","family":"constraint","epistemic":"OBSERVED","value":"B"}],
+      "decisions":[{"id":"dec:example-09:read:20260818T100000Z:01","action":"ACCEPT","claim_ids":["clm:example-09:read:constraint:a"],"effective_at":"2026-08-18T10:00:00Z","recorded_at":"2026-08-18T10:00:00Z","validity":{"valid_from":"2026-08-18T10:00:00Z","valid_to":null}},{"id":"dec:example-09:read:20260818T100000Z:02","action":"ACCEPT","claim_ids":["clm:example-09:read:constraint:b"],"effective_at":"2026-08-18T10:00:00Z","recorded_at":"2026-08-18T10:00:00Z","validity":{"valid_from":"2026-08-18T10:00:00Z","valid_to":null}}],
+      "expected_order":["dec:example-09:read:20260818T100000Z:01","dec:example-09:read:20260818T100000Z:02"]
+    }
+  ]
+}
