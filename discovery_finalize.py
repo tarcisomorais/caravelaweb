@@ -66,10 +66,10 @@ class DiscoveryFinalization:
         result: dict[str, Any] = {
             "status": self.status, "target": self.target, "capability": self.capability,
         }
-        if self.status == "NÃO_SALVA" and self.reason:
-            result["motivo"] = self.reason
-        if self.status == "NÃO_SALVA" and self.reason_code:
-            result["motivo_codigo"] = self.reason_code
+        if self.status == "NOT_SAVED" and self.reason:
+            result["reason"] = self.reason
+        if self.status == "NOT_SAVED" and self.reason_code:
+            result["reason_code"] = self.reason_code
         return result
 
 
@@ -373,7 +373,7 @@ def _replacement_plan(
     new_evidence = set(validation.get("evidence", ()))
     old_evidence = set(old_validation.get("evidence", ()))
     if not new_evidence or not old_evidence or new_evidence & old_evidence:
-        return tuple(candidates), False, "EVIDENCIA_BILATERAL_INSUFICIENTE"
+        return tuple(candidates), False, "INSUFFICIENT_BILATERAL_EVIDENCE"
     support = list(memory._conn.execute(
         """SELECT v.host_id,v.transport,v.context_json
            FROM claim_observations co
@@ -383,7 +383,7 @@ def _replacement_plan(
         (candidates[0],),
     ))
     if len(support) != 1:
-        return tuple(candidates), False, "BASELINE_MATERIAL_INSUFICIENTE"
+        return tuple(candidates), False, "INSUFFICIENT_MATERIAL_BASELINE"
     prior_context = json.loads(support[0]["context_json"])
     baseline = {
         "host_id": support[0]["host_id"],
@@ -411,9 +411,9 @@ def _replacement_plan(
     new_material = material(validation)
     required_baseline = {"transport", "engine", "javascript", "authentication", "environment"}
     if not required_baseline <= baseline.keys() or not baseline["transport"]:
-        return tuple(candidates), False, "BASELINE_MATERIAL_INSUFICIENTE"
+        return tuple(candidates), False, "INSUFFICIENT_MATERIAL_BASELINE"
     if old_material is None or new_material is None or baseline != old_material:
-        return tuple(candidates), False, "CONTEXTO_MATERIAL_INCOMPARAVEL"
+        return tuple(candidates), False, "INCOMPARABLE_MATERIAL_CONTEXT"
     changed = {
         key for key in set(old_material) | set(new_material)
         if old_material.get(key) != new_material.get(key)
@@ -430,7 +430,7 @@ def _replacement_plan(
         ):
             allowed_changes.add(key)
     if changed - allowed_changes:
-        return tuple(candidates), False, "CONTEXTO_MATERIAL_INCOMPARAVEL"
+        return tuple(candidates), False, "INCOMPARABLE_MATERIAL_CONTEXT"
     return tuple(candidates), True, None
 
 
@@ -528,9 +528,9 @@ def finalize_discovery(
     clean_provenance = _validate_provenance(provenance)
     if not normalized:
         return DiscoveryFinalization(
-            "NÃO_SALVA", target, capability,
+            "NOT_SAVED", target, capability,
             reason="Discovery found no reusable operating knowledge.",
-            reason_code="SEM_CONHECIMENTO_REUTILIZAVEL",
+            reason_code="NO_REUSABLE_KNOWLEDGE",
         )
     clean_evidence = _validate_evidence(evidence)
     host_ids, hosts_to_create = _host_plan(memory, target, normalized, clean_evidence)
@@ -549,7 +549,7 @@ def finalize_discovery(
 
     delta = [item for item in normalized if semantic(item) not in accepted]
     if not delta:
-        return DiscoveryFinalization("JÁ_EXISTENTE", target, capability)
+        return DiscoveryFinalization("ALREADY_EXISTS", target, capability)
     delta_keys = {semantic(item) for item in delta}
     pending_match = (
         _matching_pending_candidate(
@@ -559,17 +559,17 @@ def finalize_discovery(
     )
     if delta_keys <= pending and pending_match is None:
         return DiscoveryFinalization(
-            "NÃO_SALVA", target, capability,
+            "NOT_SAVED", target, capability,
             reason="This knowledge is already pending confirmation before it can be used.",
-            reason_code="JA_PENDENTE",
+            reason_code="ALREADY_PENDING",
         )
     if pending_match is None:
         delta = [item for item in delta if semantic(item) not in pending]
     if not delta:
         return DiscoveryFinalization(
-            "NÃO_SALVA", target, capability,
+            "NOT_SAVED", target, capability,
             reason="This knowledge is already pending confirmation before it can be used.",
-            reason_code="JA_PENDENTE",
+            reason_code="ALREADY_PENDING",
         )
     fingerprint = _digest({
         "target": target, "capability": capability,
@@ -731,28 +731,28 @@ def finalize_discovery(
             )
     if pending_match and not replacement_ready and enrichment_created == 0:
         return DiscoveryFinalization(
-            "NÃO_SALVA", target, capability, proposal_id, 0,
+            "NOT_SAVED", target, capability, proposal_id, 0,
             reason="This knowledge is already pending confirmation before it can be used.",
-            reason_code="JA_PENDENTE",
+            reason_code="ALREADY_PENDING",
         )
     if not automatic and not replacement_ready:
         if any(item["epistemic"] != "OBSERVED" for item in delta):
-            reason_code = "APENAS_INFERENCIA"
+            reason_code = "INFERENCE_ONLY"
         elif replacement_refusal:
             reason_code = replacement_refusal
         elif any(item.get("contradiction") for item in delta):
-            reason_code = "SUBSTITUICAO_NAO_COMPROVADA"
+            reason_code = "REPLACEMENT_UNPROVEN"
         elif has_conflict:
-            reason_code = "CONFLITO_OU_AMBIGUIDADE"
+            reason_code = "CONFLICT_OR_AMBIGUITY"
         else:
-            reason_code = "CONFIRMACAO_PENDENTE"
+            reason_code = "CONFIRMATION_PENDING"
         return DiscoveryFinalization(
-            "NÃO_SALVA", target, capability, proposal_id, len(claims),
+            "NOT_SAVED", target, capability, proposal_id, len(claims),
             reason="Conflicting or unconfirmed information blocked validation of a reusable path.",
             reason_code=reason_code,
         )
     return DiscoveryFinalization(
-        "SALVA", target, capability, proposal_id, len(claims)
+        "SAVED", target, capability, proposal_id, len(claims)
     )
 
 

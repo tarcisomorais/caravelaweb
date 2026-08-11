@@ -58,16 +58,16 @@ def main() -> int:
         # re-running Discovery. Authority/database/infrastructure failures
         # fall through to the generic branch below.
         print(json.dumps({
-            "status": "NÃO_SALVA",
-            "motivo": str(exc),
+            "status": "NOT_SAVED",
+            "reason": str(exc),
         }, ensure_ascii=False, sort_keys=True), file=sys.stderr)
         return 2
     except Exception:
         # Unexpected or infrastructure failures: no traceback, no internals,
         # in the normal user flow.
         print(json.dumps({
-            "status": "NÃO_SALVA",
-            "motivo": "Discovery could not be finalized in local Operational Memory.",
+            "status": "NOT_SAVED",
+            "reason": "Discovery could not be finalized in local Operational Memory.",
         }, ensure_ascii=False, sort_keys=True), file=sys.stderr)
         return 2
     print(json.dumps(result.as_dict(), ensure_ascii=False, sort_keys=True))

@@ -114,10 +114,10 @@ class ContinuousLearningTests(unittest.TestCase):
         return item
 
     def test_safe_replacement_changes_current_and_preserves_history_idempotently(self):
-        self.assertEqual("SALVA", self.finalize(self.observed("DIRECT_READ")).status)
+        self.assertEqual("SAVED", self.finalize(self.observed("DIRECT_READ")).status)
         old_id = self.memory.get_current("example", "search")["accepted_claim_ids"][0]
         replaced = self.finalize(self.replacement(), at=T2, run="002")
-        self.assertEqual("SALVA", replaced.status)
+        self.assertEqual("SAVED", replaced.status)
         current = self.memory.get_current("example", "search")
         self.assertNotIn(old_id, current["accepted_claim_ids"])
         self.assertEqual("CHROME", current["accepted_claims"][0]["value"]["transport"])
@@ -135,7 +135,7 @@ class ContinuousLearningTests(unittest.TestCase):
         counts = tuple(self.memory._conn.execute(
             f"SELECT count(*) FROM {table}"
         ).fetchone()[0] for table in ("claims", "proposals", "decisions"))
-        self.assertEqual("JÁ_EXISTENTE", self.finalize(self.replacement(), at=T2, run="003").status)
+        self.assertEqual("ALREADY_EXISTS", self.finalize(self.replacement(), at=T2, run="003").status)
         self.assertEqual(counts, tuple(self.memory._conn.execute(
             f"SELECT count(*) FROM {table}"
         ).fetchone()[0] for table in ("claims", "proposals", "decisions")))
@@ -160,7 +160,7 @@ class ContinuousLearningTests(unittest.TestCase):
     def assert_change_stays_pending(self, change):
         self.finalize(self.observed("DIRECT_READ"))
         result = self.finalize(change, at=T2, run="002")
-        self.assertEqual("NÃO_SALVA", result.status)
+        self.assertEqual("NOT_SAVED", result.status)
         self.assertEqual("DIRECT_READ", self.memory.get_current(
             "example", "search"
         )["accepted_claims"][0]["value"]["transport"])
@@ -184,8 +184,8 @@ class ContinuousLearningTests(unittest.TestCase):
         self.finalize(self.observed("DIRECT_READ"))
         inferred = self.observed("LIGHTPANDA")
         inferred["epistemic"] = "INFERRED"
-        self.assertEqual("NÃO_SALVA", self.finalize(inferred, at=T2, run="002").status)
-        self.assertEqual("NÃO_SALVA", self.finalize(
+        self.assertEqual("NOT_SAVED", self.finalize(inferred, at=T2, run="002").status)
+        self.assertEqual("NOT_SAVED", self.finalize(
             self.replacement(), at="2026-07-30T12:00:00Z", run="003"
         ).status)
 
@@ -208,7 +208,7 @@ class ContinuousLearningTests(unittest.TestCase):
             recorded_at=T1, knowledge_write_authority=True,
             write_destination=WRITE_DESTINATION,
         )
-        self.assertEqual("NÃO_SALVA", result.status)
+        self.assertEqual("NOT_SAVED", result.status)
         self.assertEqual([], self.memory.get_current("example", "search")["accepted_claim_ids"])
 
     def test_multiple_plausible_prior_claims_prevent_replacement(self):
@@ -229,7 +229,7 @@ class ContinuousLearningTests(unittest.TestCase):
                 "validity": {"valid_from": T1, "valid_to": None},
             })
         result = self.finalize(self.replacement(), at=T2, run="002")
-        self.assertEqual("NÃO_SALVA", result.status)
+        self.assertEqual("NOT_SAVED", result.status)
         self.assertEqual(2, len(self.memory.get_current(
             "example", "search"
         )["accepted_claim_ids"]))
@@ -237,7 +237,7 @@ class ContinuousLearningTests(unittest.TestCase):
     def test_host_is_created_reused_and_linked_to_claim_and_validation(self):
         observation = self.observed("DIRECT_READ", host="App.Example.COM.")
         result = self.finalize(observation)
-        self.assertEqual("SALVA", result.status)
+        self.assertEqual("SAVED", result.status)
         host = self.memory._conn.execute(
             "SELECT id,hostname FROM hosts WHERE target_id='tgt:example'"
         ).fetchone()
@@ -248,17 +248,17 @@ class ContinuousLearningTests(unittest.TestCase):
         self.assertEqual(host["id"], self.memory._conn.execute(
             "SELECT host_id FROM validations"
         ).fetchone()[0])
-        self.assertEqual("JÁ_EXISTENTE", self.finalize(
+        self.assertEqual("ALREADY_EXISTS", self.finalize(
             observation, at=T2, run="002"
         ).status)
         self.assertEqual(1, self.memory._conn.execute("SELECT count(*) FROM hosts").fetchone()[0])
 
     def test_target_scope_and_two_hosts_remain_distinct(self):
-        self.assertEqual("SALVA", self.finalize(self.observed("DIRECT_READ")).status)
+        self.assertEqual("SAVED", self.finalize(self.observed("DIRECT_READ")).status)
         host_result = self.finalize(
             self.observed("CHROME", host="app.example.com"), at=T2, run="002"
         )
-        self.assertEqual("SALVA", host_result.status)
+        self.assertEqual("SAVED", host_result.status)
         claims = self.memory.get_current("example", "search")["accepted_claims"]
         self.assertEqual({None, self.memory._conn.execute(
             "SELECT id FROM hosts"
@@ -299,7 +299,7 @@ class ContinuousLearningTests(unittest.TestCase):
             recorded_at=T1, knowledge_write_authority=True,
             write_destination=WRITE_DESTINATION,
         )
-        self.assertEqual("SALVA", result.status)
+        self.assertEqual("SAVED", result.status)
         current = self.memory.get_current("example", "search")["accepted_claims"]
         self.assertEqual(2, len(current))
         self.assertEqual({"CHROME", "DIRECT_READ"}, {
@@ -310,12 +310,12 @@ class ContinuousLearningTests(unittest.TestCase):
         baseline = self.observed(
             "DIRECT_READ", family=family, value=prior_value,
         )
-        self.assertEqual("SALVA", self.finalize(baseline).status)
+        self.assertEqual("SAVED", self.finalize(baseline).status)
         changed = self.replacement(
             family=family, prior_value=prior_value, new_value=new_value,
             prior_transport="DIRECT_READ", new_transport="DIRECT_READ",
         )
-        self.assertEqual("SALVA", self.finalize(changed, at=T2, run="002").status)
+        self.assertEqual("SAVED", self.finalize(changed, at=T2, run="002").status)
         current = self.memory.get_current("example", "search")["accepted_claims"]
         self.assertEqual(new_value, current[0]["value"])
 
@@ -338,8 +338,8 @@ class ContinuousLearningTests(unittest.TestCase):
         result = self.finalize(
             self.replacement(old_evidence=[]), at=T2, run="002"
         )
-        self.assertEqual("NÃO_SALVA", result.status)
-        self.assertEqual("EVIDENCIA_BILATERAL_INSUFICIENTE", result.reason_code)
+        self.assertEqual("NOT_SAVED", result.status)
+        self.assertEqual("INSUFFICIENT_BILATERAL_EVIDENCE", result.reason_code)
 
     def test_pending_unilateral_is_enriched_and_replaced_by_bilateral_discovery(self):
         self.finalize(self.observed("DIRECT_READ"))
@@ -347,7 +347,7 @@ class ContinuousLearningTests(unittest.TestCase):
         unilateral = self.finalize(
             self.replacement(old_evidence=[]), at=T2, run="002"
         )
-        self.assertEqual("NÃO_SALVA", unilateral.status)
+        self.assertEqual("NOT_SAVED", unilateral.status)
         pending = self.memory.get_pending_candidates("example", "search")
         self.assertEqual(1, len(pending))
         proposal_id = pending[0]["proposal_id"]
@@ -362,7 +362,7 @@ class ContinuousLearningTests(unittest.TestCase):
         completed = self.finalize(
             self.replacement(), at=T2, run="003"
         )
-        self.assertEqual("SALVA", completed.status)
+        self.assertEqual("SAVED", completed.status)
         self.assertEqual(proposal_id, completed.proposal_id)
         self.assertEqual(before["claims"], self.memory._conn.execute(
             "SELECT count(*) FROM claims"
@@ -389,7 +389,7 @@ class ContinuousLearningTests(unittest.TestCase):
         repeated = self.finalize(
             self.replacement(), at=T2, run="004"
         )
-        self.assertEqual("JÁ_EXISTENTE", repeated.status)
+        self.assertEqual("ALREADY_EXISTS", repeated.status)
         self.assertEqual(counts, {
             table: self.memory._conn.execute(
                 f"SELECT count(*) FROM {table}"
@@ -397,10 +397,10 @@ class ContinuousLearningTests(unittest.TestCase):
             for table in counts
         })
 
-    def test_exact_pending_repeat_returns_ja_pendente_without_writes(self):
+    def test_exact_pending_repeat_returns_already_pending_without_writes(self):
         self.finalize(self.observed("DIRECT_READ"))
         change = self.replacement(old_evidence=[])
-        self.assertEqual("NÃO_SALVA", self.finalize(
+        self.assertEqual("NOT_SAVED", self.finalize(
             change, at=T2, run="002"
         ).status)
         before = {
@@ -415,8 +415,8 @@ class ContinuousLearningTests(unittest.TestCase):
         repeated = self.finalize(
             change, at=T2, run="003"
         )
-        self.assertEqual("NÃO_SALVA", repeated.status)
-        self.assertEqual("JA_PENDENTE", repeated.reason_code)
+        self.assertEqual("NOT_SAVED", repeated.status)
+        self.assertEqual("ALREADY_PENDING", repeated.reason_code)
         self.assertEqual(before, {
             table: self.memory._conn.execute(
                 f"SELECT count(*) FROM {table}"
@@ -424,7 +424,7 @@ class ContinuousLearningTests(unittest.TestCase):
             for table in before
         })
 
-    def test_multi_claim_pending_repeat_returns_ja_pendente_without_writes(self):
+    def test_multi_claim_pending_repeat_returns_already_pending_without_writes(self):
         self.finalize(self.observed("DIRECT_READ"))
         change = self.replacement(old_evidence=[])
         self.finalize(change, at=T2, run="002")
@@ -452,8 +452,8 @@ class ContinuousLearningTests(unittest.TestCase):
             )
         }
         repeated = self.finalize(change, at=T2, run="003")
-        self.assertEqual("NÃO_SALVA", repeated.status)
-        self.assertEqual("JA_PENDENTE", repeated.reason_code)
+        self.assertEqual("NOT_SAVED", repeated.status)
+        self.assertEqual("ALREADY_PENDING", repeated.reason_code)
         self.assertEqual(before, {
             table: self.memory._conn.execute(
                 f"SELECT count(*) FROM {table}"
@@ -471,8 +471,8 @@ class ContinuousLearningTests(unittest.TestCase):
         enriched = self.finalize(
             enriched_change, at=T2, run="003"
         )
-        self.assertEqual("NÃO_SALVA", enriched.status)
-        self.assertEqual("CONTEXTO_MATERIAL_INCOMPARAVEL", enriched.reason_code)
+        self.assertEqual("NOT_SAVED", enriched.status)
+        self.assertEqual("INCOMPARABLE_MATERIAL_CONTEXT", enriched.reason_code)
         self.assertEqual(1, len(self.memory.get_pending_candidates(
             "example", "search"
         )))
@@ -484,7 +484,7 @@ class ContinuousLearningTests(unittest.TestCase):
         repeated = self.finalize(
             enriched_change, at=T2, run="004"
         )
-        self.assertEqual("JA_PENDENTE", repeated.reason_code)
+        self.assertEqual("ALREADY_PENDING", repeated.reason_code)
         self.assertEqual(before, tuple(self.memory._conn.execute(
             f"SELECT count(*) FROM {table}"
         ).fetchone()[0] for table in (
@@ -502,7 +502,7 @@ class ContinuousLearningTests(unittest.TestCase):
         result = self.finalize(
             self.replacement(), at=T2, run="004"
         )
-        self.assertEqual("NÃO_SALVA", result.status)
+        self.assertEqual("NOT_SAVED", result.status)
         self.assertEqual(2, len(self.memory.get_pending_candidates(
             "example", "search"
         )))
@@ -538,8 +538,8 @@ class ContinuousLearningTests(unittest.TestCase):
         result = self.finalize(
             self.replacement(new_evidence=[]), at=T2, run="002"
         )
-        self.assertEqual("NÃO_SALVA", result.status)
-        self.assertEqual("EVIDENCIA_BILATERAL_INSUFICIENTE", result.reason_code)
+        self.assertEqual("NOT_SAVED", result.status)
+        self.assertEqual("INSUFFICIENT_BILATERAL_EVIDENCE", result.reason_code)
 
     def test_engine_difference_stays_pending(self):
         self.finalize(self.observed(
@@ -552,8 +552,8 @@ class ContinuousLearningTests(unittest.TestCase):
             prior_transport="DIRECT_READ", new_transport="DIRECT_READ",
             old_engine="chrome", new_engine="firefox",
         ), at=T2, run="002")
-        self.assertEqual("NÃO_SALVA", result.status)
-        self.assertEqual("CONTEXTO_MATERIAL_INCOMPARAVEL", result.reason_code)
+        self.assertEqual("NOT_SAVED", result.status)
+        self.assertEqual("INCOMPARABLE_MATERIAL_CONTEXT", result.reason_code)
 
     def test_javascript_difference_stays_pending(self):
         self.finalize(self.observed(
@@ -566,21 +566,21 @@ class ContinuousLearningTests(unittest.TestCase):
             prior_transport="DIRECT_READ", new_transport="DIRECT_READ",
             old_javascript=False, new_javascript=True,
         ), at=T2, run="002")
-        self.assertEqual("NÃO_SALVA", result.status)
-        self.assertEqual("CONTEXTO_MATERIAL_INCOMPARAVEL", result.reason_code)
+        self.assertEqual("NOT_SAVED", result.status)
+        self.assertEqual("INCOMPARABLE_MATERIAL_CONTEXT", result.reason_code)
 
     def test_prior_claim_without_material_baseline_stays_pending(self):
         old = {
             "family": "search_surface", "value": {"path": "/search"},
         }
-        self.assertEqual("SALVA", self.finalize(old).status)
+        self.assertEqual("SAVED", self.finalize(old).status)
         result = self.finalize(self.replacement(
             family="search_surface", prior_value={"path": "/search"},
             new_value={"path": "/busca"}, prior_transport="DIRECT_READ",
             new_transport="DIRECT_READ",
         ), at=T2, run="002")
-        self.assertEqual("NÃO_SALVA", result.status)
-        self.assertEqual("BASELINE_MATERIAL_INSUFICIENTE", result.reason_code)
+        self.assertEqual("NOT_SAVED", result.status)
+        self.assertEqual("INSUFFICIENT_MATERIAL_BASELINE", result.reason_code)
 
     def direct_candidate(
         self, *, family="transport", host_id=None,

@@ -76,10 +76,10 @@ class DiscoveryFinalizeTests(unittest.TestCase):
 
     def test_new_knowledge_and_repeat_are_deterministic(self):
         created = self.finalize()
-        self.assertEqual("SALVA", created.status)
+        self.assertEqual("SAVED", created.status)
         self.assertEqual(2, len(self.memory.get_current("example-news", "topic-search")["accepted_claim_ids"]))
         repeated = self.finalize()
-        self.assertEqual("JÁ_EXISTENTE", repeated.status)
+        self.assertEqual("ALREADY_EXISTS", repeated.status)
         self.assertEqual([], self.memory.get_pending_candidates("example-news", "topic-search"))
 
     def test_accepted_knowledge_is_not_recaptured(self):
@@ -92,7 +92,7 @@ class DiscoveryFinalizeTests(unittest.TestCase):
                     writer.decision({"id": f"dec:example-news:topic-search:accepted-{index}", "target_id": "tgt:example-news", "capability_id": "cap:example-news:topic-search", "action": "ACCEPT", "claim_ids": [f"clm:example-news:topic-search:accepted-{index}"], "effective_at": RECORDED, "recorded_at": RECORDED, "validity": {"valid_from": RECORDED, "valid_to": None}})
             else:
                 self.accept(observation)
-        self.assertEqual("JÁ_EXISTENTE", self.finalize(payload).status)
+        self.assertEqual("ALREADY_EXISTS", self.finalize(payload).status)
 
     def test_empty_observations_close_discovery_without_a_candidate(self):
         payload = {
@@ -102,7 +102,7 @@ class DiscoveryFinalizeTests(unittest.TestCase):
             "recorded_at": RECORDED,
         }
         result = self.finalize(payload)
-        self.assertEqual("NÃO_SALVA", result.status)
+        self.assertEqual("NOT_SAVED", result.status)
         self.assertEqual(0, self.memory._conn.execute("SELECT count(*) FROM proposals").fetchone()[0])
 
     def test_new_example_portal_target_is_saved_and_immediately_usable(self):
@@ -114,7 +114,7 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         }
         self.assertIsNone(self.memory._conn.execute("SELECT 1 FROM targets WHERE id='tgt:example-portal'").fetchone())
         created = self.finalize(payload)
-        self.assertEqual("SALVA", created.status)
+        self.assertEqual("SAVED", created.status)
         self.assertEqual(1, len(self.memory.get_current("example-portal", "rss-feed")["accepted_claim_ids"]))
         self.assertEqual([], self.memory.get_pending_candidates("example-portal", "rss-feed"))
 
@@ -155,7 +155,7 @@ class DiscoveryFinalizeTests(unittest.TestCase):
             text=True, capture_output=True, encoding="utf-8",
         )
         self.assertEqual(0, finalized.returncode, finalized.stderr)
-        self.assertEqual("SALVA", json.loads(finalized.stdout)["status"])
+        self.assertEqual("SAVED", json.loads(finalized.stdout)["status"])
         before_lookup = self.memory._conn.execute("SELECT count(*) FROM targets").fetchone()[0]
         lookup = subprocess.run(
             [sys.executable, str(LOOKUP), "--knowledge-root", str(self.root), "--target", "example-portal", "--capability", "rss_feed"],
@@ -173,7 +173,7 @@ class DiscoveryFinalizeTests(unittest.TestCase):
             text=True, capture_output=True, encoding="utf-8",
         )
         self.assertEqual(2, result.returncode)
-        self.assertEqual("NÃO_SALVA", json.loads(result.stderr)["status"])
+        self.assertEqual("NOT_SAVED", json.loads(result.stderr)["status"])
         self.assertNotIn("Traceback", result.stderr)
 
     def test_cli_reports_specific_reason_for_missing_family(self):
@@ -191,8 +191,8 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         )
         self.assertEqual(2, result.returncode)
         body = json.loads(result.stderr)
-        self.assertEqual("NÃO_SALVA", body["status"])
-        self.assertEqual("observation family is not reusable operational knowledge", body["motivo"])
+        self.assertEqual("NOT_SAVED", body["status"])
+        self.assertEqual("observation family is not reusable operational knowledge", body["reason"])
         self.assertNotIn("Traceback", result.stderr)
         after = tuple(self.memory._conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in ("claims", "proposals"))
         self.assertEqual(before, after)
@@ -212,8 +212,8 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         )
         self.assertEqual(2, result.returncode)
         body = json.loads(result.stderr)
-        self.assertEqual("NÃO_SALVA", body["status"])
-        self.assertEqual("observation family is not reusable operational knowledge", body["motivo"])
+        self.assertEqual("NOT_SAVED", body["status"])
+        self.assertEqual("observation family is not reusable operational knowledge", body["reason"])
         self.assertNotIn("Traceback", result.stderr)
         after = tuple(self.memory._conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in ("claims", "proposals"))
         self.assertEqual(before, after)
@@ -232,8 +232,8 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         )
         self.assertEqual(0, result.returncode, result.stderr)
         body = json.loads(result.stdout)
-        self.assertEqual("SALVA", body["status"])
-        self.assertNotIn("motivo", body)
+        self.assertEqual("SAVED", body["status"])
+        self.assertNotIn("reason", body)
 
     def test_cli_authority_failure_returns_generic_reason_without_internals(self):
         marker = self.root / ".caravelaweb/write-authority.json"
@@ -250,8 +250,8 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         )
         self.assertEqual(2, result.returncode)
         body = json.loads(result.stderr)
-        self.assertEqual("NÃO_SALVA", body["status"])
-        self.assertEqual("Discovery could not be finalized in local Operational Memory.", body["motivo"])
+        self.assertEqual("NOT_SAVED", body["status"])
+        self.assertEqual("Discovery could not be finalized in local Operational Memory.", body["reason"])
         for forbidden in ("Claim", "Proposal", "Decision", "OPERATIONAL_MEMORY", "LEGACY", str(self.root)):
             self.assertNotIn(forbidden, result.stderr)
         self.assertNotIn("Traceback", result.stderr)
@@ -287,7 +287,7 @@ class DiscoveryFinalizeTests(unittest.TestCase):
             cwd=consumer, text=True, capture_output=True, encoding="utf-8",
         )
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual("NÃO_SALVA", json.loads(result.stdout)["status"])
+        self.assertEqual("NOT_SAVED", json.loads(result.stdout)["status"])
 
     def test_missing_evidence_wrong_authority_and_task_data_fail_closed(self):
         payload = self.payload()
@@ -304,7 +304,7 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         result = self.finalize(self.payload([
             {"family": "extraction", "value": {"structure": "JSON_LD", "field_paths": {"title": "post.title"}}},
         ]))
-        self.assertEqual("SALVA", result.status)
+        self.assertEqual("SAVED", result.status)
 
     def test_extraction_actual_title_content_is_still_rejected(self):
         payload = self.payload([
@@ -363,7 +363,7 @@ class DiscoveryFinalizeTests(unittest.TestCase):
                 "effective_at": RECORDED, "recorded_at": RECORDED,
                 "validity": {"valid_from": RECORDED, "valid_to": None},
             })
-        self.assertEqual("SALVA", self.finalize(self.payload([
+        self.assertEqual("SAVED", self.finalize(self.payload([
             {"family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"}},
         ])).status)
 
@@ -372,19 +372,19 @@ class DiscoveryFinalizeTests(unittest.TestCase):
             "target": "new-target", "capability": "new-capability", "observations": [], "evidence": [],
             "provenance": {"run_id": "run:reason:empty", "observed_at": RECORDED}, "recorded_at": RECORDED,
         })
-        self.assertTrue(empty.as_dict()["motivo"])
+        self.assertTrue(empty.as_dict()["reason"])
         inferred = self.finalize(self.payload([
             {"family": "transport", "epistemic": "INFERRED", "value": {"transport": "DIRECT_READ"}},
         ]))
-        self.assertTrue(inferred.as_dict()["motivo"])
+        self.assertTrue(inferred.as_dict()["reason"])
         conflict = self.finalize(self.payload([
             {"family": "transport", "value": {"transport": "DIRECT_READ"}},
         ]))
-        self.assertEqual("SALVA", conflict.status)
+        self.assertEqual("SAVED", conflict.status)
         conflict = self.finalize(self.payload([
             {"family": "transport", "value": {"transport": "CHROME"}},
         ]))
-        self.assertTrue(conflict.as_dict()["motivo"])
+        self.assertTrue(conflict.as_dict()["reason"])
 
     def test_example_news_fixture_retains_only_operational_facts(self):
         fixture = self.payload([
@@ -394,7 +394,7 @@ class DiscoveryFinalizeTests(unittest.TestCase):
             {"family": "paywall", "value": {"signal": "PAYWALL_MARKER"}},
             {"family": "limitation", "value": {"mode": "METADATA_ONLY"}},
         ])
-        self.assertEqual("SALVA", self.finalize(fixture).status)
+        self.assertEqual("SAVED", self.finalize(fixture).status)
         text = "\n".join(row[0] for row in self.memory._conn.execute("SELECT payload_json FROM claims"))
         self.assertNotIn("title", text.lower())
         self.assertNotIn("article", text.lower())
@@ -412,7 +412,7 @@ class DiscoveryFinalizeTests(unittest.TestCase):
                 {"family": "extraction", "value": {"structure": "RESULT_CARDS"}},
                 {"family": "validation", "value": {"rule": "GEOGRAPHIC_MATCH"}},
             ]}
-        self.assertEqual("SALVA", self.finalize(payload).status)
+        self.assertEqual("SAVED", self.finalize(payload).status)
         text = "\n".join(row[0] for row in self.memory._conn.execute("SELECT payload_json FROM claims WHERE target_id='tgt:example-maps'"))
         self.assertNotIn("store", text.lower())
 
@@ -426,9 +426,9 @@ class DiscoveryFinalizeTests(unittest.TestCase):
                 "provenance": {"run_id": f"run:{target}:001", "observed_at": RECORDED},
                 "recorded_at": RECORDED,
             })
-            self.assertEqual("SALVA", result.status)
+            self.assertEqual("SAVED", result.status)
             self.assertTrue(self.memory.get_current(target, capability)["accepted_claim_ids"])
-            self.assertEqual("JÁ_EXISTENTE", self.finalize({
+            self.assertEqual("ALREADY_EXISTS", self.finalize({
                 "target": target,
                 "capability": capability,
                 "observations": [{"family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"}}],

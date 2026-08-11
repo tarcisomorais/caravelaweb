@@ -43,9 +43,9 @@ state.
 
 The normal result strings are:
 
-- `SALVA` — reusable knowledge was saved and is available to lookup.
-- `JÁ_EXISTENTE` — equivalent knowledge already exists.
-- `NÃO_SALVA` — no reusable knowledge was accepted.
+- `SAVED` — reusable knowledge was saved and is available to lookup.
+- `ALREADY_EXISTS` — equivalent knowledge already exists.
+- `NOT_SAVED` — no reusable knowledge was accepted.
 
 These strings are part of the CLI contract. Error output includes a reason
 without exposing internal paths or a traceback in the normal user flow.

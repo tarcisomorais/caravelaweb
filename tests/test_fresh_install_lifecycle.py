@@ -125,7 +125,7 @@ class FreshInstallEndToEndTests(unittest.TestCase):
         payload_path.write_text(json.dumps(discovery_payload("acme")), encoding="utf-8")
         finalize = run(FINALIZER, "--knowledge-root", str(self.root), "--input", str(payload_path), env=self.env)
         self.assertEqual(0, finalize.returncode, finalize.stderr)
-        self.assertEqual("SALVA", json.loads(finalize.stdout)["status"])
+        self.assertEqual("SAVED", json.loads(finalize.stdout)["status"])
 
         second_lookup = run(LOOKUP, "--knowledge-root", str(self.root), "--target", "acme", env=self.env)
         self.assertEqual(0, second_lookup.returncode, second_lookup.stderr)
@@ -195,7 +195,7 @@ class FreshInstallEndToEndTests(unittest.TestCase):
         payload_path.write_text(json.dumps(discovery_payload("acme")), encoding="utf-8")
         finalize = run(FINALIZER, "--input", str(payload_path), cwd=unrelated_cwd, env=no_override_env)
         self.assertEqual(0, finalize.returncode, finalize.stderr)
-        self.assertEqual("SALVA", json.loads(finalize.stdout)["status"])
+        self.assertEqual("SAVED", json.loads(finalize.stdout)["status"])
 
         found = run(LOOKUP, "--target", "acme", cwd=unrelated_cwd, env=no_override_env)
         self.assertEqual(0, found.returncode, found.stderr)
@@ -241,7 +241,7 @@ class FreshInstallEndToEndTests(unittest.TestCase):
         payload_path.write_text(json.dumps(discovery_payload("acme")), encoding="utf-8")
         finalize = run(FINALIZER, "--input", str(payload_path), cwd=unrelated_cwd, env=session_env)
         self.assertEqual(0, finalize.returncode, finalize.stderr)
-        self.assertEqual("SALVA", json.loads(finalize.stdout)["status"])
+        self.assertEqual("SAVED", json.loads(finalize.stdout)["status"])
 
         found = run(LOOKUP, "--target", "acme", cwd=unrelated_cwd, env=session_env)
         self.assertEqual("found", json.loads(found.stdout)["status"])
@@ -353,7 +353,7 @@ class SourceAndKnowledgeRootIndependenceTests(unittest.TestCase):
             cwd=unrelated_cwd, env=self.env,
         )
         self.assertEqual(0, finalize.returncode, finalize.stderr)
-        self.assertEqual("SALVA", json.loads(finalize.stdout)["status"])
+        self.assertEqual("SAVED", json.loads(finalize.stdout)["status"])
 
         found_in_a = run(
             LOOKUP, "--knowledge-root", str(root_a), "--target", "only-in-a", cwd=unrelated_cwd, env=self.env

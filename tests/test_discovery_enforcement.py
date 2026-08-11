@@ -14,9 +14,9 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
         text = SKILL.read_text(encoding="utf-8")
         self.assertIn("If a run entered **Discovery**, it must call `scripts/discovery-finalize`", text)
         self.assertIn("before it can be declared complete", text)
-        self.assertIn("`SALVA`", text)
-        self.assertIn("`JÁ_EXISTENTE`", text)
-        self.assertIn("`NÃO_SALVA`", text)
+        self.assertIn("`SAVED`", text)
+        self.assertIn("`ALREADY_EXISTS`", text)
+        self.assertIn("`NOT_SAVED`", text)
 
     def test_operation_is_exempt_and_finalizer_failure_is_incomplete(self) -> None:
         text = SKILL.read_text(encoding="utf-8")

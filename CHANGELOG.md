@@ -26,8 +26,11 @@ under **Unreleased** until a version and tag are intentionally chosen.
 
 - Preflight no longer reports the `maintenance_tooling` optional component,
   which the standalone public runtime does not ship.
-- Discovery finalizer refusal messages are English. The `SALVA`,
-  `JÁ_EXISTENTE`, and `NÃO_SALVA` status tokens are unchanged.
+- The public Discovery finalizer vocabulary is English. Statuses are `SAVED`,
+  `ALREADY_EXISTS`, and `NOT_SAVED`; refusal output uses the `reason` and
+  `reason_code` keys; reason codes are English `UPPER_SNAKE_CASE`. Semantics,
+  acceptance criteria, and authority behavior are unchanged. This normalization
+  lands before the first public release, so no released contract is broken.
 
 ### Security
 

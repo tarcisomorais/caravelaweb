@@ -80,8 +80,8 @@ class CliPortabilityTests(unittest.TestCase):
             ]
             first = subprocess.run(command, capture_output=True, env=environment)
             second = subprocess.run(command, capture_output=True, env=environment)
-            self.assertEqual("SALVA", json.loads(first.stdout.decode("utf-8"))["status"])
-            self.assertEqual("JÁ_EXISTENTE", json.loads(second.stdout.decode("utf-8"))["status"])
+            self.assertEqual("SAVED", json.loads(first.stdout.decode("utf-8"))["status"])
+            self.assertEqual("ALREADY_EXISTS", json.loads(second.stdout.decode("utf-8"))["status"])
 
             body = json.loads(payload.read_text(encoding="utf-8"))
             body["target"] = "utf8-empty"
@@ -89,7 +89,7 @@ class CliPortabilityTests(unittest.TestCase):
             body["evidence"] = []
             payload.write_text(json.dumps(body), encoding="utf-8")
             empty = subprocess.run(command, capture_output=True, env=environment)
-            self.assertEqual("NÃO_SALVA", json.loads(empty.stdout.decode("utf-8"))["status"])
+            self.assertEqual("NOT_SAVED", json.loads(empty.stdout.decode("utf-8"))["status"])
 
 
 if __name__ == "__main__":
