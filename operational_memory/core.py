@@ -349,7 +349,7 @@ class _Writer:
 
 
 class SQLiteOperationalMemory:
-    """Production v0.4 Operational Memory engine backed by one local SQLite file.
+    """Production Operational Memory engine backed by one local SQLite file.
 
     Internal production interface, not an external CaravelaWeb product API:
     the supported CLI surface is `init-knowledge-root`/`preflight`/
@@ -526,10 +526,11 @@ class SQLiteOperationalMemory:
     ) -> tuple[str, ...]:
         """Isolated compatibility rule for the known correction-scope model gap.
 
-        Phase 0 has no corrected_claim_id/superseded_claim_id relation. The frozen S1
-        case is unambiguous because exactly one older accepted Claim is active in the
-        corrected interval. If more than one candidate exists, production code stops
-        rather than silently choosing or deleting unrelated Claims.
+        The current schema has no corrected_claim_id/superseded_claim_id relation.
+        A correction is unambiguous only when exactly one older accepted Claim is
+        active in the corrected interval. If more than one candidate exists,
+        production code stops rather than silently choosing or deleting unrelated
+        Claims.
         """
         correction_key = self._decision_key(correction_decision_id)
         candidates = [
@@ -541,7 +542,7 @@ class SQLiteOperationalMemory:
         if len(candidates) <= 1:
             return tuple(candidates)
         raise CorrectionScopeAmbiguityError(
-            "retroactive correction has multiple plausible prior Claims; Phase 0 does not encode corrected_claim_id/superseded_claim_id"
+            "retroactive correction has multiple plausible prior Claims; the schema does not encode corrected_claim_id/superseded_claim_id"
         )
 
     def projection(

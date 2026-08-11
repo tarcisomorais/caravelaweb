@@ -44,7 +44,7 @@ def accept_claim(memory: SQLiteOperationalMemory, claim: dict, suffix: str) -> N
         )
 
 
-class Phase35SchemaHostRendererTests(unittest.TestCase):
+class SchemaHostRendererTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -241,7 +241,7 @@ class Phase35SchemaHostRendererTests(unittest.TestCase):
             )
 
 
-class Phase35LookupOwnershipTests(unittest.TestCase):
+class LookupOwnershipTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)

@@ -1,4 +1,4 @@
-"""Small installation-owned marker for the v0.4 read-authority transition."""
+"""Small installation-owned marker for Operational Memory read authority."""
 
 from __future__ import annotations
 

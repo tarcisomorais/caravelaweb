@@ -20,7 +20,7 @@ from discovery_finalize import DiscoveryFinalizationError, finalize_discovery
 from om_native_writes import OMNativeWriteError, OMWriteAuthorityRequired, WRITE_DESTINATION
 from operational_memory.core import SQLiteOperationalMemory
 from platform_adapter import resolve_knowledge_root
-from write_authority import WriteAuthorityStateError
+from write_authority import MIGRATED_WRITE_AUTHORITY_KIND, WriteAuthorityStateError
 
 RECORDED = "2026-07-28T12:00:00Z"
 
@@ -28,7 +28,7 @@ RECORDED = "2026-07-28T12:00:00Z"
 def authority(root: Path) -> None:
     (root / ".caravelaweb").mkdir()
     (root / ".caravelaweb/write-authority.json").write_text(json.dumps({
-        "kind": "phase4d-write-authority", "status": "ACTIVE",
+        "kind": MIGRATED_WRITE_AUTHORITY_KIND, "status": "ACTIVE",
         "previous_write_authority": "LEGACY", "write_authority": "OPERATIONAL_MEMORY",
         "om_authoritative_writes": 0, "first_om_write": "NOT_PERFORMED",
     }), encoding="utf-8")
@@ -238,7 +238,7 @@ class DiscoveryFinalizeTests(unittest.TestCase):
     def test_cli_authority_failure_returns_generic_reason_without_internals(self):
         marker = self.root / ".caravelaweb/write-authority.json"
         marker.write_text(json.dumps({
-            "kind": "phase4d-write-authority", "status": "SUSPENDED",
+            "kind": MIGRATED_WRITE_AUTHORITY_KIND, "status": "SUSPENDED",
             "previous_write_authority": "LEGACY", "write_authority": "OPERATIONAL_MEMORY",
             "om_authoritative_writes": 0, "first_om_write": "NOT_PERFORMED",
         }), encoding="utf-8")

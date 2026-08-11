@@ -21,13 +21,15 @@ def emit(status: str, **fields: object) -> None:
     print(json.dumps({"status": status, **fields}, ensure_ascii=False, sort_keys=True))
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Operational Memory is the default after explicit Phase 4C read cutover; current v0.4 is closed. Legacy is diagnostics-only compatibility")
+    parser = argparse.ArgumentParser(
+        description="Look up accepted reusable knowledge from the current installation"
+    )
     parser.add_argument("--knowledge-root")
     parser.add_argument("--target", required=True)
     parser.add_argument("--capability")
     parser.add_argument("--operational-memory-db", help="diagnostic DB override for an explicit Operational Memory lookup")
-    parser.add_argument("--use-operational-memory", action="store_true", help="deprecated assertion of Operational Memory; never selects legacy")
-    parser.add_argument("--use-legacy", action="store_true", help="diagnostic-only lookup from historical legacy Markdown; never an automatic fallback")
+    parser.add_argument("--use-operational-memory", action="store_true", help="deprecated diagnostic assertion of Operational Memory")
+    parser.add_argument("--use-legacy", action="store_true", help="diagnostic-only compatibility lookup from targets/; never an automatic fallback")
     args = parser.parse_args()
     root = resolve_knowledge_root(args.knowledge_root, start=__file__)
     if root is None:

@@ -1,8 +1,7 @@
-"""Fresh-install initialization: the honest NONE -> OPERATIONAL_MEMORY lifecycle.
+"""Fresh initialization for the honest NONE -> OPERATIONAL_MEMORY lifecycle.
 
-This is a distinct event from Phase 4 migration/cutover. It never fabricates
-legacy authority, migration receipts, or a copied legacy corpus -- it creates
-only the state a genuinely new installation requires.
+It never fabricates prior authority, transition receipts, or an imported
+knowledge corpus; it creates only the state a new installation requires.
 """
 
 from __future__ import annotations
@@ -26,9 +25,9 @@ from write_authority import FRESH_INSTALL_WRITE_AUTHORITY_KIND, write_authority_
 
 STATE_DIRECTORY = ".caravelaweb"
 _TOLERATED_STATE_RESIDUE = {"write-authority.lock"}
-# targets/ is the required Knowledge Root corpus directory; candidates/ is
-# Phase 4A/4B's other frozen legacy input. Either one already holding content
-# means this location is a real (or real legacy) corpus, not a fresh install.
+# targets/ is the required Knowledge Root corpus directory; candidates/ is a
+# compatibility corpus input. Content in either means the location is not a
+# fresh installation.
 _LEGACY_INPUT_DIRECTORIES = (TARGETS_DIRECTORY, "candidates")
 
 
@@ -141,11 +140,10 @@ def initialize_knowledge_root(knowledge_root: str | Path | None = None) -> Initi
 
         write_marker = write_authority_marker(root)
         # Deliberately no om_authoritative_writes/first_om_write/receipt
-        # fields: those record whether the historical Phase 4 migration's
-        # one-shot first-write ceremony ran. A fresh installation never runs
-        # that ceremony, and routine Discovery writes never update this
-        # marker for either origin, so tracking a write count here would go
-        # stale immediately and misrepresent real usage.
+        # fields: those belong only to imported installations. A fresh
+        # installation never runs that transition ceremony, and routine
+        # Discovery writes never update this marker for either origin, so a
+        # write count here would go stale and misrepresent real usage.
         payload = {
             "kind": FRESH_INSTALL_WRITE_AUTHORITY_KIND,
             "status": "ACTIVE",

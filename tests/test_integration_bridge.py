@@ -13,6 +13,7 @@ SKILL = REPO
 sys.path.insert(0, str(SKILL))
 
 from operational_memory import SQLiteOperationalMemory
+from integration_bridge import BridgeError, KnowledgeLookupBoundary
 
 NOW = "2026-07-26T16:00:00Z"
 RECORDED_AT = "2026-07-26T12:00:00Z"
@@ -22,10 +23,8 @@ class IntegrationBridgeRuntimeLookupTests(unittest.TestCase):
     """Public lookup surface of the runtime bridge script.
 
     Seeded directly through Operational Memory write primitives rather than
-    a legacy corpus/importer: legacy_fixture and legacy_profile_adapter are
-    both excluded from this repo (they only ever supported the historical
-    migration path), but the runtime bridge's controlled-lookup contract
-    still needs coverage.
+    compatibility-only import machinery. The runtime bridge's controlled
+    lookup contract remains independently covered.
     """
 
     def setUp(self) -> None:
@@ -101,9 +100,26 @@ class IntegrationBridgeRuntimeLookupTests(unittest.TestCase):
         self.assertIn("transport", current)
         self.assertIn("completion", current)
 
+    def test_diagnostic_compatibility_remains_explicit(self) -> None:
+        profile = self.root / "targets" / "example-radio.md"
+        profile.write_text("# Example Radio\n", encoding="utf-8")
+        state = self.root / ".caravelaweb"
+        state.mkdir()
+        (state / "read-authority-operational-memory").write_text("active\n", encoding="utf-8")
+
+        result = KnowledgeLookupBoundary(self.root, self.db).lookup(
+            "example-radio", use_legacy=True
+        )
+        self.assertEqual("legacy", result.source)
+        self.assertEqual(str(profile), result.profile_path)
+        with self.assertRaisesRegex(BridgeError, "mutually exclusive"):
+            KnowledgeLookupBoundary(self.root, self.db).lookup(
+                "example-radio", use_operational_memory=True, use_legacy=True
+            )
+
 
 class IntegrationBridgePublicInterfaceTests(unittest.TestCase):
-    """integration_bridge must not re-export legacy_profile_adapter parsing symbols."""
+    """Only the current lookup boundary is exposed by integration_bridge."""
 
     LEGACY_NAMES = (
         "ImportResult",
@@ -112,9 +128,13 @@ class IntegrationBridgePublicInterfaceTests(unittest.TestCase):
         "import_legacy_profile",
         "parse_legacy_profile",
         "semantic_round_trip",
+        "BridgeStaleBaseError",
+        "KnowledgeWriteAuthorityRequired",
+        "map_candidate_markdown",
+        "promote_mapped_candidate",
     )
 
-    def test_legacy_parsing_symbols_are_not_reexported(self) -> None:
+    def test_retired_migration_symbols_are_not_reexported(self) -> None:
         import integration_bridge
 
         for name in self.LEGACY_NAMES:

@@ -139,7 +139,7 @@ class PersistedDefaultRootTests(unittest.TestCase):
     # WindowsPath, which pathlib refuses to instantiate on a POSIX
     # interpreter (NotImplementedError) -- there is no way to unit-test it
     # from here. Like filesystem_class's win32 cases, that branch is proven
-    # by the real native-Windows CI runner (tests/v0.6/windows_real_task_exercise.py),
+    # by the real native-Windows CI runner (tests/windows_real_task_exercise.py),
     # not a simulated unit test.
 
     def test_configured_root_file_is_distinct_from_the_default_data_directory(self) -> None:

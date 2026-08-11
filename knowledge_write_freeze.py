@@ -1,4 +1,4 @@
-"""Fail-closed guard for the v0.4 reusable-knowledge write freeze."""
+"""Fail-closed guard for the reusable-knowledge write freeze."""
 
 from __future__ import annotations
 

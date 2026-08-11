@@ -19,10 +19,10 @@ WRITE_AUTHORITY_MARKER = ".caravelaweb/write-authority.json"
 WRITE_AUTHORITY_LOCK = ".caravelaweb/write-authority.lock"
 
 # Two legitimate write-authority origins share the same current operational
-# state (OPERATIONAL_MEMORY) but must never be conflated: a historical Phase 4
-# migration truthfully had LEGACY authority before cutover, while a fresh
-# installation never did. Minting a MIGRATED_WRITE_AUTHORITY_KIND marker for a
-# fresh install would fabricate migration history that never happened.
+# state (OPERATIONAL_MEMORY) but must never be conflated: an imported
+# installation truthfully had LEGACY authority before transition, while a
+# fresh installation never did. Minting a MIGRATED_WRITE_AUTHORITY_KIND marker
+# for a fresh install would fabricate provenance that never happened.
 MIGRATED_WRITE_AUTHORITY_KIND = "phase4d-write-authority"
 FRESH_INSTALL_WRITE_AUTHORITY_KIND = "fresh-install-write-authority"
 
@@ -84,8 +84,8 @@ def _read_marker(root: str | Path) -> dict[str, Any] | None:
         and payload.get("write_authority") == "OPERATIONAL_MEMORY"
     )
     if kind == MIGRATED_WRITE_AUTHORITY_KIND:
-        # The historical Phase 4 first-write ceremony is migration-only
-        # provenance: it records whether *that one-shot cutover's* first
+        # The imported-installation first-write ceremony is compatibility
+        # provenance: it records whether that one-shot transition's first
         # OM-authoritative write was performed, not a running write count.
         # A fresh installation never went through that ceremony and must not
         # carry (or fake) these fields at all -- see FRESH_INSTALL_WRITE_AUTHORITY_KIND.

@@ -27,7 +27,7 @@ and `<skill>` is this skill directory. Always use the interpreter-prefixed form.
    | `not_found` | Enter bounded Discovery if the caller authorizes it. |
    | `unresolved` or `bridge_error` | Stop: accepted knowledge could not be consulted. |
 
-   Lookup returns accepted knowledge without silently substituting historical knowledge. Do not use diagnostic, compatibility, database-override, migration, or repair options.
+   Lookup returns accepted knowledge without silently substituting historical knowledge. Do not use diagnostic, compatibility, database-override, or repair options.
 
 3. Choose one mode for that capability, never for the whole target.
 

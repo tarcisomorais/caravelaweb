@@ -40,8 +40,8 @@ MIGRATED_AFTER_FIRST_WRITE = {
     "first_om_write_receipt": "receipt.json", "first_om_write_receipt_sha256": "a" * 64,
 }
 # The canonical fresh-install shape: no om_authoritative_writes/first_om_write/
-# receipt fields at all. Those record the historical Phase 4 migration's
-# one-shot first-write ceremony; a fresh installation never runs it.
+# receipt fields at all. Those belong to the imported-installation first-write
+# ceremony; a fresh installation never runs it.
 FRESH = {
     "kind": FRESH_INSTALL_WRITE_AUTHORITY_KIND, "status": "ACTIVE",
     "previous_write_authority": "NONE", "write_authority": "OPERATIONAL_MEMORY",

@@ -14,6 +14,7 @@ PREFLIGHT = SKILL / "scripts" / "preflight"
 sys.path.insert(0, str(SKILL))
 
 from operational_memory import SQLiteOperationalMemory
+from write_authority import MIGRATED_WRITE_AUTHORITY_KIND
 
 
 class PreflightTests(unittest.TestCase):
@@ -30,7 +31,7 @@ class PreflightTests(unittest.TestCase):
         (state / "write-authority.json").write_text(
             json.dumps(
                 {
-                    "kind": "phase4d-write-authority",
+                    "kind": MIGRATED_WRITE_AUTHORITY_KIND,
                     "status": "ACTIVE",
                     "write_authority": "OPERATIONAL_MEMORY",
                     "previous_write_authority": "LEGACY",

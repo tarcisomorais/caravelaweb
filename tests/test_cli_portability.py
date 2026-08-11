@@ -14,6 +14,7 @@ FINALIZER = SKILL / "scripts" / "discovery-finalize"
 sys.path.insert(0, str(SKILL))
 
 from operational_memory import SQLiteOperationalMemory
+from write_authority import MIGRATED_WRITE_AUTHORITY_KIND
 
 
 class CliPortabilityTests(unittest.TestCase):
@@ -29,7 +30,7 @@ class CliPortabilityTests(unittest.TestCase):
             (state / "write-authority.json").write_text(
                 json.dumps(
                     {
-                        "kind": "phase4d-write-authority",
+                        "kind": MIGRATED_WRITE_AUTHORITY_KIND,
                         "status": "ACTIVE",
                         "write_authority": "OPERATIONAL_MEMORY",
                         "previous_write_authority": "LEGACY",

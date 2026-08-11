@@ -20,6 +20,7 @@ from om_native_writes import (
     review_token,
 )
 from operational_memory.core import SQLiteOperationalMemory
+from write_authority import MIGRATED_WRITE_AUTHORITY_KIND
 
 T1 = "2026-07-28T12:00:00Z"
 T2 = "2026-07-29T12:00:00Z"
@@ -35,7 +36,7 @@ class ContinuousLearningTests(unittest.TestCase):
         (self.root / ".caravelaweb").mkdir()
         (self.root / "targets").mkdir()
         (self.root / ".caravelaweb/write-authority.json").write_text(json.dumps({
-            "kind": "phase4d-write-authority", "status": "ACTIVE",
+            "kind": MIGRATED_WRITE_AUTHORITY_KIND, "status": "ACTIVE",
             "previous_write_authority": "LEGACY", "write_authority": "OPERATIONAL_MEMORY",
             "om_authoritative_writes": 0, "first_om_write": "NOT_PERFORMED",
         }), encoding="utf-8")

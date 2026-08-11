@@ -25,6 +25,7 @@ from om_native_writes import (
     review_token,
 )
 from operational_memory.core import SQLiteOperationalMemory
+from write_authority import MIGRATED_WRITE_AUTHORITY_KIND
 
 NOW = "2030-01-01T00:00:00Z"
 RECORDED = "2026-07-28T12:00:00Z"
@@ -100,7 +101,7 @@ class OMNativeWritesTest(unittest.TestCase):
         (self.root / ".caravelaweb" / "write-authority.json").write_text(
             json.dumps(
                 {
-                    "kind": "phase4d-write-authority",
+                    "kind": MIGRATED_WRITE_AUTHORITY_KIND,
                     "status": "ACTIVE",
                     "previous_write_authority": "LEGACY",
                     "write_authority": "OPERATIONAL_MEMORY",
@@ -489,7 +490,7 @@ class OMNativeWritesTest(unittest.TestCase):
             )
         captured = self.capture()
         token = review_token(self.memory, target="alpha", capability="read")
-        enable_freeze(self.root, reason="Phase 4C read soak remains active")
+        enable_freeze(self.root, reason="read validation remains active")
         before = tuple(
             self.memory._conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
             for table in ("claims", "proposals", "decisions")

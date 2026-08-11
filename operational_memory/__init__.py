@@ -1,4 +1,4 @@
-"""Production Operational Memory core for CaravelaWeb v0.4."""
+"""Production Operational Memory core for CaravelaWeb."""
 
 from __future__ import annotations
 

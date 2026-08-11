@@ -1,11 +1,8 @@
-"""Real network end-to-end exercise for native-Windows §15.10 evidence.
+"""Real network end-to-end exercise for native Windows.
 
 Not a unittest: a standalone CLI, run once by CI on a real windows-latest
-runner, following the v0.5 executor-flow-exercise convention (a known
-OPERATIONAL Operation, plus a bounded Discovery that finalizes). It talks to
-a real, stable public target (example.com, reserved by IANA for exactly this
-kind of documentation/example use) over the real network, through the same
-public CLI entry points a user invokes.
+runner. It covers a known Operation plus a bounded Discovery that finalizes,
+using the real public CLI entry points against example.com.
 """
 
 from __future__ import annotations
@@ -25,6 +22,7 @@ LOOKUP = SKILL / "scripts" / "knowledge-lookup"
 sys.path.insert(0, str(SKILL))
 
 from operational_memory import SQLiteOperationalMemory
+from write_authority import MIGRATED_WRITE_AUTHORITY_KIND
 
 TARGET_URL = "https://example.com/"
 RECORDED = "2026-08-08T00:00:00Z"
@@ -52,7 +50,7 @@ def setup(root: Path) -> dict:
     caravela = root / ".caravelaweb"
     caravela.mkdir()
     (caravela / "write-authority.json").write_text(json.dumps({
-        "kind": "phase4d-write-authority", "status": "ACTIVE",
+        "kind": MIGRATED_WRITE_AUTHORITY_KIND, "status": "ACTIVE",
         "previous_write_authority": "LEGACY", "write_authority": "OPERATIONAL_MEMORY",
         "om_authoritative_writes": 0, "first_om_write": "NOT_PERFORMED",
     }), encoding="utf-8")

@@ -2,10 +2,8 @@
 
 Exercises the supported current-product lifecycle through the real CLI
 surface only (init-knowledge-root, preflight, knowledge-lookup,
-discovery-finalize). No Phase 4 receipt is ever fabricated here -- unlike the
-component-level fixtures elsewhere that hand-construct a post-cutover
-write-authority.json to unit-test one module in isolation, this file proves
-the end-to-end lifecycle a real fresh installation goes through.
+discovery-finalize). No imported-installation receipt is fabricated here;
+this file proves the end-to-end lifecycle a real fresh installation follows.
 
 Every subprocess call runs with an isolated HOME/LOCALAPPDATA (see
 ``fake_home_env``): a successful init-knowledge-root now persists a
@@ -32,7 +30,11 @@ FINALIZER = SKILL / "scripts" / "discovery-finalize"
 sys.path.insert(0, str(SKILL))
 
 from platform_adapter import KNOWLEDGE_ROOT_ENV
-from write_authority import FRESH_INSTALL_WRITE_AUTHORITY_KIND, automatic_legacy_rollback_allowed
+from write_authority import (
+    FRESH_INSTALL_WRITE_AUTHORITY_KIND,
+    MIGRATED_WRITE_AUTHORITY_KIND,
+    automatic_legacy_rollback_allowed,
+)
 
 RECORDED = "2026-08-09T00:00:00Z"
 
@@ -131,18 +133,25 @@ class FreshInstallEndToEndTests(unittest.TestCase):
         self.assertEqual("found", found_again["status"])
         self.assertEqual("operational-memory", found_again["source"])
 
-        # No Phase 4 receipt or first-write-ceremony field may exist on a
-        # fresh installation, before or after a real Discovery write.
+        # Imported-installation receipt fields must never appear on a fresh
+        # installation, before or after a real Discovery write.
         authority = json.loads((self.root / ".caravelaweb" / "write-authority.json").read_text(encoding="utf-8"))
         self.assertEqual(FRESH_INSTALL_WRITE_AUTHORITY_KIND, authority["kind"])
         self.assertEqual("NONE", authority["previous_write_authority"])
-        for phase4_field in (
+        for migration_field in (
             "activation_receipt", "first_om_write_receipt", "read_cutover_receipt_sha256",
             "database_counts_before_and_after", "gates",
             "om_authoritative_writes", "first_om_write",
         ):
-            self.assertNotIn(phase4_field, authority)
-        self.assertFalse((self.root / ".caravelaweb" / "operational_memory.phase4c-activation.json").exists())
+            self.assertNotIn(migration_field, authority)
+        self.assertEqual(
+            {
+                "operational_memory.db",
+                "read-authority-operational-memory",
+                "write-authority.json",
+            },
+            {path.name for path in (self.root / ".caravelaweb").iterdir()},
+        )
 
         # A fresh install never had LEGACY authority, so "automatic rollback
         # to LEGACY" is never meaningful for it -- this must hold regardless
@@ -261,19 +270,13 @@ class FreshInstallSafetyTests(unittest.TestCase):
         self.refuse()
 
     def test_refuses_when_candidates_already_has_knowledge(self) -> None:
-        """candidates/ is Phase 4A/4B's other frozen legacy input; a location
-        with real candidate content is a legacy corpus even with empty/absent
-        targets/."""
+        """Candidate content makes a location non-fresh even without targets/."""
         (self.root / "candidates" / "some-target").mkdir(parents=True)
         (self.root / "candidates" / "some-target" / "delta.md").write_text("# delta\n", encoding="utf-8")
         self.refuse()
 
     def test_refuses_the_real_repository_legacy_corpus(self) -> None:
-        """A full legacy-shaped corpus -- both targets/ and candidates/
-        present at once, as a real pre-Phase-4 installation would have -- is
-        refused, and the directory is left byte-identical: no partial writes
-        leak into someone else's legacy knowledge just from pointing
-        init-knowledge-root at it."""
+        """An existing corpus is refused and left byte-identical."""
         (self.root / "targets").mkdir(parents=True)
         (self.root / "targets" / "known.md").write_text("# known\n", encoding="utf-8")
         (self.root / "targets" / "other.md").write_text("# other\n", encoding="utf-8")
@@ -296,7 +299,7 @@ class FreshInstallSafetyTests(unittest.TestCase):
             pass
         (state / "write-authority.json").write_text(
             json.dumps({
-                "kind": "phase4d-write-authority", "status": "ACTIVE",
+                "kind": MIGRATED_WRITE_AUTHORITY_KIND, "status": "ACTIVE",
                 "previous_write_authority": "LEGACY", "write_authority": "OPERATIONAL_MEMORY",
                 "om_authoritative_writes": 0, "first_om_write": "NOT_PERFORMED",
             }),

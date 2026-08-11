@@ -1,8 +1,7 @@
 """Small, explicit Operational-Memory-native write boundary.
 
-This module is deliberately separate from ``integration_bridge``.  The latter
-is legacy compatibility machinery; this boundary never reads or writes
-Markdown and never uses a legacy profile hash.
+This module is deliberately separate from ``integration_bridge``. The latter
+owns lookup compatibility; this boundary never reads or writes Markdown.
 
 It is also deliberately separate from ``operational_memory``: this module
 owns write *policy* (review-token staleness, explicit write authority,
