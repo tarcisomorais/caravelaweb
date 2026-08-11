@@ -17,6 +17,7 @@ from operational_memory import (
     SchemaVersionError,
     SQLiteOperationalMemory,
 )
+from conformance_harness import ConformanceMemory
 from memory_lab_adapter import compare_minimum, load_memory_lab
 
 FIXTURE = REPO / "tests" / "fixtures" / "memory-lab-v1.json"
@@ -28,7 +29,7 @@ def clock() -> str:
     return TEST_NOW
 
 
-def run_oracle(memory: SQLiteOperationalMemory) -> dict:
+def run_oracle(memory: ConformanceMemory) -> dict:
     oracle = json.loads(EXPECTED.read_text(encoding="utf-8"))
     results = []
     for item in oracle["expected"]:
@@ -46,7 +47,7 @@ def run_oracle(memory: SQLiteOperationalMemory) -> dict:
     return {"status": "PASS" if all(r["status"] == "PASS" for r in results) else "FAIL", "results": results}
 
 
-def query_smoke(memory: SQLiteOperationalMemory) -> dict[str, str]:
+def query_smoke(memory: ConformanceMemory) -> dict[str, str]:
     examples = {
         "Q1": {"target": "example-01", "capability": "project-listings"},
         "Q2": {"target": "example-06", "capability": "read", "domain_time": "2026-08-05T00:00:00Z"},
@@ -77,7 +78,7 @@ def query_smoke(memory: SQLiteOperationalMemory) -> dict[str, str]:
     return result
 
 
-def stress_checks(memory: SQLiteOperationalMemory) -> list[tuple[str, bool]]:
+def stress_checks(memory: ConformanceMemory) -> list[tuple[str, bool]]:
     checks: list[tuple[str, bool]] = []
     q3 = memory.canonical_query("Q3", {"target": "example-08", "capability": "read", "knowledge_time": "2026-08-15T00:00:00Z", "domain_time": "2026-08-01T12:00:00Z"})
     q4 = memory.canonical_query("Q4", {"target": "example-08", "capability": "read", "domain_time": "2026-08-01T12:00:00Z"})
@@ -121,7 +122,7 @@ def stress_checks(memory: SQLiteOperationalMemory) -> list[tuple[str, bool]]:
     return checks
 
 
-def invariant_checks(memory: SQLiteOperationalMemory) -> list[tuple[str, bool]]:
+def invariant_checks(memory: ConformanceMemory) -> list[tuple[str, bool]]:
     q3 = memory.canonical_query("Q3", {"target": "example-08", "capability": "read", "knowledge_time": "2026-08-15T00:00:00Z", "domain_time": "2026-08-01T12:00:00Z"})
     q4 = memory.canonical_query("Q4", {"target": "example-08", "capability": "read", "domain_time": "2026-08-01T12:00:00Z"})
     q13 = memory.canonical_query("Q13", {"target": "example-02", "capability": "search", "compared_observation_ids": ["obs:example-02:search:20260725:01", "obs:example-02:search:20260725:03"]})
@@ -167,7 +168,7 @@ class FrozenConformanceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.db = Path(self.temp.name) / "memory.sqlite3"
-        self.memory = SQLiteOperationalMemory(self.db, clock=clock)
+        self.memory = ConformanceMemory(self.db, clock=clock)
         load_memory_lab(self.memory, FIXTURE)
 
     def tearDown(self) -> None:
@@ -210,7 +211,7 @@ class FrozenConformanceTests(unittest.TestCase):
     def test_physical_order_does_not_change_oracle(self) -> None:
         normal = run_oracle(self.memory)
         second_db = Path(self.temp.name) / "reverse.sqlite3"
-        with SQLiteOperationalMemory(second_db, clock=clock) as reverse:
+        with ConformanceMemory(second_db, clock=clock) as reverse:
             load_memory_lab(reverse, FIXTURE, reverse=True)
             reversed_result = run_oracle(reverse)
         self.assertEqual("PASS", normal["status"])
@@ -272,10 +273,10 @@ class ProductionInfrastructureTests(unittest.TestCase):
 
     def test_write_close_reopen_query_persists(self) -> None:
         db = self.root / "memory.sqlite3"
-        with SQLiteOperationalMemory(db, clock=clock) as memory:
+        with ConformanceMemory(db, clock=clock) as memory:
             load_memory_lab(memory, FIXTURE)
             before = memory.canonical_query("Q1", {"target": "example-01", "capability": "project-listings", "knowledge_time": TEST_NOW})
-        with SQLiteOperationalMemory(db, clock=clock, create=False) as reopened:
+        with ConformanceMemory(db, clock=clock, create=False) as reopened:
             after = reopened.canonical_query("Q1", {"target": "example-01", "capability": "project-listings", "knowledge_time": TEST_NOW})
         self.assertEqual(before, after)
 
@@ -400,18 +401,18 @@ class JsCapabilityTransportSourceTests(unittest.TestCase):
 
         for transport in BROWSER_TRANSPORTS:
             with self.subTest(transport=transport):
-                self.assertIs(True, SQLiteOperationalMemory._js_capability(transport, {}))
+                self.assertIs(True, ConformanceMemory._js_capability(transport, {}))
 
     def test_direct_read_is_unknown_without_explicit_context(self) -> None:
         from transport_policy import DIRECT_READ
 
-        self.assertEqual("UNKNOWN", SQLiteOperationalMemory._js_capability(DIRECT_READ, {}))
+        self.assertEqual("UNKNOWN", ConformanceMemory._js_capability(DIRECT_READ, {}))
 
     def test_explicit_context_overrides_transport_inference(self) -> None:
         from transport_policy import DIRECT_READ, LIGHTPANDA
 
-        self.assertIs(True, SQLiteOperationalMemory._js_capability(DIRECT_READ, {"javascript": True}))
-        self.assertIs(False, SQLiteOperationalMemory._js_capability(LIGHTPANDA, {"javascript": False}))
+        self.assertIs(True, ConformanceMemory._js_capability(DIRECT_READ, {"javascript": True}))
+        self.assertIs(False, ConformanceMemory._js_capability(LIGHTPANDA, {"javascript": False}))
 
 
 if __name__ == "__main__":
