@@ -420,6 +420,25 @@ class Phase35LookupOwnershipTests(unittest.TestCase):
         ):
             self.assertIn(pattern, ignore)
 
+    def test_knowledge_root_corpus_is_never_a_repository_artifact(self) -> None:
+        """A checkout used as a Knowledge Root gains a targets/ corpus directory.
+
+        That corpus is installation-owned state, so committing it would publish
+        someone's operating knowledge. The rule is anchored to the repository
+        root, which keeps repo-level targets/ unshippable without claiming
+        anything about a Knowledge Root kept elsewhere on disk.
+        """
+        ignore = (REPO / ".gitignore").read_text(encoding="utf-8").splitlines()
+        self.assertIn("/targets/", ignore)
+
+        completed = subprocess.run(
+            ["git", "-C", str(REPO), "check-ignore", "-q", "targets/example-target.md"],
+            capture_output=True,
+        )
+        if completed.returncode == 128:
+            self.skipTest("not a git checkout")
+        self.assertEqual(0, completed.returncode, "repo-level targets/ is not ignored")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

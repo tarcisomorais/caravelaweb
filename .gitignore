@@ -17,4 +17,10 @@ __pycache__/
 .caravelaweb/knowledge-write-freeze
 .caravelaweb/read-authority-operational-memory
 
+# The Knowledge Root corpus directory, created by init-knowledge-root when a
+# checkout is also used as a Knowledge Root. Anchored to this repository's root:
+# the corpus is installation-owned state, never a repository artifact. A Knowledge
+# Root kept anywhere else on disk is unaffected by this rule.
+/targets/
+
 .claude/
