@@ -1,0 +1,35 @@
+name: Feature request
+description: Propose a focused improvement to the supported product
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What current user problem should be solved?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Smallest useful change
+      description: Describe the minimum supported behavior needed.
+    validations:
+      required: true
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: Safety and platform impact
+      description: Note effects on authority, privacy, SQLite, Linux, WSL2, or native Windows.
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This does not require publishing private Knowledge Root data.
+          required: true
+        - label: I searched existing issues first.
+          required: true

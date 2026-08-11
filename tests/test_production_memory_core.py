@@ -353,11 +353,11 @@ class DecisionActionHardeningTests(unittest.TestCase):
             self.memory.get_current("demo", "read")
 
     def test_bare_supersede_naming_old_and_new_claim_surfaces_loudly(self) -> None:
-        """The historical failure mode: memory-contract.md's SUPERSEDE wording read
-        literally (one Decision, two claim_ids, two effects) instead of the paired
-        SUPERSEDE+ACCEPT_SUPERSEDE representation. Before this hardening, this
-        silently vaporized clm:demo:old with no error at all (accepted_claim_ids
-        went to []). It must now fail loudly instead."""
+        """A malformed SUPERSEDE that names old and new Claims must fail loudly.
+
+        The valid representation pairs SUPERSEDE with ACCEPT_SUPERSEDE; accepting
+        both effects in one Decision would corrupt the current projection.
+        """
         with self.memory.write_transaction() as writer:
             writer.claim({
                 "id": "clm:demo:new", "target_id": "tgt:demo", "capability_id": "cap:demo:read",

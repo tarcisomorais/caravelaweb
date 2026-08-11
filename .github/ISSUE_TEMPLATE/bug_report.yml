@@ -1,0 +1,66 @@
+name: Bug report
+description: Report a reproducible CaravelaWeb defect
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include credentials, cookies, private target data, browser profiles, or a real Knowledge Root. Report vulnerabilities through the security policy.
+  - type: input
+    id: commit
+    attributes:
+      label: Commit
+      description: The exact CaravelaWeb commit tested.
+      placeholder: abcdef123456...
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system and Python version.
+      placeholder: Ubuntu 24.04, Python 3.11.9
+    validations:
+      required: true
+  - type: dropdown
+    id: command
+    attributes:
+      label: Surface
+      options:
+        - init-knowledge-root
+        - preflight
+        - knowledge-lookup
+        - discovery-finalize
+        - Runtime module
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Use synthetic paths, targets, and data.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed secrets, private data, and installation-owned files from this report.
+          required: true
+        - label: I searched existing issues first.
+          required: true
