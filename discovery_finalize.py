@@ -529,7 +529,7 @@ def finalize_discovery(
     if not normalized:
         return DiscoveryFinalization(
             "NÃO_SALVA", target, capability,
-            reason="A Discovery não encontrou conhecimento operacional reutilizável.",
+            reason="Discovery found no reusable operating knowledge.",
             reason_code="SEM_CONHECIMENTO_REUTILIZAVEL",
         )
     clean_evidence = _validate_evidence(evidence)
@@ -560,7 +560,7 @@ def finalize_discovery(
     if delta_keys <= pending and pending_match is None:
         return DiscoveryFinalization(
             "NÃO_SALVA", target, capability,
-            reason="Esse aprendizado já está aguardando confirmação antes de ser usado.",
+            reason="This knowledge is already pending confirmation before it can be used.",
             reason_code="JA_PENDENTE",
         )
     if pending_match is None:
@@ -568,7 +568,7 @@ def finalize_discovery(
     if not delta:
         return DiscoveryFinalization(
             "NÃO_SALVA", target, capability,
-            reason="Esse aprendizado já está aguardando confirmação antes de ser usado.",
+            reason="This knowledge is already pending confirmation before it can be used.",
             reason_code="JA_PENDENTE",
         )
     fingerprint = _digest({
@@ -732,7 +732,7 @@ def finalize_discovery(
     if pending_match and not replacement_ready and enrichment_created == 0:
         return DiscoveryFinalization(
             "NÃO_SALVA", target, capability, proposal_id, 0,
-            reason="Esse aprendizado já está aguardando confirmação antes de ser usado.",
+            reason="This knowledge is already pending confirmation before it can be used.",
             reason_code="JA_PENDENTE",
         )
     if not automatic and not replacement_ready:
@@ -748,7 +748,7 @@ def finalize_discovery(
             reason_code = "CONFIRMACAO_PENDENTE"
         return DiscoveryFinalization(
             "NÃO_SALVA", target, capability, proposal_id, len(claims),
-            reason="Encontrei informações conflitantes ou não confirmadas e não consegui validar um caminho reutilizável.",
+            reason="Conflicting or unconfirmed information blocked validation of a reusable path.",
             reason_code=reason_code,
         )
     return DiscoveryFinalization(

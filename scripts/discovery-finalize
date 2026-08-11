@@ -67,7 +67,7 @@ def main() -> int:
         # in the normal user flow.
         print(json.dumps({
             "status": "NÃO_SALVA",
-            "motivo": "A Discovery não pôde ser finalizada na memória local.",
+            "motivo": "Discovery could not be finalized in local Operational Memory.",
         }, ensure_ascii=False, sort_keys=True), file=sys.stderr)
         return 2
     print(json.dumps(result.as_dict(), ensure_ascii=False, sort_keys=True))

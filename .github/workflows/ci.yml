@@ -44,9 +44,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Root-as-skill path gate
-        # The repository root is the skill root, so no file may refer to a
-        # nested skill directory. The character class keeps this line from
-        # matching itself, so the gate can scan the whole tree with no
-        # exclusions -- including this workflow.
+        # The repository root is the skill root. Only the thin host-discovery
+        # adapters under .claude/ and .agents/ may sit at a nested skills/
+        # path, and no file may refer to a nested skill root any other way.
+        # The character class keeps these lines from matching themselves, so
+        # the gate scans the whole tree with no exclusions -- including this
+        # workflow.
         run: |
-          ! grep -rnE "skills/carav[e]laweb" . --exclude-dir=.git
+          test ! -e skills
+          ! grep -rnP "(?<!\.claude/)(?<!\.agents/)skills/carav[e]laweb" . --exclude-dir=.git

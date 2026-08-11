@@ -18,8 +18,9 @@ cd caravelaweb
 python3 --version
 ```
 
-On Windows, use `python` or `py -3.11` if that is how Python is installed.
-Keep using that same interpreter for every CaravelaWeb command.
+On native Windows, the command is normally `python` or `py -3`. Any Python 3.11
+or newer works. Keep using that same interpreter for every CaravelaWeb command;
+`preflight` reports the exact interpreter path it ran under.
 
 ## Create a Knowledge Root
 
@@ -76,6 +77,14 @@ python3 scripts/knowledge-lookup --target example-site --capability search
 ```
 
 The expected initial result is `not_found`, not an error.
+
+## Use with an agent host
+
+Start Claude Code, Codex, or OpenCode in the repository root. Each host reads the
+project-local instruction and skill-discovery files that this repository already
+ships, so no user-home installation, symlink, or junction is required. See
+[Use with an agent host](../README.md#use-with-an-agent-host) for the file and
+invocation table.
 
 ## Optional browser transports
 

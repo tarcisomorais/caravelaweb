@@ -33,6 +33,17 @@ python3 scripts/preflight --json
 python3 scripts/knowledge-lookup --target example-site --capability search
 ```
 
+Examples use `python3`, which is the usual command on Linux and WSL2. On native
+Windows, run the same commands with `python` (or `py`) instead:
+
+```powershell
+python scripts/init-knowledge-root --json
+python scripts/preflight --json
+```
+
+Any Python 3.11 or newer works. Use one interpreter for every CaravelaWeb
+command; `preflight` reports the exact interpreter path it ran under.
+
 Initialization creates an installation-owned Knowledge Root and remembers it
 for later commands. An explicit location is also supported:
 
@@ -68,6 +79,23 @@ python3 scripts/discovery-finalize --input discovery.json
 
 Use the same Python interpreter reported by `preflight`. Each script supports
 `--help` for its exact command contract.
+
+## Use with an agent host
+
+Onboarding is three steps: clone the repository, initialize the Knowledge Root,
+then open the checkout with a supported agent host. Step three needs no
+user-home installation, symlink, or junction: the repository ships project-local
+discovery files, and the repository root stays the canonical skill root.
+
+| Host | Discovery file in this repository | Invocation |
+| --- | --- | --- |
+| Claude Code | `CLAUDE.md` and `.claude/skills/caravelaweb/SKILL.md` | `/caravelaweb`, or Claude loads it when relevant |
+| Codex | `AGENTS.md` and `.agents/skills/caravelaweb/SKILL.md` | `/skills` or `$caravelaweb`, or implicit by description |
+| OpenCode | `AGENTS.md` and the same two skill directories | the native `skill` tool, invoked by the agent |
+
+`CLAUDE.md` imports `AGENTS.md`, so all three hosts read one set of project
+instructions. Both skill files are thin discovery adapters: they carry no runtime
+code and point back to the repository-root [SKILL.md](SKILL.md).
 
 ## Safety model
 

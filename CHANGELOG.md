@@ -17,6 +17,17 @@ under **Unreleased** until a version and tag are intentionally chosen.
 - Linux and native-Windows continuous integration.
 - Public installation, architecture, platform, security, and contribution
   documentation.
+- Project-local agent-host onboarding: `AGENTS.md`, a `CLAUDE.md` that imports
+  it, and thin `caravelaweb` skill-discovery adapters under `.claude/skills/`
+  and `.agents/skills/`. A fresh clone is discoverable by Claude Code, Codex,
+  and OpenCode with no user-home installation, symlink, or junction.
+
+### Changed
+
+- Preflight no longer reports the `maintenance_tooling` optional component,
+  which the standalone public runtime does not ship.
+- Discovery finalizer refusal messages are English. The `SALVA`,
+  `JÁ_EXISTENTE`, and `NÃO_SALVA` status tokens are unchanged.
 
 ### Security
 

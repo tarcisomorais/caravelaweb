@@ -251,7 +251,7 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         self.assertEqual(2, result.returncode)
         body = json.loads(result.stderr)
         self.assertEqual("NÃO_SALVA", body["status"])
-        self.assertEqual("A Discovery não pôde ser finalizada na memória local.", body["motivo"])
+        self.assertEqual("Discovery could not be finalized in local Operational Memory.", body["motivo"])
         for forbidden in ("Claim", "Proposal", "Decision", "OPERATIONAL_MEMORY", "LEGACY", str(self.root)):
             self.assertNotIn(forbidden, result.stderr)
         self.assertNotIn("Traceback", result.stderr)

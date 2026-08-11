@@ -23,4 +23,7 @@ __pycache__/
 # Root kept anywhere else on disk is unaffected by this rule.
 /targets/
 
-.claude/
+# Local Claude Code state. The committed project-local skill adapter under
+# .claude/skills/ is public integration metadata and stays tracked.
+.claude/*
+!.claude/skills/
