@@ -1,0 +1,20 @@
+*:Zone.Identifier
+
+# Test/interpreter caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Installation-owned Caravela Operational Memory state (never repository artifacts)
+.caravelaweb-knowledge-root
+.caravelaweb/*.db
+.caravelaweb/*.db-wal
+.caravelaweb/*.db-shm
+.caravelaweb/*.db-journal
+.caravelaweb/*.db-*
+.caravelaweb/*.json
+.caravelaweb/*.lock
+.caravelaweb/knowledge-write-freeze
+.caravelaweb/read-authority-operational-memory
+
+.claude/

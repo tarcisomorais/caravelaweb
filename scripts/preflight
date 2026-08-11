@@ -1,0 +1,268 @@
+#!/usr/bin/env python3
+"""Read-only CaravelaWeb environment report."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import sqlite3
+import subprocess
+import sys
+from pathlib import Path
+
+SKILL_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SKILL_ROOT))
+
+from knowledge_write_freeze import freeze_marker
+from operational_memory.core import SCHEMA_VERSION
+from platform_adapter import (
+    configure_utf8_stdio,
+    filesystem_class,
+    knowledge_root_marker_present,
+    platform_identity,
+    resolve_knowledge_root,
+    safe_marker_stat,
+)
+from read_authority import ReadAuthorityStateError, read_cutover_active
+from transport_policy import AVAILABLE, PLATFORM_UNSUPPORTED, UNAVAILABLE
+from write_authority import WriteAuthorityStateError, current_write_authority
+
+configure_utf8_stdio()
+
+
+def _marker_state(path: Path) -> str:
+    try:
+        value = os.lstat(path)
+    except FileNotFoundError:
+        return "INACTIVE"
+    except OSError:
+        return "INVALID"
+    return "ACTIVE" if safe_marker_stat(value) else "INVALID"
+
+
+def _memory_report(root: Path) -> tuple[dict[str, object], list[str]]:
+    errors: list[str] = []
+    db = root / ".caravelaweb" / "operational_memory.db"
+    report: dict[str, object] = {
+        "path": str(db),
+        "present": db.is_file(),
+        "openable": False,
+        "schema_version": None,
+        "expected_schema_version": SCHEMA_VERSION,
+    }
+    if report["present"]:
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True)
+            table_version = connection.execute(
+                "SELECT schema_version FROM schema_metadata WHERE singleton=1"
+            ).fetchone()
+            pragma_version = connection.execute("PRAGMA user_version").fetchone()[0]
+            report["schema_version"] = pragma_version
+            report["openable"] = bool(
+                table_version
+                and table_version[0] == SCHEMA_VERSION
+                and pragma_version == SCHEMA_VERSION
+            )
+        except (OSError, sqlite3.DatabaseError):
+            pass
+        finally:
+            if connection is not None:
+                connection.close()
+    if not report["present"]:
+        errors.append(f"Operational Memory database is absent: {db}")
+    elif not report["openable"]:
+        errors.append(
+            f"Operational Memory database is unreadable or has the wrong schema; expected {SCHEMA_VERSION}: {db}"
+        )
+
+    report["freeze"] = _marker_state(freeze_marker(root))
+    try:
+        report["read_authority"] = (
+            "OPERATIONAL_MEMORY" if read_cutover_active(root) else "LEGACY"
+        )
+    except ReadAuthorityStateError:
+        report["read_authority"] = "INVALID"
+    try:
+        report["write_authority"] = current_write_authority(root)
+    except WriteAuthorityStateError:
+        report["write_authority"] = "INVALID"
+
+    if report["freeze"] != "INACTIVE":
+        errors.append(f"knowledge write freeze is {str(report['freeze']).lower()}")
+    if report["read_authority"] != "OPERATIONAL_MEMORY":
+        errors.append(f"read-authority state is {report['read_authority']}")
+    if report["write_authority"] != "OPERATIONAL_MEMORY":
+        errors.append(f"write-authority state is {report['write_authority']}")
+    report["ready"] = not errors
+    return report, errors
+
+
+def _command(names: tuple[str, ...]) -> str | None:
+    return next((path for name in names if (path := shutil.which(name))), None)
+
+
+def _transports() -> dict[str, object]:
+    agent_browser = shutil.which("agent-browser")
+    version = None
+    if agent_browser:
+        try:
+            result = subprocess.run(
+                [agent_browser, "--version"],
+                text=True,
+                capture_output=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                version = (result.stdout or result.stderr).strip()
+        except (OSError, subprocess.SubprocessError):
+            pass
+    lightpanda = _command(("lightpanda",))
+    chrome = _command(
+        ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome")
+    )
+    return {
+        "DIRECT_READ": {"status": AVAILABLE},
+        "LIGHTPANDA": {
+            "status": (
+                PLATFORM_UNSUPPORTED
+                if sys.platform == "win32"
+                else AVAILABLE if agent_browser and lightpanda else UNAVAILABLE
+            ),
+            "path": lightpanda,
+        },
+        "CHROME": {
+            "status": AVAILABLE if agent_browser and chrome else UNAVAILABLE,
+            "path": chrome,
+        },
+        "agent-browser": {
+            "status": AVAILABLE if agent_browser and version else UNAVAILABLE,
+            "path": agent_browser,
+            "version": version,
+        },
+    }
+
+
+def _root_warning(
+    root: Path, kind: str, *, platform_name: str | None = None
+) -> str | None:
+    if kind == "native-local":
+        return None
+    platform_name = platform_name or sys.platform
+    value = str(root).replace("\\", "/").casefold()
+    if platform_name == "win32" and (
+        value.startswith("//wsl.localhost/") or value.startswith("//wsl$/")
+    ):
+        return (
+            f"knowledge root {root} is boundary-crossing and deprecated: native "
+            "Windows observed SQLite lock failures on WSL-hosted roots; move it "
+            "to a native Windows path. This warning does not refuse the root."
+        )
+    if platform_name == "linux" and value.startswith("/mnt/"):
+        return (
+            f"knowledge root {root} is boundary-crossing: concurrent Windows and "
+            "WSL2 writers produced an explicit SQLite disk I/O failure; do not "
+            "access the same database from both runtimes concurrently and prefer "
+            "a native Linux path. This warning does not refuse the root."
+        )
+    return (
+        f"knowledge root {root} is {kind}; safety under this workload is "
+        "unproven; prefer a path native to the running platform"
+    )
+
+
+def build_report(override: str | None) -> dict[str, object]:
+    identity = platform_identity()
+    errors: list[str] = []
+    warnings: list[str] = []
+    if not identity["python_meets_floor"]:
+        errors.append(f"Python {identity['python']} is below the required 3.11 floor")
+    root = resolve_knowledge_root(override, start=__file__)
+    root_report: dict[str, object] = {
+        "path": str(root) if root else None,
+        "marker_present": knowledge_root_marker_present(root) if root else False,
+        "targets_present": bool(root),
+        "filesystem_class": filesystem_class(root) if root else "unknown",
+    }
+    if root is None:
+        errors.append(
+            f"knowledge root is unresolved; expected {'.caravelaweb-knowledge-root'} and targets/"
+        )
+        memory: dict[str, object] = {"ready": False}
+    else:
+        if not root_report["marker_present"]:
+            errors.append(f"knowledge-root marker is absent: {root}")
+        if warning := _root_warning(root, str(root_report["filesystem_class"])):
+            warnings.append(warning)
+        memory, memory_errors = _memory_report(root)
+        errors.extend(memory_errors)
+    report = {
+        "status": "READY" if not errors else "NOT_READY",
+        "platform": identity,
+        "invocation": {
+            "preflight": f'"{sys.executable}" "{Path(__file__).resolve()}"',
+            "knowledge_lookup": f'"{sys.executable}" "{SKILL_ROOT / "scripts" / "knowledge-lookup"}"',
+            "discovery_finalize": f'"{sys.executable}" "{SKILL_ROOT / "scripts" / "discovery-finalize"}"',
+        },
+        "knowledge_root": root_report,
+        "operational_memory": memory,
+        "transports": _transports(),
+        "unsupported_optional_components": {
+            "maintenance_tooling": (
+                "AVAILABLE"
+                if identity["os_name"] == "posix"
+                else "PLATFORM_UNSUPPORTED: Linux/WSL2-only, by design"
+            ),
+            "advisory_locking": (
+                "AVAILABLE"
+                if identity["fcntl"]
+                else "PLATFORM_UNSUPPORTED: fcntl is absent"
+            ),
+        },
+        "warnings": warnings,
+        "errors": errors,
+    }
+    return report
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Report CaravelaWeb runtime readiness")
+    parser.add_argument("--knowledge-root")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+    report = build_report(args.knowledge_root)
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    else:
+        print(f"status: {report['status']}")
+        print(f"platform: {report['platform']['sys_platform']} ({report['platform']['os_name']})")
+        print(f"python: {report['platform']['python']} ({report['platform']['python_executable']})")
+        print(f"invocation: {report['invocation']['preflight']}")
+        print(f"knowledge_root: {report['knowledge_root']['path']}")
+        print(f"filesystem: {report['knowledge_root']['filesystem_class']}")
+        print(f"operational_memory: {'READY' if report['operational_memory'].get('ready') else 'NOT_READY'}")
+        print(
+            "transports: "
+            + ", ".join(
+                f"{name}={value['status']}"
+                for name, value in report["transports"].items()
+            )
+        )
+        print(
+            "unsupported_optional_components: "
+            + "; ".join(
+                f"{name}={value}"
+                for name, value in report["unsupported_optional_components"].items()
+            )
+        )
+        for warning in report["warnings"]:
+            print(f"warning: {warning}")
+        for error in report["errors"]:
+            print(f"error: {error}")
+    return 0 if report["status"] == "READY" else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""Production Caravela reusable-knowledge read boundary."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+SKILL_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SKILL_ROOT))
+
+from integration_bridge import BridgeError, KnowledgeLookupBoundary
+from operational_memory import MemoryError
+from platform_adapter import configure_utf8_stdio, resolve_knowledge_root
+
+configure_utf8_stdio()
+
+def emit(status: str, **fields: object) -> None:
+    print(json.dumps({"status": status, **fields}, ensure_ascii=False, sort_keys=True))
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Operational Memory is the default after explicit Phase 4C read cutover; current v0.4 is closed. Legacy is diagnostics-only compatibility")
+    parser.add_argument("--knowledge-root")
+    parser.add_argument("--target", required=True)
+    parser.add_argument("--capability")
+    parser.add_argument("--operational-memory-db", help="diagnostic DB override for an explicit Operational Memory lookup")
+    parser.add_argument("--use-operational-memory", action="store_true", help="deprecated assertion of Operational Memory; never selects legacy")
+    parser.add_argument("--use-legacy", action="store_true", help="diagnostic-only lookup from historical legacy Markdown; never an automatic fallback")
+    args = parser.parse_args()
+    root = resolve_knowledge_root(args.knowledge_root, start=__file__)
+    if root is None:
+        emit("unresolved", target=args.target)
+        return 2
+    boundary = KnowledgeLookupBoundary(root, args.operational_memory_db)
+    try:
+        result = boundary.lookup(args.target, capability=args.capability, use_operational_memory=args.use_operational_memory, use_legacy=args.use_legacy)
+    except (BridgeError, MemoryError, KeyError) as error:
+        emit("bridge_error", message=str(error), target=args.target)
+        return 2
+    if result.source == "legacy":
+        if result.profile_path is None:
+            emit("not_found", source="legacy", target=args.target)
+            return 0
+        emit("found", source="legacy", profile=result.profile_path, target=args.target)
+        return 0
+    if result.operational_context is None:
+        emit("not_found", source="operational-memory", target=args.target)
+        return 0
+    emit("found", source="operational-memory", target=args.target, capability=args.capability, operational_context=result.operational_context, markdown_projection=result.markdown_projection)
+    return 0
+
+if __name__ == "__main__":
+    raise SystemExit(main())
