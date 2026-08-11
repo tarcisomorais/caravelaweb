@@ -1,0 +1,52 @@
+name: CI
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - run: python -m unittest discover -s tests -p 'test_*.py' -v
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - name: Run full suite
+        shell: bash
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Real end-to-end Windows evidence
+        # ponytail: real-network exercise, not a unit test; a rare network
+        # blip must not block merges. Non-blocking.
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -e
+          ROOT="$RUNNER_TEMP/windows-evidence"
+          mkdir -p "$ROOT"
+          python tests/windows_real_task_exercise.py setup --root "$ROOT"
+          python tests/windows_real_task_exercise.py operate --root "$ROOT"
+          python tests/windows_real_task_exercise.py discover --root "$ROOT"
+          python tests/windows_real_task_exercise.py verify --root "$ROOT"
+
+  path-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Root-as-skill path gate
+        # The repository root is the skill root, so no file may refer to a
+        # nested skill directory. The character class keeps this line from
+        # matching itself, so the gate can scan the whole tree with no
+        # exclusions -- including this workflow.
+        run: |
+          ! grep -rnE "skills/carav[e]laweb" . --exclude-dir=.git
