@@ -69,6 +69,42 @@ class DiscoveryFinalizeTests(unittest.TestCase):
             write_destination=WRITE_DESTINATION,
         )
 
+    def operational_payload(
+        self, *, target="synthetic-operational", capability="extract-items",
+        outcome="SUCCESS", proof=None, evidence_references=True,
+        observations=None,
+    ):
+        locator = f"https://{target}.example/items"
+        proof = proof if proof is not None else {
+            "entrypoint": locator,
+            "required_output": {"field_paths": {"name": "items[].name"}},
+            "completion_condition": "the item collection is present",
+            "critical_constraints": [],
+        }
+        return {
+            "target": target,
+            "capability": capability,
+            "observations": observations or [
+                {"family": "transport", "value": {"transport": "DIRECT_READ"}},
+                {"family": "authentication", "value": {"access_model": "PUBLIC"}},
+                {
+                    "family": "validation",
+                    "value": {"operational_proof": proof},
+                    "validation": {
+                        "transport": "DIRECT_READ",
+                        "outcome": outcome,
+                        "engine": None,
+                        "javascript": False,
+                        "context": {"authentication": "PUBLIC"},
+                        **({"evidence": [locator]} if evidence_references else {}),
+                    },
+                },
+            ],
+            "evidence": [{"kind": "synthetic-validation", "locator": locator}],
+            "provenance": {"run_id": f"run:{target}:001", "observed_at": RECORDED},
+            "recorded_at": RECORDED,
+        }
+
     def accept(self, observation):
         with self.memory.write_transaction() as writer:
             writer.claim({"id": "clm:example-news:topic-search:accepted", "target_id": "tgt:example-news", "capability_id": "cap:example-news:topic-search", "family": observation["family"], "epistemic": observation.get("epistemic", "OBSERVED"), "value": observation["value"], "recorded_at": RECORDED})
@@ -162,7 +198,9 @@ class DiscoveryFinalizeTests(unittest.TestCase):
             text=True, capture_output=True, encoding="utf-8",
         )
         self.assertEqual(0, lookup.returncode, lookup.stderr)
-        self.assertEqual("found", json.loads(lookup.stdout)["status"])
+        lookup_body = json.loads(lookup.stdout)
+        self.assertEqual("found", lookup_body["status"])
+        self.assertNotIn("lifecycle", lookup_body["operational_context"]["current"])
         self.assertEqual(before_lookup, self.memory._conn.execute("SELECT count(*) FROM targets").fetchone()[0])
 
     def test_cli_errors_are_structured_without_a_traceback(self):
@@ -436,6 +474,154 @@ class DiscoveryFinalizeTests(unittest.TestCase):
                 "provenance": {"run_id": f"run:{target}:002", "observed_at": RECORDED},
                 "recorded_at": RECORDED,
             }).status)
+
+    def test_partial_knowledge_is_saved_and_rendered_without_operational_lifecycle(self):
+        payload = self.operational_payload(observations=[
+            {"family": "transport", "value": {"transport": "DIRECT_READ"}},
+        ])
+        self.assertEqual("SAVED", self.finalize(payload).status)
+        context = self.memory.render_operational_context(
+            payload["target"], payload["capability"]
+        )
+        self.assertIn("transport", context["current"])
+        self.assertNotIn("lifecycle", context["current"])
+
+    def test_incomplete_operational_proof_is_saved_without_lifecycle(self):
+        payload = self.operational_payload(proof={
+            "entrypoint": "https://synthetic-operational.example/items",
+            "required_output": {"field_paths": {"name": "items[].name"}},
+            "completion_condition": "the item collection is present",
+        })
+        self.assertEqual("SAVED", self.finalize(payload).status)
+        self.assertFalse(self.memory.has_verified_operational_lifecycle(
+            payload["target"], payload["capability"]
+        ))
+
+    def test_complete_verified_path_earns_generated_operational_lifecycle(self):
+        payload = self.operational_payload()
+        result = self.finalize(payload)
+        self.assertEqual("SAVED", result.status)
+        self.assertTrue(self.memory.has_verified_operational_lifecycle(
+            payload["target"], payload["capability"]
+        ))
+        lifecycle = next(
+            claim for claim in self.memory.get_current(
+                payload["target"], payload["capability"]
+            )["accepted_claims"]
+            if claim["family"] == "lifecycle"
+        )
+        record = self.memory.get_record(lifecycle["id"])
+        self.assertEqual("OPERATIONAL", record["value"])
+        self.assertEqual(1, record["operational_proof"]["version"])
+        self.assertEqual(3, len(record["operational_proof"]["claim_ids"]))
+        self.assertNotIn("items[].name", json.dumps(record["operational_proof"]))
+
+    def test_prior_accepted_facts_can_complete_a_later_operational_proof(self):
+        first = self.operational_payload(observations=[
+            {"family": "transport", "value": {"transport": "DIRECT_READ"}},
+            {"family": "authentication", "value": {"access_model": "PUBLIC"}},
+        ])
+        self.assertEqual("SAVED", self.finalize(first).status)
+        self.assertFalse(self.memory.has_verified_operational_lifecycle(
+            first["target"], first["capability"]
+        ))
+        complete = self.operational_payload()
+        complete["observations"] = [complete["observations"][2]]
+        complete["provenance"]["run_id"] = "run:synthetic-operational:002"
+        self.assertEqual("SAVED", self.finalize(complete).status)
+        self.assertTrue(self.memory.has_verified_operational_lifecycle(
+            first["target"], first["capability"]
+        ))
+
+    def test_incomplete_proof_can_be_completed_by_a_later_discovery(self):
+        incomplete = self.operational_payload(
+            target="synthetic-proof-completion",
+            proof={
+                "entrypoint": "https://synthetic-proof-completion.example/items",
+                "required_output": {"field_paths": {"name": "items[].name"}},
+                "completion_condition": "the item collection is present",
+            },
+        )
+        self.assertEqual("SAVED", self.finalize(incomplete).status)
+        complete = self.operational_payload(target="synthetic-proof-completion")
+        complete["observations"] = [complete["observations"][2]]
+        complete["provenance"]["run_id"] = "run:synthetic-proof-completion:002"
+        self.assertEqual("SAVED", self.finalize(complete).status)
+        self.assertTrue(self.memory.has_verified_operational_lifecycle(
+            complete["target"], complete["capability"]
+        ))
+
+    def test_caller_supplied_lifecycle_cannot_self_promote(self):
+        payload = self.operational_payload(observations=[
+            {"family": "lifecycle", "value": {"state": "OPERATIONAL"}},
+        ])
+        with self.assertRaisesRegex(
+            DiscoveryFinalizationError,
+            "observation family is not reusable operational knowledge",
+        ):
+            self.finalize(payload)
+
+    def test_non_success_outcomes_do_not_earn_operational_lifecycle(self):
+        for outcome in ("FOUND", "FUNCTIONAL"):
+            with self.subTest(outcome=outcome):
+                target = f"synthetic-{outcome.lower()}"
+                payload = self.operational_payload(target=target, outcome=outcome)
+                self.assertEqual("SAVED", self.finalize(payload).status)
+                self.assertFalse(self.memory.has_verified_operational_lifecycle(
+                    target, payload["capability"]
+                ))
+
+    def test_success_without_explicit_evidence_stays_partial(self):
+        payload = self.operational_payload(evidence_references=False)
+        self.assertEqual("SAVED", self.finalize(payload).status)
+        self.assertFalse(self.memory.has_verified_operational_lifecycle(
+            payload["target"], payload["capability"]
+        ))
+
+    def test_required_output_choice_must_be_exactly_one(self):
+        base = {
+            "entrypoint": "https://synthetic-proof.example/items",
+            "completion_condition": "the requested operation completed",
+            "critical_constraints": [],
+        }
+        for suffix, proof in (
+            ("neither", base),
+            ("both", {**base, "required_output": {"field_paths": {"name": "items[].name"}}, "required_action": "submit"}),
+        ):
+            with self.subTest(case=suffix):
+                payload = self.operational_payload(
+                    target=f"synthetic-proof-{suffix}", proof=proof
+                )
+                self.assertEqual("SAVED", self.finalize(payload).status)
+                self.assertFalse(self.memory.has_verified_operational_lifecycle(
+                    payload["target"], payload["capability"]
+                ))
+
+    def test_degraded_proof_dependency_stops_rendering_operational_lifecycle(self):
+        payload = self.operational_payload(target="synthetic-degraded")
+        self.assertEqual("SAVED", self.finalize(payload).status)
+        lifecycle = next(
+            claim for claim in self.memory.get_current(
+                payload["target"], payload["capability"]
+            )["accepted_claims"]
+            if claim["family"] == "lifecycle"
+        )
+        proof_claim_id = self.memory.get_record(lifecycle["id"])["operational_proof"]["claim_ids"][0]
+        with self.memory.write_transaction() as writer:
+            writer.decision({
+                "id": "dec:synthetic-degraded:extract-items:degrade-proof",
+                "target_id": "tgt:synthetic-degraded",
+                "capability_id": "cap:synthetic-degraded:extract-items",
+                "action": "DEGRADE",
+                "claim_ids": [proof_claim_id],
+                "effective_at": "2026-07-29T12:00:00Z",
+                "recorded_at": "2026-07-29T12:00:00Z",
+                "validity": {"valid_from": RECORDED, "valid_to": "2026-07-29T12:00:00Z"},
+            })
+        context = self.memory.render_operational_context(
+            payload["target"], payload["capability"]
+        )
+        self.assertNotIn("lifecycle", context["current"])
 
 
 if __name__ == "__main__":

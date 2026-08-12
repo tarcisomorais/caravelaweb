@@ -49,6 +49,12 @@ The normal result strings are:
 
 These strings are part of the CLI contract. Error output includes a reason
 without exposing internal paths or a traceback in the normal user flow.
+Neither `SAVED` nor lookup `found` means operational readiness. The Discovery
+finalizer generates an `OPERATIONAL` lifecycle Claim only after the canonical
+reusable-path proof is complete, successful, explicitly evidenced, and
+consistent with accepted transport and access facts. Its Claim payload records
+the supporting Claim IDs; lookup trusts it only while those Claims remain
+current and uncontradicted. Partial accepted knowledge remains lookup-visible.
 
 ## Authority and safety
 

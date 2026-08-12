@@ -76,18 +76,53 @@ def setup(root: Path) -> dict:
 
 
 def operate(root: Path) -> dict:
-    lookup = _lookup(root, "example", "domain-homepage")
-    if lookup.get("status") != "found":
-        raise AssertionError(f"expected found, got {lookup}")
+    partial = _lookup(root, "example", "domain-homepage")
+    if partial.get("status") != "found" or "lifecycle" in partial["operational_context"]["current"]:
+        raise AssertionError(f"expected partial accepted context, got {partial}")
     started = time.monotonic()
     status, body = _fetch(TARGET_URL)
-    elapsed = round(time.monotonic() - started, 3)
     if status != 200 or "Example Domain" not in body:
-        raise AssertionError(f"DIRECT_READ Operation did not validate: status={status}")
+        raise AssertionError(f"DIRECT_READ Discovery did not validate: status={status}")
+    observed_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    payload_path = root / "operation-discovery.json"
+    payload_path.write_text(json.dumps({
+        "target": "example", "capability": "domain-homepage", "recorded_at": observed_at,
+        "provenance": {"run_id": "run:windows-operation:001", "observed_at": observed_at},
+        "evidence": [{"kind": "direct-read-validation", "locator": TARGET_URL}],
+        "observations": [
+            {"family": "authentication", "value": {"access_model": "PUBLIC"}},
+            {"family": "validation", "value": {"operational_proof": {
+                "entrypoint": TARGET_URL,
+                "required_output": {"field_paths": {"heading": "main.h1"}},
+                "completion_condition": "the Example Domain heading is present",
+                "critical_constraints": [],
+            }}, "validation": {
+                "transport": "DIRECT_READ", "outcome": "SUCCESS",
+                "engine": None, "javascript": False,
+                "context": {"authentication": "PUBLIC"},
+                "evidence": [TARGET_URL],
+            }},
+        ],
+    }), encoding="utf-8")
+    finalized = subprocess.run(
+        [sys.executable, str(FINALIZER), "--knowledge-root", str(root), "--input", str(payload_path)],
+        text=True, capture_output=True, encoding="utf-8",
+    )
+    if finalized.returncode != 0 or json.loads(finalized.stdout).get("status") != "SAVED":
+        raise AssertionError(f"operational Discovery did not save: {finalized.stderr}")
+    operational = _lookup(root, "example", "domain-homepage")
+    lifecycle = operational["operational_context"]["current"].get("lifecycle", [])
+    if not any(item.get("value") == "OPERATIONAL" for item in lifecycle):
+        raise AssertionError(f"verified path did not become operational: {operational}")
+    operation_status, operation_body = _fetch(TARGET_URL)
+    elapsed = round(time.monotonic() - started, 3)
+    if operation_status != 200 or "Example Domain" not in operation_body:
+        raise AssertionError(f"DIRECT_READ Operation did not validate: status={operation_status}")
     return {
-        "stage": "operate", "lookup_status": lookup["status"],
-        "recorded_transport": lookup["operational_context"]["current"],
-        "http_status": status, "content_matched": "Example Domain" in body,
+        "stage": "operate", "partial_lookup_status": partial["status"],
+        "operational_lookup_status": operational["status"],
+        "recorded_context": operational["operational_context"]["current"],
+        "http_status": operation_status, "content_matched": "Example Domain" in operation_body,
         "elapsed_seconds": elapsed,
     }
 
@@ -119,6 +154,8 @@ def discover(root: Path, payload_path: Path) -> dict:
     first = finalize()
     second = finalize()
     after = _lookup(root, "example", "reserved-notice")
+    if "lifecycle" in after.get("operational_context", {}).get("current", {}):
+        raise AssertionError(f"partial Discovery became operational: {after}")
     return {
         "stage": "discover",
         "before_lookup_status": before["status"],

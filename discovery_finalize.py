@@ -35,6 +35,7 @@ OPERATIONAL_FAMILIES = {
     "transport", "search_surface", "extraction", "pagination", "paywall",
     "authentication", "blocking", "validation", "limitation", "unknown",
 }
+_OPERATIONAL_PROOF_VERSION = 1
 _TASK_DATA_KEYS = {
     "article", "articles", "title", "titles", "store", "stores", "shop", "shops",
     "price", "prices", "result", "results", "html", "raw_html", "log", "logs",
@@ -206,7 +207,13 @@ def _normalize_observations(observations: Sequence[Mapping[str, Any]]) -> list[d
             raise DiscoveryFinalizationError("observation epistemic class is invalid")
         if not isinstance(value, Mapping) or not value:
             raise DiscoveryFinalizationError("observation value must be a non-empty object")
-        _reject_task_data(value, allow_schema_pointer=(family == "extraction"))
+        _reject_task_data(
+            value,
+            allow_schema_pointer=(
+                family == "extraction"
+                or (family == "validation" and "operational_proof" in value)
+            ),
+        )
         validation = _normalize_validation(item.get("validation"), field="observation.validation")
         contradiction = item.get("contradiction")
         clean_contradiction = None
@@ -230,6 +237,144 @@ def _normalize_observations(observations: Sequence[Mapping[str, Any]]) -> list[d
             "host": host, "validation": validation, "contradiction": clean_contradiction,
         }
     return [normalized[key] for key in sorted(normalized)]
+
+
+def _meaningful(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    return isinstance(value, (Mapping, list)) and bool(value)
+
+
+def _operational_proof_dependencies(
+    memory: SQLiteOperationalMemory,
+    target: str,
+    capability: str,
+    claims: Sequence[Mapping[str, Any]],
+    evidence: Sequence[Mapping[str, Any]],
+) -> tuple[str, ...] | None:
+    """Return the Claims that prove one reproducible path, or fail closed."""
+    try:
+        current = memory.get_current(target, capability)
+    except KeyError:
+        current = {"accepted_claims": [], "contradiction_warnings": []}
+    merged = [*current["accepted_claims"], *claims]
+    contradicted = {
+        warning["contradicted_claim_id"]
+        for warning in current["contradiction_warnings"]
+    }
+
+    proofs: list[tuple[Mapping[str, Any], Mapping[str, Any]]] = []
+    for claim in merged:
+        if claim["family"] != "validation" or claim["epistemic"] != "OBSERVED":
+            continue
+        value = claim["value"]
+        if not isinstance(value, Mapping) or set(value) != {"operational_proof"}:
+            continue
+        validation = claim.get("discovery_validation")
+        if validation is None:
+            try:
+                validation = memory.get_record(str(claim["id"])).get("discovery_validation")
+            except KeyError:
+                continue
+        if isinstance(validation, Mapping):
+            proofs.append((claim, validation))
+
+    eligible: list[tuple[str, ...]] = []
+    evidence_locators = {item["locator"] for item in evidence}
+    for proof_claim, validation in proofs:
+        proof = proof_claim["value"]["operational_proof"]
+        if not isinstance(proof, Mapping):
+            continue
+        required = {"entrypoint", "completion_condition", "critical_constraints"}
+        if not required <= proof.keys() or set(proof) - required - {"required_output", "required_action"}:
+            continue
+        if ("required_output" in proof) == ("required_action" in proof):
+            continue
+        if (
+            not _meaningful(proof["entrypoint"])
+            or not _meaningful(proof["completion_condition"])
+            or not _meaningful(proof.get("required_output", proof.get("required_action")))
+            or not isinstance(proof["critical_constraints"], list)
+        ):
+            continue
+        references = validation.get("evidence")
+        if (
+            validation.get("outcome") != "SUCCESS"
+            or not isinstance(references, list)
+            or not references
+        ):
+            continue
+        proof_id = str(proof_claim["id"])
+        if proof_id in contradicted:
+            continue
+        if proof_claim in claims:
+            if not set(references) <= evidence_locators:
+                continue
+        else:
+            recorded = {
+                item.get("locator") for item in memory.get_evidence(proof_id)["evidence"]
+            }
+            if not set(references) <= recorded:
+                continue
+
+        transport = validation.get("transport")
+        context = validation.get("context")
+        access_model = context.get("authentication") if isinstance(context, Mapping) else None
+        if not _meaningful(transport) or not _meaningful(access_model):
+            continue
+        if transport in {"LIGHTPANDA", "CHROME"} and (
+            not _meaningful(validation.get("engine"))
+            or not isinstance(validation.get("javascript"), bool)
+        ):
+            continue
+
+        proof_host = proof_claim.get("host_id")
+        in_scope = lambda claim: claim.get("host_id") in {None, proof_host}
+        transport_facts = [
+            claim for claim in merged
+            if claim["family"] == "transport"
+            and in_scope(claim)
+            and claim["id"] not in contradicted
+        ]
+        access_facts = [
+            claim for claim in merged
+            if claim["family"] == "authentication"
+            and in_scope(claim)
+            and claim["id"] not in contradicted
+        ]
+        if any(
+            claim["epistemic"] != "OBSERVED"
+            or not isinstance(claim["value"], Mapping)
+            or not _meaningful(claim["value"].get("transport"))
+            for claim in transport_facts
+        ) or any(
+            claim["epistemic"] != "OBSERVED"
+            or not isinstance(claim["value"], Mapping)
+            or not _meaningful(claim["value"].get("access_model"))
+            for claim in access_facts
+        ):
+            continue
+        transports = {
+            claim["value"].get("transport") for claim in transport_facts
+            if _meaningful(claim["value"].get("transport"))
+        }
+        access_models = {
+            claim["value"].get("access_model") for claim in access_facts
+            if _meaningful(claim["value"].get("access_model"))
+        }
+        if transports == {transport} and access_models == {access_model}:
+            transport_claim = next(
+                claim for claim in transport_facts
+                if claim["value"].get("transport") == transport
+            )
+            access_claim = next(
+                claim for claim in access_facts
+                if claim["value"].get("access_model") == access_model
+            )
+            eligible.append(tuple(sorted({
+                proof_id, str(transport_claim["id"]), str(access_claim["id"]),
+            })))
+    return eligible[0] if len(eligible) == 1 else None
 
 
 def _validate_provenance(provenance: Mapping[str, Any]) -> dict[str, Any]:
@@ -487,11 +632,22 @@ def _has_conflict(
     automatic Decision is allowed only when a family has no other value in the
     current accepted or pending view.
     """
-    families = {str(item["family"]) for item in delta}
+    # Operational proofs are append-only evidence summaries: an incomplete
+    # earlier summary may be completed by a later Discovery, while two complete
+    # summaries remain ambiguous at the dedicated proof gate above.
+    conflict_delta = [
+        item for item in delta
+        if not (
+            item["family"] == "validation"
+            and isinstance(item["value"], Mapping)
+            and "operational_proof" in item["value"]
+        )
+    ]
+    families = {str(item["family"]) for item in conflict_delta}
     if not families:
         return False
     delta_values: dict[tuple[str, str | None], set[str]] = {}
-    for item in delta:
+    for item in conflict_delta:
         host_id = host_ids.get(str(item.get("host"))) if item.get("host") else None
         delta_values.setdefault((item["family"], host_id), set()).add(
             json.dumps(item["value"], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -534,7 +690,7 @@ def _has_conflict(
                 separators=(",", ":"),
             )
         }
-        for item in delta
+        for item in conflict_delta
     )
 
 
@@ -638,6 +794,8 @@ def finalize_discovery(
             claim["host_id"] = host_ids[str(item["host"])]
         claims.append(claim)
         validation = item.get("validation") or {}
+        if validation:
+            claim["discovery_validation"] = validation
         validation_context = dict(validation.get("context", {}))
         for key in ("engine", "javascript", "outcome", "failure_class"):
             if key in validation:
@@ -670,6 +828,27 @@ def finalize_discovery(
         all(item["epistemic"] == "OBSERVED" for item in delta)
         and not has_conflict
     )
+    proof_claim_ids = (
+        _operational_proof_dependencies(
+            memory, target, capability, claims, clean_evidence
+        )
+        if automatic else None
+    )
+    if proof_claim_ids and not memory.has_verified_operational_lifecycle(target, capability):
+        lifecycle_id = (
+            f"clm:{target}:{capability}:lifecycle-operational-"
+            f"{_digest(proof_claim_ids)}"
+        )
+        claims.append({
+            "id": lifecycle_id,
+            "family": "lifecycle",
+            "epistemic": "OBSERVED",
+            "value": "OPERATIONAL",
+            "operational_proof": {
+                "version": _OPERATIONAL_PROOF_VERSION,
+                "claim_ids": list(proof_claim_ids),
+            },
+        })
     contradicting: dict[str, list[str]] = {}
     contradiction_contexts: dict[str, dict[str, Any]] = {}
     if replacement_ids:

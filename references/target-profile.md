@@ -128,6 +128,10 @@ For a multi-host target, record the affected host when behavior differs. Transpo
 
 An `OPERATIONAL` capability records enough evidence to reproduce the requested path: target and capability, access model, transport, entrypoint, observable completion condition, required output or action, critical constraints, and validation evidence. Browser-backed evidence also records the actually observed `agent-browser` and engine context when material.
 
+Discovery cannot assert lifecycle directly. The finalizer earns `OPERATIONAL` from accepted `OBSERVED` transport and authentication facts plus one canonical `validation` value: `{"operational_proof":{"entrypoint":"...","required_output":{...},"completion_condition":"...","critical_constraints":[]}}`; `required_action` may replace `required_output`, but exactly one is required. Its validation outcome must be exactly `SUCCESS`, evidence references must be explicit, and browser transports require explicit engine and JavaScript context. The generated lifecycle Claim records its supporting Claim IDs. Lookup suppresses an unverified lifecycle assertion, or one whose supporting Claims are no longer current or are contradicted.
+
+`SAVED` and lookup `found` remain acceptance signals. Partial reusable facts keep both properties without becoming `OPERATIONAL`; a later Discovery may complete the proof from the current accepted facts plus its new delta.
+
 Readiness says a surface is ready to inspect; completion says the requested capability produced the required result. Use an observable readiness condition and bounded timeout when readiness is needed. A page load, HTTP 200, or elapsed sleep is never sufficient proof of completion.
 
 A well-understood blocked capability records its lifecycle, availability, relevant host, blocker/failure class, observed evidence, and conditions that would need to change. Do not invent operational fields that were never reached.

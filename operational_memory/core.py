@@ -1182,7 +1182,16 @@ class SQLiteOperationalMemory:
         )
         families: dict[str, list[dict[str, Any]]] = defaultdict(list)
         evidence_refs: set[str] = set()
+        accepted_ids = set(view["accepted_claim_ids"])
+        contradicted_ids = {
+            warning["contradicted_claim_id"]
+            for warning in view["contradiction_warnings"]
+        }
         for claim in view["accepted_claims"]:
+            if not self._lifecycle_claim_is_trusted(
+                claim, accepted_ids, contradicted_ids
+            ):
+                continue
             families[claim["family"]].append(
                 {"id": claim["id"], "host_id": claim.get("host_id"), "epistemic": claim["epistemic"], "value": claim["value"]}
             )
@@ -1197,6 +1206,43 @@ class SQLiteOperationalMemory:
             "caller_context": dict(caller_context or {}),
             "history_included": False,
         }
+
+    def _lifecycle_claim_is_trusted(
+        self,
+        claim: Mapping[str, Any],
+        accepted_ids: set[str],
+        contradicted_ids: set[str],
+    ) -> bool:
+        if claim["family"] != "lifecycle" or claim["value"] != "OPERATIONAL":
+            return True
+        proof = self.get_record(str(claim["id"])).get("operational_proof")
+        if not isinstance(proof, Mapping) or proof.get("version") != 1:
+            return False
+        claim_ids = proof.get("claim_ids")
+        return (
+            isinstance(claim_ids, list)
+            and bool(claim_ids)
+            and all(isinstance(item, str) for item in claim_ids)
+            and set(claim_ids) <= accepted_ids
+            and not set(claim_ids) & contradicted_ids
+        )
+
+    def has_verified_operational_lifecycle(self, target: str, capability: str) -> bool:
+        try:
+            view = self.get_current(target, capability)
+        except KeyError:
+            return False
+        accepted_ids = set(view["accepted_claim_ids"])
+        contradicted_ids = {
+            warning["contradicted_claim_id"]
+            for warning in view["contradiction_warnings"]
+        }
+        return any(
+            claim["family"] == "lifecycle"
+            and claim["value"] == "OPERATIONAL"
+            and self._lifecycle_claim_is_trusted(claim, accepted_ids, contradicted_ids)
+            for claim in view["accepted_claims"]
+        )
 
     def render_markdown(
         self,
@@ -1233,7 +1279,16 @@ class SQLiteOperationalMemory:
             else:
                 raise ValueError(f"unknown rendering viewpoint mode: {mode}")
             lines.extend([f"## Capability: {key}", ""])
+            accepted_ids = set(view["accepted_claim_ids"])
+            contradicted_ids = {
+                warning["contradicted_claim_id"]
+                for warning in view["contradiction_warnings"]
+            }
             for claim in view["accepted_claims"]:
+                if not self._lifecycle_claim_is_trusted(
+                    claim, accepted_ids, contradicted_ids
+                ):
+                    continue
                 value = claim["value"]
                 display = canonical_json(value) if isinstance(value, (dict, list)) else str(value)
                 lines.append(f"- **{claim['family']}** [{claim['epistemic']}]: {display}")

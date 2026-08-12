@@ -56,6 +56,15 @@ class IntegrationBridgeRuntimeLookupTests(unittest.TestCase):
                 "value": {"status": "COMPLETE"},
                 "recorded_at": RECORDED_AT,
             })
+            writer.claim({
+                "id": "clm:example-radio:search:lifecycle:unverified",
+                "target_id": "tgt:example-radio",
+                "capability_id": "cap:example-radio:search",
+                "family": "lifecycle",
+                "epistemic": "OBSERVED",
+                "value": "OPERATIONAL",
+                "recorded_at": RECORDED_AT,
+            })
             writer.decision({
                 "id": "dec:example-radio:search:accept-transport",
                 "target_id": "tgt:example-radio",
@@ -72,6 +81,16 @@ class IntegrationBridgeRuntimeLookupTests(unittest.TestCase):
                 "capability_id": "cap:example-radio:search",
                 "action": "ACCEPT",
                 "claim_ids": ["clm:example-radio:search:completion:full"],
+                "effective_at": RECORDED_AT,
+                "recorded_at": RECORDED_AT,
+                "validity": {"valid_from": RECORDED_AT, "valid_to": None},
+            })
+            writer.decision({
+                "id": "dec:example-radio:search:accept-unverified-lifecycle",
+                "target_id": "tgt:example-radio",
+                "capability_id": "cap:example-radio:search",
+                "action": "ACCEPT",
+                "claim_ids": ["clm:example-radio:search:lifecycle:unverified"],
                 "effective_at": RECORDED_AT,
                 "recorded_at": RECORDED_AT,
                 "validity": {"valid_from": RECORDED_AT, "valid_to": None},
@@ -99,6 +118,7 @@ class IntegrationBridgeRuntimeLookupTests(unittest.TestCase):
         current = payload["operational_context"]["current"]
         self.assertIn("transport", current)
         self.assertIn("completion", current)
+        self.assertNotIn("lifecycle", current)
 
     def test_diagnostic_compatibility_remains_explicit(self) -> None:
         profile = self.root / "targets" / "example-radio.md"
