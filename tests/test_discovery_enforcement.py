@@ -7,6 +7,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 SKILL = REPO / "SKILL.md"
 TRANSPORT = REPO / "references" / "transport-and-modes.md"
+TARGET_PROFILE = REPO / "references" / "target-profile.md"
 
 
 class DiscoveryEnforcementContractTests(unittest.TestCase):
@@ -94,6 +95,35 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
         self.assertIn("DIRECT_READ -> LIGHTPANDA -> CHROME", text)
         self.assertIn("After Chrome-based Discovery, SIMPLIFY is mandatory", text)
         self.assertIn("Runs that stayed in **Operation** do not call the finalizer", text)
+
+    def test_live_web_target_scope_is_not_exempted_by_task_shape(self) -> None:
+        text = SKILL.read_text(encoding="utf-8")
+        self.assertIn("Any task that reads, navigates, or acts on a live web target is in scope here", text)
+        self.assertIn("not ruled out for being read-only, quick, QA, one-off", text)
+        self.assertIn("Skip this skill only when no live web target is involved at all", text)
+
+    def test_skill_line_budget_is_preserved(self) -> None:
+        self.assertLessEqual(len(SKILL.read_text(encoding="utf-8").splitlines()), 125)
+
+    def test_capability_identity_is_procedure_not_result(self) -> None:
+        text = TARGET_PROFILE.read_text(encoding="utf-8")
+        self.assertIn("Reusability is a property of the\nprocedure, never of the result", text)
+        self.assertIn("even though its result differs every run", text)
+        self.assertIn(
+            "Capability identity stays semantic\n-- never equated with a page, origin, transport, or the current result",
+            text,
+        )
+
+    def test_unfinalized_observation_is_not_accepted_knowledge(self) -> None:
+        text = TARGET_PROFILE.read_text(encoding="utf-8")
+        self.assertIn("accepted Operational Memory only once `discovery-finalize` succeeds", text)
+        self.assertIn("never accepted knowledge", text)
+        self.assertIn("never substitutes for lookup or Discovery on a later task", text)
+
+    def test_discovery_delivers_the_real_task_not_a_dry_run(self) -> None:
+        text = TRANSPORT.read_text(encoding="utf-8")
+        self.assertIn("Discovery executes and delivers the caller's actual task while it learns", text)
+        self.assertIn("not a preparatory or throwaway run before the real work", text)
 
 
 if __name__ == "__main__":

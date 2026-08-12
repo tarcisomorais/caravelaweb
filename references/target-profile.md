@@ -65,7 +65,11 @@ The capability ID identifies what reusable ability is learned; Operational
 Memory records how that ability works; a task result contains the current
 values returned by the ability. Thus `instructor-list` may retain a reusable
 extraction procedure, but neither its identity nor its reusable knowledge may
-contain the current instructor names.
+contain the current instructor names. Reusability is a property of the
+procedure, never of the result: a verification or QA action (does the page
+render, is a field present) is as valid a capability as an extraction action,
+even though its result differs every run. Capability identity stays semantic
+-- never equated with a page, origin, transport, or the current result.
 
 ## Knowledge Lookup
 
@@ -91,6 +95,8 @@ Lookup is capability-scoped and performs no web action, transport selection, kno
 Only reusable operating observations, evidence, and provenance belong in Discovery finalization. When a bounded Discovery has none, use `"observations": []`; this closes as `NOT_SAVED`. Never include task results, raw page dumps, runtime logs, browser-session state, credentials, private user data, business logic, editorial judgment, or speculative facts presented as truth.
 
 Local Operational Memory is writable by the installation's normal policy and is separate from web-action authority. Saving local knowledge never authorizes source-control publication, project-file changes, or external state changes. A successful, directly observed Discovery is available to the next lookup immediately; ambiguous or invalid knowledge is not used operationally. Diagnostic compatibility and repair procedures are not executor input.
+
+An observation made during an active Discovery may guide that same Discovery, but it is accepted Operational Memory only once `discovery-finalize` succeeds. An earlier task's unfinalized observation -- something merely seen, not saved -- is never accepted knowledge: it does not satisfy `knowledge-lookup`, and it never substitutes for lookup or Discovery on a later task.
 
 The public Discovery payload is a closed contract. Unknown wrapper, evidence,
 provenance, validation-context, contradiction-value, proof, or family-value

@@ -1,6 +1,6 @@
 ---
 name: caravelaweb
-description: Use for a web task on a marketplace, portal, or site: decide whether to run a known capability or bounded Discovery, choose DIRECT_READ, Lightpanda, or Chrome, and respect caller authority.
+description: Use for any task that reads, navigates, or acts on a live web target -- including QA, verification, or one-off checks, not only marketplace/portal/site lookups: decide whether to run a known capability or bounded Discovery, choose DIRECT_READ, Lightpanda, or Chrome, and respect caller authority.
 ---
 
 # CaravelaWeb
@@ -12,7 +12,7 @@ and `<skill>` is this skill directory. Always use the interpreter-prefixed form.
 
 ## Executor flow
 
-1. Identify the stable target ID and the requested capability. A hostname or URL reference resolves to that ID only through a recorded target<->host association, never by mechanical transformation of the hostname -- see `references/target-profile.md` -- so lookup and finalization always agree. First-time Discovery for a new target must supply its stable canonical ID directly. Do not use this skill for work that does not need web access.
+1. Identify the stable target ID and the requested capability. A hostname or URL reference resolves to that ID only through a recorded target<->host association, never by mechanical transformation of the hostname -- see `references/target-profile.md` -- so lookup and finalization always agree. First-time Discovery for a new target must supply its stable canonical ID directly. Any task that reads, navigates, or acts on a live web target is in scope here, decided before any tool path is chosen -- not ruled out for being read-only, quick, QA, one-off, or expected to return different results each run. Skip this skill only when no live web target is involved at all.
 2. Before minting a capability ID, inspect accepted capabilities with `<python> <skill>/scripts/knowledge-lookup --target <target-id>`.
 
    A capability ID is a stable reusable output, action, or intention in

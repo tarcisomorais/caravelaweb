@@ -1,6 +1,6 @@
 ---
 name: caravelaweb
-description: Use for a web task on a marketplace, portal, or site: decide whether to run a known capability or bounded Discovery, choose DIRECT_READ, Lightpanda, or Chrome, and respect caller authority.
+description: Use for any task that reads, navigates, or acts on a live web target -- including QA, verification, or one-off checks, not only marketplace/portal/site lookups: decide whether to run a known capability or bounded Discovery, choose DIRECT_READ, Lightpanda, or Chrome, and respect caller authority.
 ---
 
 # CaravelaWeb project-local discovery adapter

@@ -8,6 +8,8 @@
 
 Discovery does not expand authority — see `safety.md`. When a question can't be answered within current authority, record it `UNKNOWN` and stop; don't cross the boundary to complete the profile.
 
+Discovery executes and delivers the caller's actual task while it learns — it is not a preparatory or throwaway run before the real work.
+
 ### Five conceptual phases (not separate tools/commands)
 
 1. **IDENTIFY** — canonical origin, actual entrypoint, requested capability, initial access state, immediate blockers. Don't explore unrelated sections yet.
