@@ -9,6 +9,13 @@ SKILL = REPO / "SKILL.md"
 TRANSPORT = REPO / "references" / "transport-and-modes.md"
 TARGET_PROFILE = REPO / "references" / "target-profile.md"
 
+# The contract is loaded on every CaravelaWeb task, so its length is capped
+# deliberately rather than allowed to drift. Detail belongs in references/.
+# Raised from 125 when the First run readiness sequence moved into the
+# contract: it must be read before the first command, so a reference file
+# cannot carry it.
+SKILL_LINE_BUDGET = 140
+
 
 class DiscoveryEnforcementContractTests(unittest.TestCase):
     def test_discovery_requires_the_finalizer_before_completion(self) -> None:
@@ -47,7 +54,7 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
             "never repeat navigation or extraction",
         ):
             self.assertIn(rule, text)
-        self.assertLessEqual(len(text.splitlines()), 125)
+        self.assertLessEqual(len(text.splitlines()), SKILL_LINE_BUDGET)
 
     def test_one_page_absence_does_not_end_permitted_search(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
@@ -111,7 +118,7 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
         self.assertIn("Skip this skill only when no live web target is involved at all", text)
 
     def test_skill_line_budget_is_preserved(self) -> None:
-        self.assertLessEqual(len(SKILL.read_text(encoding="utf-8").splitlines()), 125)
+        self.assertLessEqual(len(SKILL.read_text(encoding="utf-8").splitlines()), SKILL_LINE_BUDGET)
 
     def test_capability_identity_is_procedure_not_result(self) -> None:
         text = TARGET_PROFILE.read_text(encoding="utf-8")

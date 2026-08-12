@@ -9,6 +9,8 @@ Thank you for helping improve CaravelaWeb.
 - Use a security report, not a public issue, for vulnerabilities.
 - Keep changes inside the repository-root skill boundary. Do not add package
   distribution scaffolding, a public Python SDK, or a nested skill directory.
+  The `.claude-plugin/` manifests are the one exception: they publish the
+  repository root itself as a Claude Code plugin and add no runtime layer.
 
 For behavior changes, describe the target capability, current result,
 expected result, platform, Python version, and a minimal synthetic

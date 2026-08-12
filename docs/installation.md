@@ -1,49 +1,154 @@
 # Installation
 
-CaravelaWeb runs directly from a repository checkout. It does not require or
-provide a package installation step.
+The supported public install is the Claude Code plugin. This page also covers
+alternative installs, developer mode, first-run behavior, optional browser
+transports, and removal.
 
 ## Prerequisites
 
-- Git
-- Python 3.11 or newer with standard-library SQLite support
-- An optional browser stack only when a capability cannot be satisfied by
-  direct reading
+- Python 3.11 or newer, including the standard-library `sqlite3` module
+- Claude Code 2.1.142 or newer
+- Windows, Linux, WSL2, or macOS
 
-Clone the repository:
+CaravelaWeb has no package-installation step and no Python dependencies.
 
-```bash
-git clone https://github.com/tarcisomorais/caravelaweb.git
-cd caravelaweb
-python3 --version
+## Install as a Claude Code plugin
+
+From any project:
+
+```text
+/plugin marketplace add tarcisomorais/caravelaweb
+/plugin install caravelaweb@caravelaweb
 ```
 
-On native Windows, the command is normally `python` or `py -3`. Any Python 3.11
-or newer works. Keep using that same interpreter for every CaravelaWeb command;
-`preflight` reports the exact interpreter path it ran under.
-
-## Create a Knowledge Root
-
-The normal path requires no location decision:
+Or, without an interactive step:
 
 ```bash
-python3 scripts/init-knowledge-root --json
+claude plugin marketplace add tarcisomorais/caravelaweb
+claude plugin install caravelaweb@caravelaweb
 ```
 
-The default data location is:
+The commands are identical on every supported platform. No symlink, junction,
+`PATH` entry, or elevated privilege is involved: Claude Code copies the plugin
+into its own versioned cache and loads the repository-root `SKILL.md` as the
+skill.
 
-- Linux and WSL2: `$XDG_DATA_HOME/caravelaweb/knowledge-root` when
-  `XDG_DATA_HOME` is set, otherwise
-  `~/.local/share/caravelaweb/knowledge-root`
+The plugin declares no `version`, so Claude Code versions it by the source
+commit. `/plugin update caravelaweb@caravelaweb` therefore moves you to the
+latest commit of the default branch. A numbered release policy is not yet
+established; see [CHANGELOG](../CHANGELOG.md).
+
+## First run
+
+The executor prepares readiness itself. On the first CaravelaWeb command of a
+new installation it runs `preflight`, creates the Knowledge Root if none is
+resolved, and reports where that local memory was created.
+
+The default location is:
+
+- Linux, WSL2, and macOS: `$XDG_DATA_HOME/caravelaweb/knowledge-root` when
+  `XDG_DATA_HOME` is set, otherwise `~/.local/share/caravelaweb/knowledge-root`
 - Native Windows: `%LOCALAPPDATA%\CaravelaWeb\knowledge-root`
 
-Initialization also stores a small remembered-root pointer in the same
-per-user application directory. To create or temporarily select another
-root, use an explicit flag or environment variable:
+That location is outside the plugin cache, so a plugin update never touches it.
+
+To choose another location, or to inspect readiness yourself, use the runtime
+commands below.
+
+## Alternative install: personal skill directory
+
+If you prefer a Git checkout you control, clone the repository straight into
+Claude Code's personal skill directory:
+
+```bash
+git clone https://github.com/tarcisomorais/caravelaweb.git ~/.claude/skills/caravelaweb
+```
+
+On native Windows, the destination is
+`%USERPROFILE%\.claude\skills\caravelaweb`.
+
+Claude Code discovers it with no install step, and `git pull` inside that
+directory updates it. Because the repository ships a plugin manifest, the entry
+loads as `caravelaweb@skills-dir`. Removing the directory removes the skill.
+
+Do not combine this with the plugin install: both would appear at once.
+
+## Developer mode
+
+To work on CaravelaWeb itself, load a checkout live instead of a cached copy:
+
+```bash
+claude --plugin-dir /path/to/caravelaweb
+```
+
+The repository also ships a one-time global link for the same purpose:
+
+```bash
+python3 scripts/register-host --host claude --json
+```
+
+This creates `~/.claude/skills/caravelaweb` as a symlink to the repository root
+on Linux, macOS, and WSL2, or a junction on native Windows. It never copies
+runtime files. It is a development convenience, not the public install path.
+
+Registration is idempotent and reports `ALREADY_REGISTERED` when correct. If
+the checkout moves, repair the link from its new location:
+
+```bash
+python3 scripts/register-host --host claude --check --json
+python3 scripts/register-host --host claude --relink --json
+```
+
+`--relink` only replaces a link that is already a CaravelaWeb-shaped
+registration. It refuses, with or without `--relink`, to touch a plain file or
+directory at that path.
+
+Opening Claude Code, Codex, or OpenCode directly in the checkout also works
+with no registration step, through the project-local files this repository
+ships:
+
+| Host | Discovery file in this repository | Invocation |
+| --- | --- | --- |
+| Claude Code | `CLAUDE.md` and `.claude/skills/caravelaweb/SKILL.md` | `/caravelaweb`, or Claude loads it when relevant |
+| Codex | `AGENTS.md` and `.agents/skills/caravelaweb/SKILL.md` | `/skills` or `$caravelaweb`, or implicit by description |
+| OpenCode | `AGENTS.md` and the same two skill directories | the native `skill` tool, invoked by the agent |
+
+`CLAUDE.md` imports `AGENTS.md`, so all three hosts read one set of project
+instructions. Both skill files are thin discovery adapters: they carry no
+runtime code and point back to the repository-root [SKILL.md](../SKILL.md). A
+checkout that is installed and also opened locally may show both entries; they
+resolve to the same canonical file, so this is expected.
+
+Codex and OpenCode have no verified global installation in this repository.
+
+## Runtime commands (advanced)
+
+| Command | Purpose |
+| --- | --- |
+| `scripts/init-knowledge-root` | Create an empty local Knowledge Root and Operational Memory. |
+| `scripts/preflight` | Report readiness, platform facts, and optional transport availability. |
+| `scripts/knowledge-lookup` | Read accepted knowledge for one target and optional capability. |
+| `scripts/discovery-finalize` | Validate and save reusable knowledge from a bounded Discovery. |
+| `scripts/register-host` | Link a checkout into Claude Code's per-user skill directory (developer mode). |
+
+Use one interpreter for every CaravelaWeb command; `preflight` reports the
+exact interpreter path it ran under. On native Windows, use `python` or `py -3`
+instead of `python3`. Each script supports `--help`.
+
+To create or select another Knowledge Root:
 
 ```bash
 python3 scripts/init-knowledge-root --knowledge-root /path/to/root --json
 export CARAVELAWEB_KNOWLEDGE_ROOT=/path/to/root
+```
+
+Resolution is deterministic:
+
+```text
+explicit --knowledge-root
+-> CARAVELAWEB_KNOWLEDGE_ROOT
+-> remembered root
+-> .caravelaweb-knowledge-root marker walk-up
 ```
 
 The initialized layout is installation-owned:
@@ -61,107 +166,68 @@ knowledge-root/
 Initialization refuses a location that already contains knowledge or
 incompatible state. It does not overwrite or import that content.
 
-## Verify readiness
-
-```bash
-python3 scripts/preflight --json
-```
-
-A ready installation reports `"status": "READY"`, an openable schema, and
-Operational Memory read/write authority. Preflight is read-only.
-
-Then verify the empty lookup boundary:
-
-```bash
-python3 scripts/knowledge-lookup --target example-site --capability search
-```
-
-The expected initial result is `not_found`, not an error.
-
-## Register with an agent host
-
-Normal use is from your own project, not from inside this checkout, so
-CaravelaWeb needs a one-time global registration with the agent host. This
-creates a single link at the host's per-user skill directory that points at
-this repository root; it never copies runtime files.
-
-For Claude Code:
-
-```bash
-python3 scripts/register-host --host claude --json
-```
-
-This creates `~/.claude/skills/caravelaweb` as:
-
-- a symlink to the repository root on Linux, macOS, and WSL2;
-- a junction to the repository root on native Windows (no symlink privilege
-  required).
-
-Registration is idempotent: rerunning it when already correctly registered
-reports `ALREADY_REGISTERED` and changes nothing. `git pull` in this checkout
-updates every project that uses the global registration; no re-registration
-is needed after an update.
-
-If the checkout is moved or deleted, the link goes stale. Check and repair it
-from the new checkout location:
-
-```bash
-python3 scripts/register-host --host claude --check --json
-python3 scripts/register-host --host claude --relink --json
-```
-
-`--relink` only replaces a link that is already a CaravelaWeb-shaped
-registration (pointing elsewhere, or pointing at a target that no longer
-exists). It refuses, with or without `--relink`, to touch a plain file or
-directory already at that path — remove it by hand first if you intend to
-register there.
-
-To uninstall, remove only the link itself (never delete through it):
-
-```bash
-rm ~/.claude/skills/caravelaweb          # Linux, macOS, WSL2
-rmdir %USERPROFILE%\.claude\skills\caravelaweb   # native Windows (junction)
-```
-
-Codex and OpenCode do not yet have a documented equivalent one-time global
-registration in this repository; their supported discovery model is
-checkout-local only (below) until verified.
-
-## Checkout-local discovery (contributors, or work inside this repository)
-
-Opening Claude Code, Codex, or OpenCode directly in this repository checkout
-works without any registration step: each host reads the project-local
-instruction and skill-discovery files this repository ships (`CLAUDE.md`,
-`AGENTS.md`, and the two `SKILL.md` adapters). See
-[Use with an agent host](../README.md#use-with-an-agent-host) for the file and
-invocation table.
-
-If this checkout is also globally registered (the normal case for its own
-maintainer), a session opened at or near the checkout may see both the
-global `caravelaweb` entry and the project-local adapter. Both resolve to the
-same canonical `SKILL.md`, so this is expected and harmless. From an
-unrelated project, only the global entry is present.
+`preflight` is read-only. A ready installation reports `"status": "READY"`, an
+openable schema, and Operational Memory read/write authority. A first lookup
+against an empty installation returns `not_found`, not an error.
 
 ## Optional browser transports
 
 CaravelaWeb does not install or vendor browsers. `agent-browser`, Lightpanda,
-and Chrome are optional upstream tools. `READY` still means only that the
-Knowledge Root and Operational Memory are ready. Preflight can therefore report
-**core READY; browser coverage incomplete** without failing core setup.
+and Chrome are optional upstream tools, and `DIRECT_READ` needs none of them.
 
-For browser-backed work, use the supported upstream `agent-browser` interface.
-With explicit user authorization, install it upstream, run `agent-browser install`
-when browser provisioning is required, and use `agent-browser doctor --json`
-for diagnosis. Preflight never performs those actions or launches a
-browser. Do not replace a missing or broken `agent-browser` with Playwright,
-Puppeteer, Selenium, CDP/MCP tooling, or another browser-control stack.
+`READY` means core storage is usable, not that browser coverage is complete.
+Preflight can report **core READY; browser coverage incomplete** without
+failing core setup. On native Windows, Lightpanda is `PLATFORM_UNSUPPORTED` and
+Chrome requires both `agent-browser` and a detected Chrome engine.
+
+With explicit user authorization, install `agent-browser` upstream, run
+`agent-browser install` when browser provisioning is required, and use
+`agent-browser doctor --json` for diagnosis. Preflight never performs those
+actions or launches a browser. Do not replace a missing or broken
+`agent-browser` with Playwright, Puppeteer, Selenium, CDP/MCP tooling, or
+another browser-control stack.
 
 See [platform support](platform-support.md) and
 [`references/external-dependencies.md`](../references/external-dependencies.md).
 
-## Update the checkout
+## Uninstall
 
-Update source with Git, then rerun the deterministic suite and preflight:
+Remove the plugin:
+
+```text
+/plugin uninstall caravelaweb@caravelaweb
+```
+
+Remove the marketplace entry too, if you no longer want it listed:
+
+```text
+/plugin marketplace remove caravelaweb
+```
+
+For the personal-skill-directory install, delete
+`~/.claude/skills/caravelaweb`. For a developer-mode link, remove only the link
+itself, never delete through it:
+
+```bash
+rm ~/.claude/skills/caravelaweb                  # Linux, macOS, WSL2
+rmdir %USERPROFILE%\.claude\skills\caravelaweb   # native Windows (junction)
+```
+
+### Remove the local memory
+
+Uninstalling never deletes your Knowledge Root. Delete it deliberately:
+
+```bash
+rm -rf ~/.local/share/caravelaweb                            # Linux, WSL2, macOS
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\CaravelaWeb"  # native Windows
+```
+
+This removes accepted knowledge for every target on this installation.
+
+## Update a checkout
+
+For the personal-skill-directory or developer-mode installs, update with Git
+and rerun the suite:
 
 ```bash
 git pull --ff-only

@@ -44,7 +44,7 @@ def main() -> int:
         else:
             print(f"status: INITIALIZED\nknowledge_root: {result.root}")
             print("This is now the default; future commands find it automatically, no --knowledge-root needed.")
-            print(f"To use a different root temporarily instead: export {KNOWLEDGE_ROOT_ENV}=<other-root>")
+            print(f"To use a different root temporarily: set the {KNOWLEDGE_ROOT_ENV} environment variable.")
         return 0
     # The Knowledge Root itself is fully valid and usable; only the
     # convenience pointer that lets future commands find it automatically
@@ -62,7 +62,7 @@ def main() -> int:
                 "warning": warning,
                 "next_steps": [
                     f"pass --knowledge-root {result.root} explicitly on future commands",
-                    f"or: export {KNOWLEDGE_ROOT_ENV}={result.root}",
+                    f"or set the {KNOWLEDGE_ROOT_ENV} environment variable to {result.root}",
                 ],
             },
             ensure_ascii=False, sort_keys=True,
@@ -70,7 +70,10 @@ def main() -> int:
     else:
         print(f"status: INITIALIZED\nknowledge_root: {result.root}")
         print(f"warning: {warning}")
-        print(f"Use it with --knowledge-root {result.root}, or: export {KNOWLEDGE_ROOT_ENV}={result.root}")
+        print(
+            f"Use it with --knowledge-root {result.root}, "
+            f"or set the {KNOWLEDGE_ROOT_ENV} environment variable to that path."
+        )
     return 1
 
 

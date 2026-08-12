@@ -2,9 +2,10 @@
 
 ## Claude Code
 
-Use the `caravelaweb` skill for web tasks. From an unrelated project, this
-requires a one-time global registration:
-`python3 <checkout>/scripts/register-host --host claude --json`. Opened
-directly in this checkout, `.claude/skills/caravelaweb/` is discovered with no
-registration step. Either way the repository-root `SKILL.md` stays the
-canonical contract, and the runtime always resolves from the repository root.
+Use the `caravelaweb` skill for web tasks. From an unrelated project, install
+the published plugin: `/plugin marketplace add tarcisomorais/caravelaweb`, then
+`/plugin install caravelaweb@caravelaweb`. Opened directly in this checkout,
+`.claude/skills/caravelaweb/` is discovered with no install step; to load a
+live checkout globally instead, use `claude --plugin-dir <checkout>` or
+`scripts/register-host`. Every path resolves from the skill root, which the
+contract calls `<skill>`, and the repository-root `SKILL.md` stays canonical.

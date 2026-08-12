@@ -8,7 +8,21 @@ description: Use for any task that reads, navigates, or acts on a live web targe
 Use this skill for requested web access. It is a routing policy, not a browser framework: use the simplest reliable transport that proves the requested capability.
 
 In commands below, `<python>` is the concrete interpreter shown by `preflight`
-and `<skill>` is this skill directory. Always use the interpreter-prefixed form.
+and `<skill>` is the skill root holding this file and `scripts/`: for a plugin
+install that root is `${CLAUDE_PLUGIN_ROOT}`, otherwise the repository root.
+Always use the interpreter-prefixed form.
+
+## First run
+
+Readiness is executor work, never a user setup step, and it stops repeating
+once an installation reports `READY`. Run `<python> <skill>/scripts/preflight`
+and continue on `READY`. When no Knowledge Root resolves, run
+`<python> <skill>/scripts/init-knowledge-root` once, say in one line where that
+local memory was created, and continue. When Python is below the supported
+floor, or preflight is still not `READY`, stop and report the blocker.
+Incomplete browser coverage never blocks this; `DIRECT_READ` needs no browser.
+Never ask the caller to run these commands, and never replace a Knowledge Root
+the caller supplied.
 
 ## Executor flow
 
@@ -35,7 +49,8 @@ and `<skill>` is this skill directory. Always use the interpreter-prefixed form.
    | --- | --- |
    | `found` | Read the returned accepted capability context. |
    | `not_found` | Enter bounded Discovery if the caller authorizes it. |
-   | `unresolved` or `bridge_error` | Stop: accepted knowledge could not be consulted. |
+   | `unresolved` | Run **First run** once, then retry the lookup. If it stays `unresolved`, stop: accepted knowledge could not be consulted. |
+   | `bridge_error` | Stop: accepted knowledge could not be consulted. |
 
    Lookup returns accepted knowledge without silently substituting historical knowledge. Do not use diagnostic, compatibility, database-override, or repair options.
 

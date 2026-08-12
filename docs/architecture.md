@@ -31,15 +31,38 @@ Their production import closure is deliberately small:
 Everything under `tests/` is test-only infrastructure, including the frozen
 conformance query harness and synthetic fixture.
 
+## Distribution
+
+The repository is the unit of distribution. `.claude-plugin/marketplace.json`
+publishes one plugin whose source is the repository root, and
+`.claude-plugin/plugin.json` names it. The repository is therefore both the
+marketplace and the plugin, and the root `SKILL.md` is loaded as the plugin's
+single skill.
+
+Claude Code copies an installed plugin into its own versioned cache, so the
+skill root differs per install:
+
+| Install | Skill root |
+| --- | --- |
+| Plugin | The cached copy, addressable as `${CLAUDE_PLUGIN_ROOT}` |
+| Personal skill directory, or a link into it | The checkout |
+| Checkout opened directly | The checkout |
+
+The contract refers to that root as `<skill>` in every host, so no runtime path
+is host-specific. The cached root is replaced on update and must never hold
+state; every writable path CaravelaWeb owns lives under the Knowledge Root and
+the per-user application directory instead.
+
 ## Host registration
 
 `scripts/register-host` (import closure: `host_registration.py`) is a
 separate concern from the runtime surface above: it manages one link (a
 POSIX symlink or Windows junction) at a supported agent host's per-user
-skill directory, pointing at this repository root, so the checkout is
+skill directory, pointing at this repository root, so a checkout is
 discoverable from unrelated repositories. It never copies runtime files,
 never touches Knowledge Root state, and never installs browser
-dependencies. See [installation](installation.md#register-with-an-agent-host).
+dependencies. It is developer tooling, not the public install path. See
+[installation](installation.md#developer-mode).
 
 ## Runtime flow
 

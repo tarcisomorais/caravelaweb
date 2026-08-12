@@ -1,6 +1,11 @@
 """Agent-host discovery, checked structurally.
 
-Two independent surfaces are covered here:
+Three independent surfaces are covered here:
+
+- Plugin distribution (Claude Code): the public install reads
+  ``.claude-plugin/marketplace.json`` and ``.claude-plugin/plugin.json`` from
+  a fresh clone, and loads the repository-root ``SKILL.md`` as the plugin's
+  single skill. See ``PluginDistributionTests`` below.
 
 - Checkout-local discovery: a host opened directly in a fresh clone must find
   CaravelaWeb with no registration step. That depends on tracked files: root
@@ -15,6 +20,7 @@ Two independent surfaces are covered here:
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -25,6 +31,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 REGISTER_HOST = REPO / "scripts" / "register-host"
+PLUGIN_MANIFEST = Path(".claude-plugin/plugin.json")
+MARKETPLACE_MANIFEST = Path(".claude-plugin/marketplace.json")
 
 ADAPTERS = (
     Path(".claude/skills/caravelaweb/SKILL.md"),  # Claude Code, and OpenCode
@@ -49,6 +57,11 @@ def tracked() -> set[str]:
         text=True, capture_output=True, check=True,
     ).stdout
     return set(output.splitlines())
+
+
+def tracked_root_entries() -> set[str]:
+    """Top-level names a fresh clone (and therefore the plugin cache) holds."""
+    return {name.split("/", 1)[0] for name in tracked()}
 
 
 class CheckoutLocalDiscoveryTests(unittest.TestCase):
@@ -97,6 +110,55 @@ class CheckoutLocalDiscoveryTests(unittest.TestCase):
         # Claude Code does not read AGENTS.md; the text import keeps one policy
         # document without a Windows-hostile symlink.
         self.assertIn("@AGENTS.md", claude)
+
+
+class PluginDistributionTests(unittest.TestCase):
+    """The published Claude Code plugin, checked from tracked files only.
+
+    A consumer never sees this working tree: Claude Code clones the
+    repository, reads the marketplace catalog, and copies the plugin source
+    into its own cache. Every assertion here therefore runs against tracked
+    content and the documented single-skill-at-plugin-root layout.
+    """
+
+    def setUp(self) -> None:
+        self.plugin = json.loads((REPO / PLUGIN_MANIFEST).read_text(encoding="utf-8"))
+        self.marketplace = json.loads((REPO / MARKETPLACE_MANIFEST).read_text(encoding="utf-8"))
+
+    def test_both_manifests_are_tracked(self) -> None:
+        files = tracked()
+        for relative in (PLUGIN_MANIFEST, MARKETPLACE_MANIFEST):
+            with self.subTest(file=relative):
+                self.assertIn(relative.as_posix(), files, f"untracked: {relative}")
+
+    def test_marketplace_publishes_the_repository_root_as_one_plugin(self) -> None:
+        entries = self.marketplace["plugins"]
+        self.assertEqual(1, len(entries), f"expected exactly one plugin entry: {entries}")
+        self.assertEqual("./", entries[0]["source"])
+        self.assertIn("name", self.marketplace["owner"])
+
+    def test_one_name_identifies_the_marketplace_entry_plugin_and_skill(self) -> None:
+        # These three names are what a user types and what Claude Code
+        # namespaces the skill with; drift between them breaks the documented
+        # `/plugin install caravelaweb@caravelaweb` install.
+        self.assertEqual("caravelaweb", self.marketplace["name"])
+        self.assertEqual("caravelaweb", self.marketplace["plugins"][0]["name"])
+        self.assertEqual("caravelaweb", self.plugin["name"])
+        self.assertEqual("caravelaweb", frontmatter_name(REPO / "SKILL.md"))
+
+    def test_single_skill_at_plugin_root_layout_is_preserved(self) -> None:
+        # Claude Code loads a root SKILL.md as the plugin's single skill only
+        # while the plugin declares no skills/ directory and no skills field.
+        self.assertNotIn("skills", self.plugin)
+        self.assertNotIn("skills", self.marketplace["plugins"][0])
+        self.assertFalse((REPO / "skills").exists(), "a skills/ tree would shadow the root SKILL.md")
+
+    def test_plugin_root_holds_no_installation_state(self) -> None:
+        # The cached plugin directory is replaced on every update, so nothing
+        # writable may be published inside it.
+        for name in (".caravelaweb", ".caravelaweb-knowledge-root", "targets"):
+            with self.subTest(entry=name):
+                self.assertNotIn(name, tracked_root_entries())
 
 
 def fake_home_env(home: Path) -> dict[str, str]:
