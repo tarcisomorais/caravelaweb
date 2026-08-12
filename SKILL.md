@@ -13,7 +13,17 @@ and `<skill>` is this skill directory. Always use the interpreter-prefixed form.
 ## Executor flow
 
 1. Identify the stable target ID and the requested capability. A hostname or URL reference resolves to that ID only through a recorded target<->host association, never by mechanical transformation of the hostname -- see `references/target-profile.md` -- so lookup and finalization always agree. First-time Discovery for a new target must supply its stable canonical ID directly. Do not use this skill for work that does not need web access.
-2. Consult accepted knowledge for that exact capability before calling it unknown:
+2. Before minting a capability ID, inspect accepted capabilities with `<python> <skill>/scripts/knowledge-lookup --target <target-id>`.
+
+   A capability ID is a stable reusable output, action, or intention in
+   lower-kebab-case (`[a-z0-9]+(?:-[a-z0-9]+)*`). Lookup and finalization
+   normalize spaces, underscores, and punctuation to hyphens and reject an
+   empty result. They do not stem, singularize, translate, remove words, or
+   fuzzy-match. Reuse an accepted ID only when its reusable output/action,
+   material scope, authority/access boundary, and completion condition are
+   clearly equivalent; otherwise keep the capabilities distinct.
+
+   Then consult accepted knowledge for the selected exact capability before calling it unknown:
 
    ```text
    <python> <skill>/scripts/knowledge-lookup --target <target-id> --capability <capability>
@@ -76,7 +86,7 @@ and `<skill>` is this skill directory. Always use the interpreter-prefixed form.
    <python> <skill>/scripts/discovery-finalize --input <discovery.json>
    ```
 
-   The finalizer resolves the same installation root as lookup and saves successful reusable operating knowledge in the installation's local Operational Memory. The input holds bounded reusable operating observations, evidence, and run provenance; when none are reusable, set `"observations": []`. Never include task results (found articles, shop lists, or current results or prices), raw logs, complete HTML, or browser-session state. This local write does not authorize Git, project files, or external state changes.
+   The finalizer resolves the same installation root as lookup and saves successful reusable operating knowledge in the installation's local Operational Memory. The capability ID says what reusable ability is being learned; Operational Memory says how that ability works; the task result is the current values returned by it and is never capability identity or reusable result data. For example, `instructor-list` may retain a reusable extraction procedure but never current instructor names. The input holds bounded reusable operating observations, evidence, and run provenance; when none are reusable, set `"observations": []`. Never include task results (found articles, shop lists, or current results or prices), raw logs, complete HTML, or browser-session state. This local write does not authorize Git, project files, or external state changes.
 
    Report only `SAVED`, `ALREADY_EXISTS`, or `NOT_SAVED` to the normal user flow. `SAVED` is immediately available to lookup; `ALREADY_EXISTS` means no duplicate was created; `NOT_SAVED` means the result was not added to accepted knowledge. A finalizer error means **Discovery finalization is incomplete** and must never be silently described as a completed Discovery, even if the task result can be reported. Runs that stayed in **Operation** do not call the finalizer.
 
@@ -89,7 +99,7 @@ and `<skill>` is this skill directory. Always use the interpreter-prefixed form.
    Example:
 
    ```json
-   {"target": "example-site", "capability": "search_results",
+   {"target": "example-site", "capability": "search-results",
     "observations": [{"family": "transport", "host": "www.example.com",
       "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"},
       "validation": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL",

@@ -90,6 +90,17 @@ class TargetIdentityError(MemoryError):
 
 
 _CANONICAL_TARGET_ID = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+_CANONICAL_CAPABILITY_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+def normalize_capability_id(value: str) -> str:
+    """Normalize one capability reference to its stable lower-kebab ID."""
+    if not isinstance(value, str):
+        raise RecordValidationError("capability must be a non-empty string")
+    normalized = re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
+    if not normalized or not _CANONICAL_CAPABILITY_ID.fullmatch(normalized):
+        raise RecordValidationError("capability must normalize to lower-kebab-case")
+    return normalized
 
 
 def _is_ip_literal(host: str) -> bool:

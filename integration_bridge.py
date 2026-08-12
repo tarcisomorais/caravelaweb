@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +10,7 @@ from typing import Any, Mapping
 from read_authority import ReadAuthorityStateError, read_cutover_active
 
 from operational_memory import MemoryError as OperationalMemoryError, SQLiteOperationalMemory
+from operational_memory.core import normalize_capability_id
 
 
 class BridgeError(Exception):
@@ -25,12 +25,6 @@ class LookupResult:
     profile_path: str | None = None
     operational_context: Mapping[str, Any] | None = None
     markdown_projection: str | None = None
-
-
-def _slug(value: str) -> str:
-    value = value.strip().lower().replace("_", "-")
-    value = re.sub(r"[^a-z0-9]+", "-", value).strip("-")
-    return value or "unknown"
 
 
 DEFAULT_OPERATIONAL_MEMORY_RELATIVE_PATH = Path(".caravelaweb") / "operational_memory.db"
@@ -60,7 +54,7 @@ class KnowledgeLookupBoundary:
         caller_context: Mapping[str, Any] | None = None,
     ) -> LookupResult:
         target = target.removesuffix(".md")
-        capability = _slug(capability) if capability else None
+        capability = normalize_capability_id(capability) if capability is not None else None
         if use_operational_memory and use_legacy:
             raise BridgeError("legacy and Operational Memory lookup modes are mutually exclusive")
         try:

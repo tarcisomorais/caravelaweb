@@ -45,12 +45,35 @@ target-wide (see Capability and Host Scope below). It is the same
 mechanism target-reference resolution reads from, but it is never collapsed
 into or derived from the target ID.
 
+## Capability ID Naming Convention
+
+Capability IDs are target-scoped, stable lower-kebab-case identifiers matching
+`[a-z0-9]+(?:-[a-z0-9]+)*`. Spaces, underscores, and punctuation normalize to
+hyphens, so `Instructor List`, `instructor-list`, `instructor_list`, and
+`instructor / list` all become `instructor-list`; an empty normalized value is
+invalid. Normalization never stems, singularizes, translates, removes words,
+or uses fuzzy matching.
+
+Before minting an ID, run target-only `knowledge-lookup --target <target-id>`
+and inspect its accepted capability IDs. Reuse one only when the actual
+capability contract has the same reusable output or action, material scope,
+authority/access boundary, and completion condition. Semantic synonyms are
+never merged automatically: `instructors`, `coaches`, `team`, and
+`instructor-directory` remain distinct when equivalence is absent or uncertain.
+
+The capability ID identifies what reusable ability is learned; Operational
+Memory records how that ability works; a task result contains the current
+values returned by the ability. Thus `instructor-list` may retain a reusable
+extraction procedure, but neither its identity nor its reusable knowledge may
+contain the current instructor names.
+
 ## Knowledge Lookup
 
 Before treating a capability as unknown, run `knowledge-lookup` with the
 concrete interpreter and skill path reported by preflight:
 
 ```text
+<python> <skill>/scripts/knowledge-lookup --target example-jobs
 <python> <skill>/scripts/knowledge-lookup --target example-jobs --capability project_listings
 <python> <skill>/scripts/knowledge-lookup --knowledge-root <explicit-root> --target example-jobs --capability project_listings
 ```

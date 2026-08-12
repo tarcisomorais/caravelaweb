@@ -21,8 +21,8 @@ from om_native_writes import (
 )
 from operational_memory.core import (
     EPISTEMIC_CLASSES, SQLiteOperationalMemory, TargetIdentityError,
-    is_canonical_target_id, normalize_host_reference, validate_public_hostname,
-    validate_timestamp,
+    is_canonical_target_id, normalize_capability_id, normalize_host_reference,
+    RecordValidationError, validate_public_hostname, validate_timestamp,
 )
 from transport_policy import PLATFORM_UNSUPPORTED
 
@@ -50,10 +50,6 @@ _SCHEMA_FIELD_PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-
 
 def _is_schema_field_path(value: Any) -> bool:
     return isinstance(value, str) and bool(_SCHEMA_FIELD_PATH.match(value))
-
-
-def _scope_key(value: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", value.strip().lower().replace("_", "-")).strip("-")
 
 
 def _resolve_target_argument(memory: SQLiteOperationalMemory, target: str) -> str:
@@ -550,12 +546,13 @@ def finalize_discovery(
     write_destination: str | None = WRITE_DESTINATION, authority_at_operation: str = WRITE_DESTINATION,
 ) -> DiscoveryFinalization:
     """Finalize Discovery into local OM, accepting only direct observations."""
-    if not isinstance(target, str) or not target.strip() or not isinstance(capability, str) or not capability.strip():
+    if not isinstance(target, str) or not target.strip():
         raise DiscoveryFinalizationError("target and capability are required")
     target = _resolve_target_argument(memory, target)
-    capability = _scope_key(capability)
-    if not target or not capability:
-        raise DiscoveryFinalizationError("target and capability are required")
+    try:
+        capability = normalize_capability_id(capability)
+    except RecordValidationError as exc:
+        raise DiscoveryFinalizationError(str(exc)) from exc
     # Validate authority before examining or normalizing Discovery output.  This
     # deliberately fails closed when the installation is not OM-writable.
     from om_native_writes import assert_om_native_write_authority
