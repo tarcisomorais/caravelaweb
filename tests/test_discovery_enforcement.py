@@ -96,6 +96,14 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
         self.assertIn("After Chrome-based Discovery, SIMPLIFY is mandatory", text)
         self.assertIn("Runs that stayed in **Operation** do not call the finalizer", text)
 
+    def test_missing_browser_control_never_authorizes_a_substitute_stack(self) -> None:
+        for text in (SKILL.read_text(encoding="utf-8"), TRANSPORT.read_text(encoding="utf-8")):
+            self.assertIn("Playwright", text)
+            self.assertIn("Puppeteer", text)
+            self.assertIn("Selenium", text)
+            self.assertIn("explicit user authorization", text)
+            self.assertIn("substitute", text)
+
     def test_live_web_target_scope_is_not_exempted_by_task_shape(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
         self.assertIn("Any task that reads, navigates, or acts on a live web target is in scope here", text)

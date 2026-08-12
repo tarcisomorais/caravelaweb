@@ -23,6 +23,14 @@ repository and use its four command-line entry points directly.
 `DIRECT_READ` has no browser dependency. Missing optional transports do not
 prevent initialization or direct-read workflows.
 
+`READY` means core storage is usable, not that optional browser coverage is
+complete. On native Windows, DIRECT_READ is supported, Lightpanda is
+`PLATFORM_UNSUPPORTED`, and CHROME requires both `agent-browser` and a detected
+Chrome engine. If `agent-browser` is missing or broken, do not substitute
+Playwright, Puppeteer, Selenium, or CDP/MCP tooling; report incomplete browser
+coverage and offer upstream `agent-browser` setup only with explicit user
+authorization.
+
 ## Quick start
 
 ```bash

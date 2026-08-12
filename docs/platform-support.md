@@ -31,12 +31,19 @@ move or rewrite an installation.
 | Component | Linux / WSL2 | Native Windows | macOS |
 | --- | --- | --- | --- |
 | `agent-browser` | Optional | Optional | Unvalidated |
-| Chrome | Optional | Optional | Unvalidated |
-| Lightpanda | Optional | Platform unsupported; use WSL2 | Unvalidated |
+| Chrome | Optional | Supported when `agent-browser` and Chrome are detected | Unvalidated |
+| Lightpanda | Optional | Platform unsupported natively | Unvalidated |
 
 When Lightpanda is physically unavailable on a platform, that fact produces
 no target observation, Candidate, or degradation. After DIRECT_READ is shown
 insufficient, Chrome may be tested if available.
+
+On native Windows, DIRECT_READ is supported; Lightpanda remains
+`PLATFORM_UNSUPPORTED`; and CHROME is available only when the supported
+`agent-browser` control interface and a Chrome engine are both present.
+`READY` does not promise this optional browser coverage. A separate,
+intentionally chosen Linux/WSL2 runtime may support Lightpanda; CaravelaWeb
+does not bridge Windows and WSL2 or share runtime state automatically.
 
 ## Encoding and markers
 

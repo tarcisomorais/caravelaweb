@@ -103,6 +103,8 @@ CaravelaWeb selects engines and interprets results; it does not implement them. 
 
 `agent-browser` is a shell CLI, not a registered agent tool/MCP entry. Never conclude "Chrome/Lightpanda unavailable" from an empty tool/MCP registry search — that only checks whether the host agent has a native browser tool, not whether the runtime dependency exists. Check the shell directly (e.g. `agent-browser --version`) before recording a browser transport as unavailable.
 
+If `agent-browser` is unavailable or broken, browser coverage is incomplete. Report the local prerequisite and stop: do not install, bootstrap, or substitute Playwright, Puppeteer, Selenium, Chrome DevTools/CDP/MCP tooling, or another browser-control stack merely to continue the task. The only supported remediation is upstream `agent-browser` setup, proposed or performed only with explicit user authorization.
+
 ## Browser Session Isolation
 
 Browser-backed transports (Lightpanda, Chrome) run through a stateful `agent-browser` session. **Every browser-backed workflow must use an explicit `--session <name>`** — no session name means shared default state, which causes collisions in concurrent environments.

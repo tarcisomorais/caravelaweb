@@ -68,6 +68,7 @@ and `<skill>` is this skill directory. Always use the interpreter-prefixed form.
    Operation uses its validated transport. In Discovery, first test whether `DIRECT_READ` satisfies the requested result; Chrome is the behavioral baseline when browser Discovery is necessary. After Chrome-based Discovery, SIMPLIFY is mandatory: validate Lightpanda, then `DIRECT_READ`, against the same capability. Chrome remains valid when neither simpler transport preserves it.
 
    Every browser workflow uses an explicit isolated session: `agent-browser --session <name>`. A bounded workflow may reuse its own session; unrelated or concurrent workflows may not share one.
+   If `agent-browser` is missing or broken, report browser coverage incomplete and stop browser escalation: never install, bootstrap, or substitute Playwright, Puppeteer, Selenium, CDP/MCP tooling, or another browser-control stack. Offer the upstream `agent-browser` setup only with explicit user authorization.
 
    **Stopping rules for direct work:**
    - Start with one suitable direct implementation and stop by field coverage, never merely by page, source, tool, or call count; do not impose a global maximum. Before concluding, classify every required field as directly confirmed; inferred with uncertainty explicit; contradictory and reported; unconfirmed after sufficient search of relevant permitted surfaces; or inaccessible because of an observed constraint. Absence from one page is not evidence of absence from the permitted scope.

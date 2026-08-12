@@ -145,8 +145,18 @@ unrelated project, only the global entry is present.
 ## Optional browser transports
 
 CaravelaWeb does not install or vendor browsers. `agent-browser`, Lightpanda,
-and Chrome are optional upstream tools. Preflight reports their observed
-availability; see [platform support](platform-support.md) and
+and Chrome are optional upstream tools. `READY` still means only that the
+Knowledge Root and Operational Memory are ready. Preflight can therefore report
+**core READY; browser coverage incomplete** without failing core setup.
+
+For browser-backed work, use the supported upstream `agent-browser` interface.
+With explicit user authorization, install it upstream, run `agent-browser install`
+when browser provisioning is required, and use `agent-browser doctor --json`
+for diagnosis. Preflight never performs those actions or launches a
+browser. Do not replace a missing or broken `agent-browser` with Playwright,
+Puppeteer, Selenium, CDP/MCP tooling, or another browser-control stack.
+
+See [platform support](platform-support.md) and
 [`references/external-dependencies.md`](../references/external-dependencies.md).
 
 ## Update the checkout

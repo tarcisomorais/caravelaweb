@@ -70,10 +70,13 @@ class PlatformAdapterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "targets").mkdir()
-            with patch.dict("os.environ", {KNOWLEDGE_ROOT_ENV: str(root)}, clear=False):
+            with patch.dict("os.environ", {KNOWLEDGE_ROOT_ENV: str(root)}, clear=True):
                 self.assertEqual(root.resolve(), resolve_knowledge_root(start=root))
             # Without the env var (and with no marker to walk up to), unresolved.
-            self.assertIsNone(resolve_knowledge_root(start=root))
+            with patch.dict("os.environ", {}, clear=True), patch(
+                "platform_adapter.read_configured_knowledge_root", return_value=None
+            ):
+                self.assertIsNone(resolve_knowledge_root(start=root))
 
     def test_explicit_override_wins_over_the_env_var(self) -> None:
         with tempfile.TemporaryDirectory() as env_directory, tempfile.TemporaryDirectory() as override_directory:
