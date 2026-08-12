@@ -78,13 +78,69 @@ python3 scripts/knowledge-lookup --target example-site --capability search
 
 The expected initial result is `not_found`, not an error.
 
-## Use with an agent host
+## Register with an agent host
 
-Start Claude Code, Codex, or OpenCode in the repository root. Each host reads the
-project-local instruction and skill-discovery files that this repository already
-ships, so no user-home installation, symlink, or junction is required. See
+Normal use is from your own project, not from inside this checkout, so
+CaravelaWeb needs a one-time global registration with the agent host. This
+creates a single link at the host's per-user skill directory that points at
+this repository root; it never copies runtime files.
+
+For Claude Code:
+
+```bash
+python3 scripts/register-host --host claude --json
+```
+
+This creates `~/.claude/skills/caravelaweb` as:
+
+- a symlink to the repository root on Linux, macOS, and WSL2;
+- a junction to the repository root on native Windows (no symlink privilege
+  required).
+
+Registration is idempotent: rerunning it when already correctly registered
+reports `ALREADY_REGISTERED` and changes nothing. `git pull` in this checkout
+updates every project that uses the global registration; no re-registration
+is needed after an update.
+
+If the checkout is moved or deleted, the link goes stale. Check and repair it
+from the new checkout location:
+
+```bash
+python3 scripts/register-host --host claude --check --json
+python3 scripts/register-host --host claude --relink --json
+```
+
+`--relink` only replaces a link that is already a CaravelaWeb-shaped
+registration (pointing elsewhere, or pointing at a target that no longer
+exists). It refuses, with or without `--relink`, to touch a plain file or
+directory already at that path — remove it by hand first if you intend to
+register there.
+
+To uninstall, remove only the link itself (never delete through it):
+
+```bash
+rm ~/.claude/skills/caravelaweb          # Linux, macOS, WSL2
+rmdir %USERPROFILE%\.claude\skills\caravelaweb   # native Windows (junction)
+```
+
+Codex and OpenCode do not yet have a documented equivalent one-time global
+registration in this repository; their supported discovery model is
+checkout-local only (below) until verified.
+
+## Checkout-local discovery (contributors, or work inside this repository)
+
+Opening Claude Code, Codex, or OpenCode directly in this repository checkout
+works without any registration step: each host reads the project-local
+instruction and skill-discovery files this repository ships (`CLAUDE.md`,
+`AGENTS.md`, and the two `SKILL.md` adapters). See
 [Use with an agent host](../README.md#use-with-an-agent-host) for the file and
 invocation table.
+
+If this checkout is also globally registered (the normal case for its own
+maintainer), a session opened at or near the checkout may see both the
+global `caravelaweb` entry and the project-local adapter. Both resolve to the
+same canonical `SKILL.md`, so this is expected and harmless. From an
+unrelated project, only the global entry is present.
 
 ## Optional browser transports
 

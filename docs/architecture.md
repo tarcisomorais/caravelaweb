@@ -6,7 +6,7 @@ directory and no package-installation layer.
 
 ## Public runtime boundary
 
-Four CLI entry points form the supported surface:
+Four CLI entry points form the supported runtime surface:
 
 - `scripts/init-knowledge-root`
 - `scripts/preflight`
@@ -30,6 +30,16 @@ Their production import closure is deliberately small:
 
 Everything under `tests/` is test-only infrastructure, including the frozen
 conformance query harness and synthetic fixture.
+
+## Host registration
+
+`scripts/register-host` (import closure: `host_registration.py`) is a
+separate concern from the runtime surface above: it manages one link (a
+POSIX symlink or Windows junction) at a supported agent host's per-user
+skill directory, pointing at this repository root, so the checkout is
+discoverable from unrelated repositories. It never copies runtime files,
+never touches Knowledge Root state, and never installs browser
+dependencies. See [installation](installation.md#register-with-an-agent-host).
 
 ## Runtime flow
 

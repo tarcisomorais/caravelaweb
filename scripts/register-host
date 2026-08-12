@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+"""Register this checkout as the global caravelaweb skill for a supported agent host."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+SKILL_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SKILL_ROOT))
+
+from host_registration import RegistrationError, SUPPORTED_HOSTS, register, registration_state
+from platform_adapter import configure_utf8_stdio
+
+configure_utf8_stdio()
+
+
+def _print(payload: dict[str, object], *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return
+    for key in ("status", "link", "target", "points_to", "reason"):
+        if key in payload and payload[key] is not None:
+            print(f"{key}: {payload[key]}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Register this checkout as the global caravelaweb skill for a supported agent host"
+    )
+    parser.add_argument("--host", required=True, choices=SUPPORTED_HOSTS)
+    parser.add_argument(
+        "--check", action="store_true", help="report the current registration state; make no changes"
+    )
+    parser.add_argument(
+        "--relink", action="store_true", help="replace a conflicting or dangling registration link"
+    )
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+
+    try:
+        if args.check:
+            info = registration_state(args.host)
+            payload = {
+                "status": info["state"],
+                "link": str(info["link"]),
+                "target": str(info["target"]),
+                "points_to": str(info["points_to"]) if info["points_to"] else None,
+            }
+            _print(payload, as_json=args.json)
+            return 0 if info["state"] in ("ABSENT", "REGISTERED") else 1
+
+        result = register(args.host, relink=args.relink)
+    except RegistrationError as error:
+        _print({"status": "REFUSED", "reason": str(error)}, as_json=args.json)
+        return 2
+
+    _print(
+        {"status": result.status, "link": str(result.link), "target": str(result.target)},
+        as_json=args.json,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

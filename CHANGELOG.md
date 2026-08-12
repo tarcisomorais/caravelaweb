@@ -17,10 +17,15 @@ under **Unreleased** until a version and tag are intentionally chosen.
 - Linux and native-Windows continuous integration.
 - Public installation, architecture, platform, security, and contribution
   documentation.
-- Project-local agent-host onboarding: `AGENTS.md`, a `CLAUDE.md` that imports
-  it, and thin `caravelaweb` skill-discovery adapters under `.claude/skills/`
-  and `.agents/skills/`. A fresh clone is discoverable by Claude Code, Codex,
-  and OpenCode with no user-home installation, symlink, or junction.
+- Checkout-local agent-host onboarding: `AGENTS.md`, a `CLAUDE.md` that
+  imports it, and thin `caravelaweb` skill-discovery adapters under
+  `.claude/skills/` and `.agents/skills/`. A host opened directly in a fresh
+  clone discovers CaravelaWeb with no registration step.
+- `scripts/register-host --host claude`: one-time global registration of the
+  canonical checkout with Claude Code's per-user skill directory (a symlink
+  on Linux/macOS/WSL2, a junction on native Windows), so CaravelaWeb is
+  usable from unrelated repositories. Codex and OpenCode global registration
+  is not yet implemented.
 
 ### Changed
 

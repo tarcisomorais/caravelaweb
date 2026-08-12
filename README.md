@@ -76,16 +76,31 @@ python3 scripts/discovery-finalize --input discovery.json
 | `scripts/preflight` | Report readiness, platform facts, and optional transport availability. |
 | `scripts/knowledge-lookup` | Read accepted knowledge for one target and optional capability. |
 | `scripts/discovery-finalize` | Validate and save reusable knowledge from a bounded Discovery. |
+| `scripts/register-host` | Register this checkout as the global `caravelaweb` skill for a supported agent host. |
 
 Use the same Python interpreter reported by `preflight`. Each script supports
 `--help` for its exact command contract.
 
 ## Use with an agent host
 
-Onboarding is three steps: clone the repository, initialize the Knowledge Root,
-then open the checkout with a supported agent host. Step three needs no
-user-home installation, symlink, or junction: the repository ships project-local
-discovery files, and the repository root stays the canonical skill root.
+Normal use is from your own project. For Claude Code, register the canonical
+checkout once, globally, then use it from any repository:
+
+```bash
+python3 scripts/register-host --host claude --json
+```
+
+This creates `~/.claude/skills/caravelaweb` as a symlink (Linux, macOS, WSL2)
+or junction (native Windows) pointing at this repository root — no runtime
+files are copied. `git pull` in this checkout updates every project that uses
+it. See [Installation](docs/installation.md#register-with-an-agent-host) for
+repair, uninstall, and moved-checkout guidance.
+
+Codex and OpenCode do not yet have a documented equivalent global registration
+in this repository.
+
+Opening a host directly in this checkout also works with no registration
+step, via project-local discovery files this repository ships:
 
 | Host | Discovery file in this repository | Invocation |
 | --- | --- | --- |
@@ -95,7 +110,9 @@ discovery files, and the repository root stays the canonical skill root.
 
 `CLAUDE.md` imports `AGENTS.md`, so all three hosts read one set of project
 instructions. Both skill files are thin discovery adapters: they carry no runtime
-code and point back to the repository-root [SKILL.md](SKILL.md).
+code and point back to the repository-root [SKILL.md](SKILL.md). A checkout
+that is both globally registered and opened locally may show both entries;
+they resolve to the same canonical file, so this is expected.
 
 ## Safety model
 
