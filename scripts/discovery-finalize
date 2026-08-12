@@ -24,6 +24,12 @@ def read_input(path: str) -> dict:
     value = json.loads(raw)
     if not isinstance(value, dict):
         raise DiscoveryFinalizationError("Discovery input must be a JSON object")
+    allowed = {"target", "capability", "observations", "evidence", "provenance", "recorded_at"}
+    unknown = set(value) - allowed
+    if unknown:
+        raise DiscoveryFinalizationError(
+            f"Discovery input contains unsupported fields: {', '.join(sorted(unknown))}"
+        )
     return value
 
 

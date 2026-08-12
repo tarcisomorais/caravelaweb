@@ -36,21 +36,12 @@ OPERATIONAL_FAMILIES = {
     "authentication", "blocking", "validation", "limitation", "unknown",
 }
 _OPERATIONAL_PROOF_VERSION = 1
-_TASK_DATA_KEYS = {
-    "article", "articles", "title", "titles", "store", "stores", "shop", "shops",
-    "price", "prices", "result", "results", "html", "raw_html", "log", "logs",
-    "task", "task_summary", "listing", "listings", "product", "products",
-}
 _TASK_DATA_TEXT = re.compile(r"<(?:html|body|article|script)\b|\b(?:R\$|US\$)\s?\d|\b(?:articles?|stores?|shops?)\s+(?:found|returned)\b", re.I)
-# A schema field-path pointer (e.g. "post.title", "items[].title") names where a
-# field lives, it does not carry the field's actual content. Requires at least
-# one ".segment" or "[]" hop so a bare word (a real one-word title) still trips
-# the key-name check below.
 _SCHEMA_FIELD_PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*|\[\d*\])+$")
-
-
-def _is_schema_field_path(value: Any) -> bool:
-    return isinstance(value, str) and bool(_SCHEMA_FIELD_PATH.match(value))
+_FIELD_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_SYMBOL = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]*$")
+_EVIDENCE_KIND = re.compile(r"^[a-z][a-z0-9-]*$")
+_TRANSPORTS = {"DIRECT_READ", "LIGHTPANDA", "CHROME"}
 
 
 def _resolve_target_argument(memory: SQLiteOperationalMemory, target: str) -> str:
@@ -121,17 +112,15 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
-def _reject_task_data(value: Any, *, field: str = "observation", allow_schema_pointer: bool = False) -> None:
+def _reject_unsafe_content(value: Any, *, field: str = "observation") -> None:
     if isinstance(value, Mapping):
         for key, child in value.items():
             if not isinstance(key, str):
                 raise DiscoveryFinalizationError(f"{field} keys must be strings")
-            if key.lower() in _TASK_DATA_KEYS and not (allow_schema_pointer and _is_schema_field_path(child)):
-                raise DiscoveryFinalizationError(f"{field} contains task-specific data ({key})")
-            _reject_task_data(child, field=field, allow_schema_pointer=allow_schema_pointer)
+            _reject_unsafe_content(child, field=field)
     elif isinstance(value, list):
         for child in value:
-            _reject_task_data(child, field=field, allow_schema_pointer=allow_schema_pointer)
+            _reject_unsafe_content(child, field=field)
     elif isinstance(value, str):
         if value.strip().upper().replace(" ", "_") == PLATFORM_UNSUPPORTED:
             raise DiscoveryFinalizationError(
@@ -139,6 +128,181 @@ def _reject_task_data(value: Any, *, field: str = "observation", allow_schema_po
             )
         if len(value) > 500 or _TASK_DATA_TEXT.search(value):
             raise DiscoveryFinalizationError(f"{field} contains task-specific or raw content")
+
+
+def _exact_keys(
+    value: Mapping[str, Any], *, field: str,
+    required: set[str] | frozenset[str] = frozenset(),
+    optional: set[str] | frozenset[str] = frozenset(),
+) -> None:
+    missing = required - set(value)
+    unknown = set(value) - required - optional
+    if missing:
+        raise DiscoveryFinalizationError(
+            f"{field} is missing required fields: {', '.join(sorted(missing))}"
+        )
+    if unknown:
+        raise DiscoveryFinalizationError(
+            f"{field} contains unsupported fields: {', '.join(sorted(unknown))}"
+        )
+
+
+def _text(value: Any, *, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise DiscoveryFinalizationError(f"{field} must be a non-empty string")
+    _reject_unsafe_content(value, field=field)
+    return value
+
+
+def _symbol(value: Any, *, field: str) -> str:
+    value = _text(value, field=field)
+    if not _SYMBOL.fullmatch(value):
+        raise DiscoveryFinalizationError(f"{field} must be a symbolic value")
+    return value
+
+
+def _transport(value: Any, *, field: str) -> str:
+    value = _symbol(value, field=field)
+    if value not in _TRANSPORTS:
+        raise DiscoveryFinalizationError(f"{field} is not a supported transport")
+    return value
+
+
+def _schema_map(value: Any, *, field: str, paths: bool) -> dict[str, str]:
+    if not isinstance(value, Mapping) or not value:
+        raise DiscoveryFinalizationError(f"{field} must be a non-empty object")
+    result: dict[str, str] = {}
+    for key, locator in value.items():
+        if not isinstance(key, str) or not _FIELD_NAME.fullmatch(key):
+            raise DiscoveryFinalizationError(f"{field} contains an invalid output field")
+        locator = _text(locator, field=f"{field}.{key}")
+        if paths and not _SCHEMA_FIELD_PATH.fullmatch(locator):
+            raise DiscoveryFinalizationError(
+                f"{field}.{key} must be a reusable schema field path"
+            )
+        result[key] = locator
+    return result
+
+
+def _output_schema(value: Any, *, field: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or not value:
+        raise DiscoveryFinalizationError(f"{field} must be a non-empty object")
+    _exact_keys(
+        value, field=field,
+        optional={"structure", "field_paths", "selectors"},
+    )
+    result: dict[str, Any] = {}
+    if "structure" in value:
+        result["structure"] = _symbol(value["structure"], field=f"{field}.structure")
+    if "field_paths" in value:
+        result["field_paths"] = _schema_map(
+            value["field_paths"], field=f"{field}.field_paths", paths=True
+        )
+    if "selectors" in value:
+        result["selectors"] = _schema_map(
+            value["selectors"], field=f"{field}.selectors", paths=False
+        )
+    if not ({"field_paths", "selectors"} & set(result)):
+        raise DiscoveryFinalizationError(
+            f"{field} requires field_paths or selectors"
+        )
+    return result
+
+
+def _operational_proof(value: Any) -> dict[str, Any]:
+    field = "observation.value.operational_proof"
+    if not isinstance(value, Mapping) or not value:
+        raise DiscoveryFinalizationError(f"{field} must be a non-empty object")
+    _exact_keys(
+        value, field=field,
+        optional={
+            "entrypoint", "required_output", "required_action",
+            "completion_condition", "critical_constraints",
+        },
+    )
+    result: dict[str, Any] = {}
+    if "entrypoint" in value:
+        result["entrypoint"] = _text(value["entrypoint"], field=f"{field}.entrypoint")
+    if "required_output" in value:
+        result["required_output"] = _output_schema(
+            value["required_output"], field=f"{field}.required_output"
+        )
+    if "required_action" in value:
+        result["required_action"] = _text(
+            value["required_action"], field=f"{field}.required_action"
+        )
+    if "completion_condition" in value:
+        result["completion_condition"] = _text(
+            value["completion_condition"], field=f"{field}.completion_condition"
+        )
+    if "critical_constraints" in value:
+        constraints = value["critical_constraints"]
+        if not isinstance(constraints, list):
+            raise DiscoveryFinalizationError(
+                f"{field}.critical_constraints must be an array"
+            )
+        normalized_constraints: list[str] = []
+        for index, constraint in enumerate(constraints):
+            constraint_field = f"{field}.critical_constraints[{index}]"
+            normalized_constraints.append(_text(constraint, field=constraint_field))
+        result["critical_constraints"] = normalized_constraints
+    return result
+
+
+_FAMILY_FIELDS = {
+    "transport": {"transport", "outcome", "requirement"},
+    "search_surface": {"surface", "path", "entrypoint", "method", "loading"},
+    "extraction": {
+        "structure", "field_paths", "selectors", "transport", "outcome",
+        "evidence_quality",
+    },
+    "pagination": {"mode", "parameter", "path", "next_path", "stop_condition"},
+    "paywall": {"signal", "state", "condition"},
+    "authentication": {"access_model", "entrypoint", "condition"},
+    "blocking": {"failure_class", "signal", "state", "condition"},
+    "limitation": {"kind", "mode", "state", "condition", "constraint"},
+    "unknown": {"state", "subject", "condition"},
+}
+_TEXT_FIELDS = {
+    "path", "entrypoint", "stop_condition", "condition", "constraint", "subject",
+}
+
+
+def _normalize_family_value(family: str, value: Mapping[str, Any]) -> dict[str, Any]:
+    field = "observation.value"
+    if family == "validation":
+        _exact_keys(value, field=field, optional={"rule", "operational_proof"})
+        if len(value) != 1:
+            raise DiscoveryFinalizationError(
+                "validation value requires exactly one reusable validation form"
+            )
+        if "rule" in value:
+            return {"rule": _symbol(value["rule"], field=f"{field}.rule")}
+        return {"operational_proof": _operational_proof(value["operational_proof"])}
+
+    allowed = _FAMILY_FIELDS[family]
+    _exact_keys(value, field=field, optional=allowed)
+    result: dict[str, Any] = {}
+    for key, child in value.items():
+        child_field = f"{field}.{key}"
+        if key == "transport":
+            result[key] = _transport(child, field=child_field)
+        elif key == "field_paths":
+            result[key] = _schema_map(child, field=child_field, paths=True)
+        elif key == "selectors":
+            result[key] = _schema_map(child, field=child_field, paths=False)
+        elif key in _TEXT_FIELDS:
+            result[key] = _text(child, field=child_field)
+        else:
+            result[key] = _symbol(child, field=child_field)
+    return result
+
+
+def _is_canonical_family_value(family: str, value: Mapping[str, Any]) -> bool:
+    try:
+        return _normalize_family_value(family, value) == value
+    except DiscoveryFinalizationError:
+        return False
 
 
 def _normalize_hostname(value: Any) -> str | None:
@@ -176,7 +340,25 @@ def _normalize_validation(value: Any, *, field: str) -> dict[str, Any] | None:
     context = value.get("context", {})
     if not isinstance(context, Mapping):
         raise DiscoveryFinalizationError(f"{field}.context must be an object")
-    clean = {key: value[key] for key in allowed if key in value}
+    _exact_keys(
+        context, field=f"{field}.context",
+        optional={"authentication", "environment"},
+    )
+    clean: dict[str, Any] = {}
+    if "transport" in value:
+        clean["transport"] = _transport(value["transport"], field=f"{field}.transport")
+    if "engine" in value:
+        clean["engine"] = (
+            None if value["engine"] is None
+            else _text(value["engine"], field=f"{field}.engine")
+        )
+    if "javascript" in value:
+        if not isinstance(value["javascript"], bool):
+            raise DiscoveryFinalizationError(f"{field}.javascript must be a boolean")
+        clean["javascript"] = value["javascript"]
+    for key in ("outcome", "failure_class"):
+        if key in value:
+            clean[key] = _symbol(value[key], field=f"{field}.{key}")
     references = value.get("evidence", [])
     if (
         not isinstance(references, Sequence)
@@ -185,8 +367,11 @@ def _normalize_validation(value: Any, *, field: str) -> dict[str, Any] | None:
     ):
         raise DiscoveryFinalizationError(f"{field}.evidence must be an array of locators")
     clean["evidence"] = sorted(set(references))
-    clean["context"] = dict(context)
-    _reject_task_data(clean, field=field)
+    clean["context"] = {
+        key: _symbol(child, field=f"{field}.context.{key}")
+        for key, child in context.items()
+    }
+    _reject_unsafe_content(clean, field=field)
     return clean
 
 
@@ -203,17 +388,16 @@ def _normalize_observations(observations: Sequence[Mapping[str, Any]]) -> list[d
         host = _normalize_hostname(item.get("host"))
         if family not in OPERATIONAL_FAMILIES:
             raise DiscoveryFinalizationError("observation family is not reusable operational knowledge")
+        _exact_keys(
+            item, field="observation",
+            required={"family", "value"},
+            optional={"epistemic", "host", "validation", "contradiction"},
+        )
         if epistemic not in EPISTEMIC_CLASSES:
             raise DiscoveryFinalizationError("observation epistemic class is invalid")
         if not isinstance(value, Mapping) or not value:
             raise DiscoveryFinalizationError("observation value must be a non-empty object")
-        _reject_task_data(
-            value,
-            allow_schema_pointer=(
-                family == "extraction"
-                or (family == "validation" and "operational_proof" in value)
-            ),
-        )
+        clean_value = _normalize_family_value(str(family), value)
         validation = _normalize_validation(item.get("validation"), field="observation.validation")
         contradiction = item.get("contradiction")
         clean_contradiction = None
@@ -225,15 +409,16 @@ def _normalize_observations(observations: Sequence[Mapping[str, Any]]) -> list[d
             if not isinstance(contradiction["prior_value"], Mapping) or not contradiction["prior_value"]:
                 raise DiscoveryFinalizationError("contradiction.prior_value must be a non-empty object")
             clean_contradiction = {
-                "prior_value": dict(contradiction["prior_value"]),
+                "prior_value": _normalize_family_value(
+                    str(family), contradiction["prior_value"]
+                ),
                 "validation": _normalize_validation(
                     contradiction["validation"], field="observation.contradiction.validation"
                 ),
             }
-            _reject_task_data(clean_contradiction["prior_value"], field="contradiction.prior_value")
-        semantic = {"family": family, "epistemic": epistemic, "value": value, "host": host}
+        semantic = {"family": family, "epistemic": epistemic, "value": clean_value, "host": host}
         normalized[_canonical(semantic)] = {
-            "family": family, "epistemic": epistemic, "value": dict(value),
+            "family": family, "epistemic": epistemic, "value": clean_value,
             "host": host, "validation": validation, "contradiction": clean_contradiction,
         }
     return [normalized[key] for key in sorted(normalized)]
@@ -284,6 +469,11 @@ def _operational_proof_dependencies(
     for proof_claim, validation in proofs:
         proof = proof_claim["value"]["operational_proof"]
         if not isinstance(proof, Mapping):
+            continue
+        try:
+            if _operational_proof(proof) != proof:
+                continue
+        except DiscoveryFinalizationError:
             continue
         required = {"entrypoint", "completion_condition", "critical_constraints"}
         if not required <= proof.keys() or set(proof) - required - {"required_output", "required_action"}:
@@ -345,11 +535,13 @@ def _operational_proof_dependencies(
         if any(
             claim["epistemic"] != "OBSERVED"
             or not isinstance(claim["value"], Mapping)
+            or not _is_canonical_family_value("transport", claim["value"])
             or not _meaningful(claim["value"].get("transport"))
             for claim in transport_facts
         ) or any(
             claim["epistemic"] != "OBSERVED"
             or not isinstance(claim["value"], Mapping)
+            or not _is_canonical_family_value("authentication", claim["value"])
             or not _meaningful(claim["value"].get("access_model"))
             for claim in access_facts
         ):
@@ -380,12 +572,14 @@ def _operational_proof_dependencies(
 def _validate_provenance(provenance: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(provenance, Mapping) or not provenance:
         raise DiscoveryFinalizationError("run provenance is required")
-    run_id, observed_at = provenance.get("run_id"), provenance.get("observed_at")
-    if not isinstance(run_id, str) or not run_id.strip():
-        raise DiscoveryFinalizationError("provenance.run_id is required")
+    _exact_keys(
+        provenance, field="provenance",
+        required={"run_id", "observed_at"},
+    )
+    run_id, observed_at = provenance["run_id"], provenance["observed_at"]
+    run_id = _text(run_id, field="provenance.run_id")
     validate_timestamp(observed_at, field="provenance.observed_at")
-    _reject_task_data(dict(provenance), field="provenance")
-    return dict(provenance)
+    return {"run_id": run_id, "observed_at": observed_at}
 
 
 def _validate_evidence(evidence: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -395,11 +589,17 @@ def _validate_evidence(evidence: Sequence[Mapping[str, Any]]) -> list[dict[str, 
     for item in evidence:
         if not isinstance(item, Mapping):
             raise DiscoveryFinalizationError("every evidence item must be an object")
+        _exact_keys(
+            item, field="evidence",
+            required={"kind", "locator"}, optional={"scope"},
+        )
         kind, locator = item.get("kind"), item.get("locator")
-        if not isinstance(kind, str) or not kind or not isinstance(locator, str) or not locator:
-            raise DiscoveryFinalizationError("evidence requires kind and locator")
-        _reject_task_data(dict(item), field="evidence")
-        clean = {key: value for key, value in item.items() if key != "id"}
+        if not isinstance(kind, str) or not _EVIDENCE_KIND.fullmatch(kind):
+            raise DiscoveryFinalizationError("evidence.kind must be a lowercase symbolic value")
+        locator = _text(locator, field="evidence.locator")
+        clean = {"kind": kind, "locator": locator}
+        if "scope" in item:
+            clean["scope"] = _symbol(item["scope"], field="evidence.scope")
         result[_canonical(clean)] = clean
     return [result[key] for key in sorted(result)]
 

@@ -92,6 +92,26 @@ Only reusable operating observations, evidence, and provenance belong in Discove
 
 Local Operational Memory is writable by the installation's normal policy and is separate from web-action authority. Saving local knowledge never authorizes source-control publication, project-file changes, or external state changes. A successful, directly observed Discovery is available to the next lookup immediately; ambiguous or invalid knowledge is not used operationally. Diagnostic compatibility and repair procedures are not executor input.
 
+The public Discovery payload is a closed contract. Unknown wrapper, evidence,
+provenance, validation-context, contradiction-value, proof, or family-value
+fields are rejected before Candidate construction. Family values use only:
+
+- `transport`: `transport`, `outcome`, `requirement`;
+- `search_surface`: `surface`, `path`, `entrypoint`, `method`, `loading`;
+- `extraction`: `structure`, `field_paths`, `selectors`, `transport`, `outcome`, `evidence_quality`;
+- `pagination`: `mode`, `parameter`, `path`, `next_path`, `stop_condition`;
+- `paywall`: `signal`, `state`, `condition`;
+- `authentication`: `access_model`, `entrypoint`, `condition`;
+- `blocking`: `failure_class`, `signal`, `state`, `condition`;
+- `limitation`: `kind`, `mode`, `state`, `condition`, `constraint`;
+- `unknown`: `state`, `subject`, `condition`;
+- `validation`: exactly one of `rule` or `operational_proof`.
+
+`field_paths` and `selectors` are maps from output-field identifiers to source
+paths/selectors. Thus `{"name":"items[].name"}` is legal inside `field_paths`,
+while `{"name":"Current Person"}` is not a legal extraction value. Structured
+result objects and arrays have no public persistence position.
+
 ## Epistemic Classes
 
 Every meaningful claim is one of:
@@ -128,7 +148,7 @@ For a multi-host target, record the affected host when behavior differs. Transpo
 
 An `OPERATIONAL` capability records enough evidence to reproduce the requested path: target and capability, access model, transport, entrypoint, observable completion condition, required output or action, critical constraints, and validation evidence. Browser-backed evidence also records the actually observed `agent-browser` and engine context when material.
 
-Discovery cannot assert lifecycle directly. The finalizer earns `OPERATIONAL` from accepted `OBSERVED` transport and authentication facts plus one canonical `validation` value: `{"operational_proof":{"entrypoint":"...","required_output":{...},"completion_condition":"...","critical_constraints":[]}}`; `required_action` may replace `required_output`, but exactly one is required. Its validation outcome must be exactly `SUCCESS`, evidence references must be explicit, and browser transports require explicit engine and JavaScript context. The generated lifecycle Claim records its supporting Claim IDs. Lookup suppresses an unverified lifecycle assertion, or one whose supporting Claims are no longer current or are contradicted.
+Discovery cannot assert lifecycle directly. The finalizer earns `OPERATIONAL` from accepted `OBSERVED` transport and authentication facts plus one canonical `validation` value: `{"operational_proof":{"entrypoint":"...","required_output":{"field_paths":{"field":"items[].field"}},"completion_condition":"...","critical_constraints":[]}}`; a string `required_action` may replace the output schema, but exactly one is required. Entrypoint and completion condition are strings; constraints are strings, with an empty array meaning none material were observed. Its validation outcome must be exactly `SUCCESS`, evidence references must be explicit, and browser transports require explicit engine and JavaScript context. The generated lifecycle Claim records its supporting Claim IDs. Lookup suppresses an unverified lifecycle assertion, or one whose supporting Claims are no longer current or are contradicted.
 
 `SAVED` and lookup `found` remain acceptance signals. Partial reusable facts keep both properties without becoming `OPERATIONAL`; a later Discovery may complete the proof from the current accepted facts plus its new delta.
 

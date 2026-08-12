@@ -358,6 +358,165 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         with self.assertRaises(DiscoveryFinalizationError):
             self.finalize(payload)
 
+    def test_result_shaped_observation_values_fail_closed_without_writes(self):
+        cases = {
+            "unknown-key": {"instructor_name": "Current Person"},
+            "nested-object": {"container": {"members": [{"name": "Current Person"}]}},
+            "result-array": {"people": ["Current Person"]},
+            "generic-data": {"data": {"value": "Current Person"}},
+        }
+        before = tuple(self.memory._conn.execute(
+            f"SELECT count(*) FROM {table}"
+        ).fetchone()[0] for table in ("claims", "proposals", "evidence"))
+        for name, value in cases.items():
+            with self.subTest(case=name), self.assertRaises(DiscoveryFinalizationError):
+                self.finalize(self.payload([{"family": "extraction", "value": value}]))
+        after = tuple(self.memory._conn.execute(
+            f"SELECT count(*) FROM {table}"
+        ).fetchone()[0] for table in ("claims", "proposals", "evidence"))
+        self.assertEqual(before, after)
+
+    def test_persisted_wrappers_reject_unknown_structured_fields(self):
+        payload = self.payload([{
+            "family": "validation", "value": {"rule": "OUTPUT_PRESENT"},
+            "validation": {
+                "transport": "DIRECT_READ", "outcome": "FUNCTIONAL",
+                "context": {"people": ["Current Person"]},
+            },
+        }])
+        cases = (
+            payload,
+            {**self.payload(), "evidence": [{
+                "kind": "synthetic-validation", "locator": "https://example.com/",
+                "records": [{"name": "Current Person"}],
+            }]},
+            {**self.payload(), "provenance": {
+                "run_id": "run:result:001", "observed_at": RECORDED,
+                "people": ["Current Person"],
+            }},
+            self.payload([{
+                "family": "transport", "value": {"transport": "DIRECT_READ"},
+                "returned_data": ["Current Person"],
+            }]),
+            self.payload([{
+                "family": "extraction", "value": {"structure": "JSON_LD"},
+                "contradiction": {
+                    "prior_value": {"people": ["Current Person"]},
+                    "validation": {
+                        "transport": "DIRECT_READ", "outcome": "FAILED",
+                        "failure_class": "TARGET_CHANGED",
+                        "context": {
+                            "authentication": "PUBLIC", "environment": "PRODUCTION",
+                        },
+                    },
+                },
+            }]),
+        )
+        for index, case in enumerate(cases):
+            with self.subTest(case=index), self.assertRaises(DiscoveryFinalizationError):
+                self.finalize(case)
+
+    def test_canonical_public_family_values_remain_accepted(self):
+        observations = [
+            {"family": "transport", "value": {
+                "transport": "DIRECT_READ", "outcome": "FUNCTIONAL",
+            }},
+            {"family": "authentication", "value": {"access_model": "PUBLIC"}},
+            {"family": "search_surface", "value": {
+                "surface": "OFFICIAL_SEARCH", "path": "/search", "method": "GET",
+            }},
+            {"family": "pagination", "value": {
+                "mode": "QUERY_PARAMETER", "parameter": "page",
+                "stop_condition": "the next-page link is absent",
+            }},
+            {"family": "paywall", "value": {"signal": "PAYWALL_MARKER"}},
+            {"family": "blocking", "value": {
+                "failure_class": "TARGET_BLOCK", "condition": "a challenge page is shown",
+            }},
+            {"family": "limitation", "value": {
+                "kind": "FIELD_UNAVAILABLE", "constraint": "public pages omit private fields",
+            }},
+        ]
+        result = self.finalize(self.payload(observations))
+        self.assertEqual("SAVED", result.status)
+        current = self.memory.get_current("example-news", "topic-search")
+        self.assertEqual(7, len(current["accepted_claims"]))
+
+    def test_extraction_paths_selectors_and_operational_constraints_remain_reusable(self):
+        extraction = self.payload([{
+            "family": "extraction",
+            "value": {
+                "structure": "RESULT_CARDS",
+                "field_paths": {"name": "items[].name"},
+                "selectors": {"profile_url": "article a[href]"},
+            },
+        }])
+        self.assertEqual("SAVED", self.finalize(extraction).status)
+
+        operational = self.operational_payload(
+            target="synthetic-constrained",
+            proof={
+                "entrypoint": "https://synthetic-constrained.example/items",
+                "required_output": {
+                    "field_paths": {"name": "items[].name"},
+                    "selectors": {"profile_url": "article a[href]"},
+                },
+                "completion_condition": "the requested item collection is present",
+                "critical_constraints": ["pagination must reach the final page"],
+            },
+        )
+        self.assertEqual("SAVED", self.finalize(operational).status)
+        self.assertTrue(self.memory.has_verified_operational_lifecycle(
+            operational["target"], operational["capability"]
+        ))
+
+    def test_operational_proof_rejects_result_shaped_structures(self):
+        base = {
+            "entrypoint": "https://synthetic-proof.example/items",
+            "required_output": {"field_paths": {"name": "items[].name"}},
+            "completion_condition": "the requested item collection is present",
+            "critical_constraints": [],
+        }
+        proofs = (
+            {**base, "required_output": {"people": ["Current Person"]}},
+            {**base, "critical_constraints": [{"members": ["Current Person"]}]},
+            {**base, "entrypoint": {"data": ["Current Person"]}},
+            {**base, "required_output": ["Current Person"]},
+            {**base, "returned_data": ["Current Person"]},
+        )
+        for index, proof in enumerate(proofs):
+            with self.subTest(case=index), self.assertRaises(DiscoveryFinalizationError):
+                self.finalize(self.operational_payload(
+                    target=f"synthetic-result-proof-{index}", proof=proof
+                ))
+
+    def test_required_action_proof_remains_operational(self):
+        payload = self.operational_payload(
+            target="synthetic-action",
+            proof={
+                "entrypoint": "https://synthetic-action.example/search",
+                "required_action": "submit the bounded public search query",
+                "completion_condition": "the result surface is present",
+                "critical_constraints": ["caller authority remains read-only"],
+            },
+        )
+        self.assertEqual("SAVED", self.finalize(payload).status)
+        self.assertTrue(self.memory.has_verified_operational_lifecycle(
+            payload["target"], payload["capability"]
+        ))
+
+    def test_cli_rejects_unknown_top_level_fields(self):
+        payload = self.root / "unknown-wrapper.json"
+        payload.write_text(json.dumps({
+            **self.payload(), "returned_data": [{"name": "Current Person"}],
+        }), encoding="utf-8")
+        result = subprocess.run(
+            [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root), "--input", str(payload)],
+            text=True, capture_output=True, encoding="utf-8",
+        )
+        self.assertEqual(2, result.returncode)
+        self.assertIn("unsupported fields", json.loads(result.stderr)["reason"])
+
     def test_invalid_payload_has_no_partial_write(self):
         before = tuple(self.memory._conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in ("claims", "proposals", "evidence"))
         payload = self.payload([{"family": "transport", "value": {"html": "<html>bad</html>"}}])

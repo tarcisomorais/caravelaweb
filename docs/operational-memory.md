@@ -55,6 +55,9 @@ reusable-path proof is complete, successful, explicitly evidenced, and
 consistent with accepted transport and access facts. Its Claim payload records
 the supporting Claim IDs; lookup trusts it only while those Claims remain
 current and uncontradicted. Partial accepted knowledge remains lookup-visible.
+The public finalizer accepts only documented wrapper and family-value fields.
+Extraction output is represented as field-path/selector schema maps, never as
+returned records; unknown structured fields are rejected before persistence.
 
 ## Authority and safety
 
