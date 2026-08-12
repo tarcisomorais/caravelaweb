@@ -153,6 +153,21 @@ class PluginDistributionTests(unittest.TestCase):
         self.assertNotIn("skills", self.marketplace["plugins"][0])
         self.assertFalse((REPO / "skills").exists(), "a skills/ tree would shadow the root SKILL.md")
 
+    def test_published_files_are_checked_out_with_lf_endings(self) -> None:
+        # Claude Code clones this repository to install the plugin. With a
+        # CRLF checkout -- the Git for Windows default -- its frontmatter
+        # parser misses `name:` and falls back to the install directory name,
+        # which is the version string, so the skill stops being invocable as
+        # `caravelaweb` on native Windows only.
+        published = ("SKILL.md", PLUGIN_MANIFEST.as_posix(), MARKETPLACE_MANIFEST.as_posix())
+        attributes = subprocess.run(
+            ["git", "-C", str(REPO), "check-attr", "eol", "--", *published],
+            text=True, capture_output=True, check=True,
+        ).stdout
+        for line in attributes.splitlines():
+            with self.subTest(attribute=line):
+                self.assertTrue(line.endswith(": eol: lf"), f"not pinned to LF: {line}")
+
     def test_plugin_root_holds_no_installation_state(self) -> None:
         # The cached plugin directory is replaced on every update, so nothing
         # writable may be published inside it.

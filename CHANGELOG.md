@@ -47,6 +47,10 @@ under **Unreleased** until a version and tag are intentionally chosen.
   runtime path became host-specific.
 - `scripts/register-host` is documented as developer tooling rather than the
   install path. Its behavior is unchanged.
+- Every tracked file is checked out with LF endings. A CRLF checkout, the Git
+  for Windows default, made Claude Code miss the `name:` frontmatter of the
+  cloned `SKILL.md` and name the skill after the install directory, so the
+  plugin skill was not invocable as `caravelaweb` on native Windows.
 - `init-knowledge-root` names the `CARAVELAWEB_KNOWLEDGE_ROOT` environment
   variable instead of printing POSIX `export` syntax, which was wrong on the
   native-Windows shells that now see this output during first run.
