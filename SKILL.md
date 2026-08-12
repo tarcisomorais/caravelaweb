@@ -12,7 +12,7 @@ and `<skill>` is this skill directory. Always use the interpreter-prefixed form.
 
 ## Executor flow
 
-1. Identify the stable target ID and the requested capability. Do not use this skill for work that does not need web access.
+1. Identify the stable target ID and the requested capability. A hostname or URL reference resolves to that ID only through a recorded target<->host association, never by mechanical transformation of the hostname -- see `references/target-profile.md` -- so lookup and finalization always agree. First-time Discovery for a new target must supply its stable canonical ID directly. Do not use this skill for work that does not need web access.
 2. Consult accepted knowledge for that exact capability before calling it unknown:
 
    ```text

@@ -13,7 +13,11 @@ from .core import (
     RecordValidationError,
     SchemaVersionError,
     SQLiteOperationalMemory as _SQLiteOperationalMemory,
+    TargetIdentityError,
     canonical_json,
+    is_canonical_target_id,
+    normalize_host_reference,
+    validate_public_hostname,
     validate_timestamp,
 )
 
@@ -48,6 +52,10 @@ __all__ = [
     "RecordValidationError",
     "SchemaVersionError",
     "SQLiteOperationalMemory",
+    "TargetIdentityError",
     "canonical_json",
+    "is_canonical_target_id",
+    "normalize_host_reference",
+    "validate_public_hostname",
     "validate_timestamp",
 ]

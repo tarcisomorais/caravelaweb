@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ipaddress
 import json
+import re
 import sqlite3
 from collections import defaultdict
 from contextlib import contextmanager
@@ -8,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
+from urllib.parse import urlparse
 
 from knowledge_write_freeze import (
     KnowledgeWriteFrozenError,
@@ -80,6 +83,120 @@ def validate_timestamp(value: str | None, *, field: str, required: bool = True) 
         datetime.fromisoformat(value[:-1] + "+00:00")
     except ValueError as exc:
         raise RecordValidationError(f"{field} is not a valid RFC 3339 timestamp") from exc
+
+
+class TargetIdentityError(MemoryError):
+    """A target or host reference is malformed or too ambiguous to resolve."""
+
+
+_CANONICAL_TARGET_ID = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+
+
+def _is_ip_literal(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return True
+
+
+def is_canonical_target_id(value: str) -> bool:
+    """Whether ``value`` is already a stable kebab-case target ID.
+
+    A canonical ID never contains a dot -- a caller reference that does
+    contain one is a host/URL reference instead, never a target ID.
+    """
+    return isinstance(value, str) and "." not in value and bool(_CANONICAL_TARGET_ID.match(value))
+
+
+def validate_public_hostname(value: str) -> str:
+    """Strict structural validation for one bare hostname, no URL syntax.
+
+    This is the shared primitive behind both host-identity policies in this
+    module: :func:`normalize_host_reference` (target-reference resolution,
+    which additionally strips a leading ``www.``) and the caller-facing
+    ``observation.host`` scope in ``discovery_finalize`` (which must keep
+    ``www.example.com`` and ``example.com`` as distinct recorded hosts).
+    Both call this function for the guarantees below, so neither can drift
+    out of sync with the other.
+
+    Accepts only a plain hostname -- no scheme, userinfo, port, path, query,
+    fragment, or brackets. Fails closed on: whitespace anywhere; any of
+    ``/ ? # @ : [ ]``; an IP literal (IPv4, IPv6, or an IPv4-mapped IPv6
+    literal); a malformed run of repeated trailing dots or an otherwise
+    empty label; and a hostname that is not IDNA-encodable. A single
+    trailing DNS root dot (``example.com.``) is accepted and dropped.
+    Returns the canonical ASCII IDNA (punycode) form, so an internationalized
+    hostname and its punycode form converge to one string.
+    """
+    if not isinstance(value, str) or not value:
+        raise TargetIdentityError("hostname must be a non-empty string")
+    if any(char.isspace() for char in value):
+        raise TargetIdentityError(f"ambiguous hostname: {value!r}")
+    raw = value.lower()
+    if any(char in raw for char in "/?#@:[]"):
+        raise TargetIdentityError(f"ambiguous hostname: {value!r}")
+    if raw.endswith(".."):
+        raise TargetIdentityError(f"ambiguous hostname: {value!r}")
+    host = raw[:-1] if raw.endswith(".") else raw
+    if not host or ".." in host or host.startswith(".") or "." not in host:
+        raise TargetIdentityError(f"ambiguous hostname: {value!r}")
+    if _is_ip_literal(host):
+        raise TargetIdentityError(f"ambiguous hostname: {value!r}")
+    try:
+        return host.encode("idna").decode("ascii")
+    except UnicodeError as exc:
+        raise TargetIdentityError(f"ambiguous hostname: {value!r}") from exc
+
+
+def normalize_host_reference(reference: str) -> str:
+    """Normalize a URL/hostname reference to a literal ASCII host string.
+
+    Scheme, userinfo, path, query, fragment, and port are dropped, and a
+    leading ``www.`` label is stripped so ``example.com`` and
+    ``www.example.com`` compare equal. Unlike a target ID, dots are kept
+    literally -- this is a host string, not an identity, so ``a.b.com`` and
+    ``a-b.com`` never collide.
+
+    Ambiguous or malformed input fails closed rather than guessing:
+    embedded, leading, or trailing whitespace, credentials, an unsupported
+    scheme, an invalid or out-of-range port, or an unparseable host all
+    raise :class:`TargetIdentityError` here; the extracted hostname itself
+    is then validated by :func:`validate_public_hostname` (IP literals,
+    malformed dots, IDNA).
+    """
+    if not isinstance(reference, str) or not reference:
+        raise TargetIdentityError("host reference must be a non-empty string")
+    if any(char.isspace() for char in reference):
+        raise TargetIdentityError(f"ambiguous host reference: {reference!r}")
+    raw = reference.lower()
+    candidate = raw if "//" in raw else f"//{raw}"
+    try:
+        parsed = urlparse(candidate)
+    except ValueError as exc:
+        raise TargetIdentityError(f"ambiguous host reference: {reference!r}") from exc
+    if parsed.scheme not in ("", "http", "https"):
+        raise TargetIdentityError(f"ambiguous host reference: {reference!r}")
+    if parsed.username or parsed.password:
+        raise TargetIdentityError(f"ambiguous host reference: {reference!r}")
+    try:
+        # Accessing .port forces the stdlib parser to actually validate it;
+        # an invalid or out-of-range port must not be silently ignored.
+        parsed.port
+        hostname = parsed.hostname
+    except ValueError as exc:
+        raise TargetIdentityError(f"ambiguous host reference: {reference!r}") from exc
+    if not hostname:
+        raise TargetIdentityError(f"ambiguous host reference: {reference!r}")
+    try:
+        host = validate_public_hostname(hostname)
+    except TargetIdentityError as exc:
+        raise TargetIdentityError(f"ambiguous host reference: {reference!r}") from exc
+    if host.startswith("www."):
+        host = host[len("www."):]
+    if not host or "." not in host:
+        raise TargetIdentityError(f"ambiguous host reference: {reference!r}")
+    return host
 
 
 def _require_id(value: Any, prefix: str) -> str:
@@ -459,8 +576,40 @@ class SQLiteOperationalMemory:
         validate_timestamp(value, field="clock")
         return value
 
+    def target_ids_for_host(self, host_reference: str) -> list[str]:
+        """Existing ``tgt:`` IDs whose recorded host matches ``host_reference``.
+
+        Compares by :func:`normalize_host_reference` on both sides, so a
+        ``www.`` alias and its bare host resolve to the same stored
+        association without collapsing distinct hosts (``a.b.com`` stays
+        distinct from ``a-b.com``). A small table scan: Operational Memory
+        installations are single-installation and host-row counts stay
+        small, so no index is warranted here.
+        """
+        target = normalize_host_reference(host_reference)
+        matches: set[str] = set()
+        for row in self._conn.execute("SELECT DISTINCT target_id, hostname FROM hosts"):
+            try:
+                stored = normalize_host_reference(row["hostname"])
+            except TargetIdentityError:
+                continue
+            if stored == target:
+                matches.add(row["target_id"])
+        return sorted(matches)
+
     def resolve_target(self, target: str) -> str:
-        tid = target if target.startswith("tgt:") else f"tgt:{target}"
+        if target.startswith("tgt:"):
+            tid = target
+        elif is_canonical_target_id(target.strip().lower()):
+            tid = f"tgt:{target.strip().lower()}"
+        else:
+            try:
+                matches = self.target_ids_for_host(target)
+            except TargetIdentityError as exc:
+                raise KeyError(str(exc)) from exc
+            if len(matches) != 1:
+                raise KeyError(f"unknown target {target}")
+            tid = matches[0]
         if self._conn.execute("SELECT 1 FROM targets WHERE id=?", (tid,)).fetchone() is None:
             raise KeyError(f"unknown target {target}")
         return tid

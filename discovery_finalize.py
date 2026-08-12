@@ -19,7 +19,11 @@ from om_native_writes import (
     WRITE_DESTINATION, capture_candidate, enrich_candidate, promote_candidate,
     replace_candidate, review_token,
 )
-from operational_memory.core import EPISTEMIC_CLASSES, SQLiteOperationalMemory, validate_timestamp
+from operational_memory.core import (
+    EPISTEMIC_CLASSES, SQLiteOperationalMemory, TargetIdentityError,
+    is_canonical_target_id, normalize_host_reference, validate_public_hostname,
+    validate_timestamp,
+)
 from transport_policy import PLATFORM_UNSUPPORTED
 
 
@@ -50,6 +54,41 @@ def _is_schema_field_path(value: Any) -> bool:
 
 def _scope_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", value.strip().lower().replace("_", "-")).strip("-")
+
+
+def _resolve_target_argument(memory: SQLiteOperationalMemory, target: str) -> str:
+    """Resolve the top-level ``target`` argument to a stable canonical ID.
+
+    A literal kebab-case reference (``gtolab``, ``example-jobs``) is used
+    as-is -- it is never reinterpreted as a hostname. A URL/hostname
+    reference (contains a dot) is resolved only against an *existing*
+    target<->host association recorded via ``observation.host``: it is
+    never used to manufacture a new target ID by slugging the hostname.
+    First-time Discovery for a brand-new target must supply the stable
+    canonical ID directly, e.g. ``target: "gtolab"`` with an accompanying
+    ``host: "gtolab.com"`` observation to register the association.
+    """
+    if is_canonical_target_id(target.strip().lower()):
+        return target.strip().lower()
+    try:
+        # Unstripped: normalize_host_reference itself fails closed on
+        # leading/trailing/embedded whitespace rather than silently
+        # trimming a malformed reference.
+        host_reference = normalize_host_reference(target)
+    except TargetIdentityError as exc:
+        raise DiscoveryFinalizationError(f"target reference is ambiguous: {exc}") from exc
+    matches = memory.target_ids_for_host(host_reference)
+    if not matches:
+        raise DiscoveryFinalizationError(
+            "no existing target is associated with this hostname; first-time "
+            "Discovery must supply the stable canonical target ID directly"
+        )
+    if len(matches) > 1:
+        raise DiscoveryFinalizationError(
+            "this hostname is associated with more than one target; the "
+            "stable canonical target ID must be supplied directly"
+        )
+    return matches[0].removeprefix("tgt:")
 
 
 @dataclass(frozen=True)
@@ -106,19 +145,24 @@ def _reject_task_data(value: Any, *, field: str = "observation", allow_schema_po
 
 
 def _normalize_hostname(value: Any) -> str | None:
+    """Validate and canonicalize ``observation.host``.
+
+    Shares :func:`validate_public_hostname` with target-reference
+    resolution for its structural guarantees (no whitespace, no IP
+    literal, no malformed dots, canonical IDNA form), but does not strip a
+    leading ``www.``: an observation's host is a literal recorded host
+    scope, so ``www.example.com`` and ``example.com`` must stay distinct.
+    """
     if value is None:
         return None
     if not isinstance(value, str) or not value.strip():
         raise DiscoveryFinalizationError("observation.host must be a hostname")
-    raw = value.strip().lower().rstrip(".")
     try:
-        hostname = urlparse(f"//{raw}").hostname
-        ascii_name = hostname.encode("idna").decode("ascii") if hostname else None
-    except (UnicodeError, ValueError):
-        ascii_name = None
-    if not ascii_name or ascii_name != raw or "." not in ascii_name:
-        raise DiscoveryFinalizationError("observation.host must be a normalized public hostname")
-    return ascii_name
+        return validate_public_hostname(value)
+    except TargetIdentityError as exc:
+        raise DiscoveryFinalizationError(
+            f"observation.host must be a normalized public hostname: {exc}"
+        ) from exc
 
 
 def _normalize_validation(value: Any, *, field: str) -> dict[str, Any] | None:
@@ -508,7 +552,8 @@ def finalize_discovery(
     """Finalize Discovery into local OM, accepting only direct observations."""
     if not isinstance(target, str) or not target.strip() or not isinstance(capability, str) or not capability.strip():
         raise DiscoveryFinalizationError("target and capability are required")
-    target, capability = _scope_key(target), _scope_key(capability)
+    target = _resolve_target_argument(memory, target)
+    capability = _scope_key(capability)
     if not target or not capability:
         raise DiscoveryFinalizationError("target and capability are required")
     # Validate authority before examining or normalizing Discovery output.  This

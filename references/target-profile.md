@@ -6,6 +6,45 @@ This reference defines reusable, capability-scoped operating knowledge. It is no
 
 Target IDs are stable lowercase kebab-case identifiers derived from the public brand, not a URL path, capability, campaign, or consuming-project ID. Prefer the shortest unambiguous public name (`example-news`, `example-jobs`, `example-maps`). Keep an accepted ID stable. One evidence-backed target may span hosts; host differences belong in the capability context.
 
+A caller passes a **target reference**: an already-known canonical ID, a
+hostname, or a URL. `knowledge-lookup`, `discovery-finalize`, and every
+Operational Memory access resolve that reference through one shared path to
+the same **canonical target ID**, so a capability learned once under any
+equivalent reference is found by any other -- but a hostname never becomes
+the target ID by mechanical transformation (a hostname is not the brand,
+and dots are not hyphens):
+
+- A reference shaped like a canonical ID (no dot, e.g. `gtolab`,
+  `example-jobs`) is used as that ID directly. It is never reinterpreted as
+  a hostname, and an existing ID never changes shape.
+- A reference shaped like a URL or hostname (contains a dot) is first
+  normalized to a plain **host reference**: scheme, userinfo, path, query,
+  fragment, port, and a leading `www.` label are dropped, so
+  `example.com`, `www.example.com`, `https://example.com/`, and
+  `https://www.example.com/` all normalize to the same host string
+  `example.com` -- with its dots kept literally, never collapsed to
+  hyphens, so `a.b.com` and `a-b.com` stay distinct. That host reference is
+  then looked up against the **existing** target<->host associations
+  already recorded in Operational Memory (the same `host` scope described
+  below): exactly one match resolves to that target's canonical ID; zero
+  matches never invent a target ID from the hostname; more than one match
+  fails closed.
+- A reference that cannot be parsed deterministically (credentials in the
+  URL, an IP literal, an unsupported scheme) is refused rather than
+  guessed.
+
+First-time Discovery for a target that has no recorded host yet must supply
+the stable canonical target ID directly (e.g. `target: "gtolab"`) together
+with a `host` observation (e.g. `"host": "gtolab.com"`) to register the
+association; the runtime never derives that ID by slugging a hostname. A
+later lookup by `gtolab.com`, `www.gtolab.com`, or an equivalent URL then
+resolves through that recorded association to `gtolab`.
+
+`host` is a separate, per-capability scope for behavior that is not
+target-wide (see Capability and Host Scope below). It is the same
+mechanism target-reference resolution reads from, but it is never collapsed
+into or derived from the target ID.
+
 ## Knowledge Lookup
 
 Before treating a capability as unknown, run `knowledge-lookup` with the
