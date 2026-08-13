@@ -24,7 +24,11 @@ from operational_memory.core import (
     is_canonical_target_id, normalize_capability_id, normalize_host_reference,
     RecordValidationError, validate_public_hostname, validate_timestamp,
 )
-from transport_policy import PLATFORM_UNSUPPORTED
+from transport_policy import (
+    AVAILABLE, CHROME, DIRECT_READ, INSUFFICIENT, LIGHTPANDA,
+    PLATFORM_UNSUPPORTED, SATISFIED, UNAVAILABLE, TransportPolicyError,
+    next_transport,
+)
 
 
 class DiscoveryFinalizationError(ValueError):
@@ -41,7 +45,9 @@ _SCHEMA_FIELD_PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-
 _FIELD_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SYMBOL = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]*$")
 _EVIDENCE_KIND = re.compile(r"^[a-z][a-z0-9-]*$")
-_TRANSPORTS = {"DIRECT_READ", "LIGHTPANDA", "CHROME"}
+_TRANSPORTS = {DIRECT_READ, LIGHTPANDA, CHROME}
+_BROWSER_TRANSPORTS = {LIGHTPANDA, CHROME}
+_TRANSPORT_FAILURES = {"FAILED", "INSUFFICIENT"}
 
 
 def _resolve_target_argument(memory: SQLiteOperationalMemory, target: str) -> str:
@@ -436,6 +442,7 @@ def _operational_proof_dependencies(
     capability: str,
     claims: Sequence[Mapping[str, Any]],
     evidence: Sequence[Mapping[str, Any]],
+    validated_transport: tuple[str | None, str] | None,
 ) -> tuple[str, ...] | None:
     """Return the Claims that prove one reproducible path, or fail closed."""
     try:
@@ -520,7 +527,7 @@ def _operational_proof_dependencies(
 
         proof_host = proof_claim.get("host_id")
         in_scope = lambda claim: claim.get("host_id") in {None, proof_host}
-        transport_facts = [
+        all_transport_facts = [
             claim for claim in merged
             if claim["family"] == "transport"
             and in_scope(claim)
@@ -537,13 +544,21 @@ def _operational_proof_dependencies(
             or not isinstance(claim["value"], Mapping)
             or not _is_canonical_family_value("transport", claim["value"])
             or not _meaningful(claim["value"].get("transport"))
-            for claim in transport_facts
+            for claim in all_transport_facts
         ) or any(
             claim["epistemic"] != "OBSERVED"
             or not isinstance(claim["value"], Mapping)
             or not _is_canonical_family_value("authentication", claim["value"])
             or not _meaningful(claim["value"].get("access_model"))
             for claim in access_facts
+        ):
+            continue
+        transport_facts = [
+            claim for claim in all_transport_facts
+            if claim["value"].get("outcome") == "FUNCTIONAL"
+        ]
+        if transport in _BROWSER_TRANSPORTS and validated_transport != (
+            proof_host, transport
         ):
             continue
         transports = {
@@ -604,6 +619,205 @@ def _validate_evidence(evidence: Sequence[Mapping[str, Any]]) -> list[dict[str, 
     return [result[key] for key in sorted(result)]
 
 
+def _normalize_transport_trace(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise DiscoveryFinalizationError("transport_trace must be an object")
+    _exact_keys(
+        value, field="transport_trace",
+        required={"availability", "attempts"},
+    )
+    availability = value["availability"]
+    if not isinstance(availability, Mapping):
+        raise DiscoveryFinalizationError("transport_trace.availability must be an object")
+    _exact_keys(
+        availability, field="transport_trace.availability",
+        required={LIGHTPANDA, CHROME},
+    )
+    clean_availability = dict(availability)
+    if any(
+        not isinstance(status, str) or not _SYMBOL.fullmatch(status)
+        for status in clean_availability.values()
+    ):
+        raise DiscoveryFinalizationError(
+            "transport_trace availability contains an invalid status"
+        )
+    if any(
+        status not in {AVAILABLE, UNAVAILABLE, PLATFORM_UNSUPPORTED}
+        for status in clean_availability.values()
+    ):
+        raise DiscoveryFinalizationError(
+            "transport_trace availability contains an unsupported status"
+        )
+
+    attempts = value["attempts"]
+    if (
+        not isinstance(attempts, Sequence)
+        or isinstance(attempts, (str, bytes))
+        or not attempts
+    ):
+        raise DiscoveryFinalizationError(
+            "transport_trace.attempts must be a non-empty array"
+        )
+    clean_attempts: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for attempt in attempts:
+        if not isinstance(attempt, Mapping):
+            raise DiscoveryFinalizationError(
+                "every transport_trace attempt must be an object"
+            )
+        _exact_keys(
+            attempt, field="transport_trace.attempt",
+            required={"transport", "outcome", "evidence"}, optional={"host"},
+        )
+        transport = _transport(
+            attempt["transport"], field="transport_trace.attempt.transport"
+        )
+        if transport in seen:
+            raise DiscoveryFinalizationError(
+                "transport_trace may attempt each transport only once"
+            )
+        seen.add(transport)
+        outcome = _symbol(
+            attempt["outcome"], field="transport_trace.attempt.outcome"
+        )
+        if outcome not in _TRANSPORT_FAILURES | {"FUNCTIONAL"}:
+            raise DiscoveryFinalizationError(
+                "transport_trace attempt outcome must be FAILED, INSUFFICIENT, or FUNCTIONAL"
+            )
+        references = attempt["evidence"]
+        if (
+            not isinstance(references, Sequence)
+            or isinstance(references, (str, bytes))
+            or not references
+            or any(not isinstance(item, str) or not item for item in references)
+        ):
+            raise DiscoveryFinalizationError(
+                "transport_trace attempt evidence must be a non-empty locator array"
+            )
+        clean_attempts.append({
+            "transport": transport,
+            "outcome": outcome,
+            "host": _normalize_hostname(attempt.get("host")),
+            "evidence": sorted(set(references)),
+        })
+    return {"availability": clean_availability, "attempts": clean_attempts}
+
+
+def _browser_trace_required(observations: Sequence[Mapping[str, Any]]) -> bool:
+    return any(
+        transport in _BROWSER_TRANSPORTS
+        for item in observations
+        for transport in (
+            item["value"].get("transport"),
+            (item.get("validation") or {}).get("transport"),
+        )
+    )
+
+
+def _validated_transport_trace(
+    trace: Mapping[str, Any], observations: Sequence[Mapping[str, Any]],
+    evidence: Sequence[Mapping[str, Any]], host_ids: Mapping[str, str],
+) -> tuple[str | None, str] | None:
+    availability = trace["availability"]
+    policy_attempts: dict[str, str] = {}
+    selected: tuple[str | None, str] | None = None
+    evidence_locators = {item["locator"] for item in evidence}
+    material_context: dict[str, Any] | None = None
+
+    observed: list[dict[str, Any]] = []
+    for item in observations:
+        validation = item.get("validation")
+        if validation:
+            observed.append({
+                "host": item.get("host"), "value": item["value"],
+                "validation": validation, "functional": True,
+                "epistemic": item["epistemic"],
+                "transport_claim": item["family"] == "transport",
+            })
+        contradiction = item.get("contradiction")
+        if contradiction:
+            observed.append({
+                "host": item.get("host"),
+                "value": contradiction["prior_value"],
+                "validation": contradiction["validation"],
+                "functional": False, "epistemic": item["epistemic"],
+                "transport_claim": item["family"] == "transport",
+            })
+
+    for attempt in trace["attempts"]:
+        transport, outcome = attempt["transport"], attempt["outcome"]
+        try:
+            expected = next_transport(policy_attempts, availability)
+        except TransportPolicyError:
+            return None
+        if expected != transport:
+            return None
+        policy_outcome = SATISFIED if outcome == "FUNCTIONAL" else INSUFFICIENT
+        policy_attempts[transport] = policy_outcome
+
+        references = set(attempt["evidence"])
+        if not references <= evidence_locators:
+            return None
+        matches: list[dict[str, Any]] = []
+        for candidate in observed:
+            validation = candidate["validation"]
+            value = candidate["value"]
+            validation_outcome = validation.get("outcome")
+            if (
+                candidate["epistemic"] != "OBSERVED"
+                or candidate["host"] != attempt["host"]
+                or validation.get("transport") != transport
+                or not references <= set(validation.get("evidence", ()))
+                or "engine" not in validation
+                or not isinstance(validation.get("javascript"), bool)
+            ):
+                continue
+            if candidate["transport_claim"] and value.get("transport") != transport:
+                continue
+            if outcome == "FUNCTIONAL":
+                if (
+                    not candidate["functional"]
+                    or validation_outcome != "FUNCTIONAL"
+                    or (
+                        candidate["transport_claim"]
+                        and value.get("outcome") != "FUNCTIONAL"
+                    )
+                ):
+                    continue
+            elif validation_outcome not in _TRANSPORT_FAILURES or (
+                candidate["functional"] and candidate["transport_claim"]
+                and value.get("outcome") not in _TRANSPORT_FAILURES
+            ):
+                continue
+            context = validation.get("context")
+            if (
+                not isinstance(context, Mapping)
+                or set(context) != {"authentication", "environment"}
+                or any(not _meaningful(child) for child in context.values())
+            ):
+                continue
+            matches.append(candidate)
+        contexts = {_canonical(item["validation"]["context"]) for item in matches}
+        if len(contexts) != 1:
+            return None
+        context = dict(matches[0]["validation"]["context"])
+        if material_context is None:
+            material_context = context
+        elif material_context != context:
+            return None
+        if outcome == "FUNCTIONAL":
+            selected = (
+                host_ids.get(str(attempt["host"])) if attempt["host"] else None,
+                transport,
+            )
+
+    if selected is None or trace["attempts"][-1]["outcome"] != "FUNCTIONAL":
+        return None
+    return selected
+
+
 def _referenced_evidence(
     validation: Mapping[str, Any],
     evidence: Sequence[Mapping[str, Any]],
@@ -654,12 +868,11 @@ def _matching_pending_candidate(
     memory: SQLiteOperationalMemory,
     target: str,
     capability: str,
-    semantic_key: str,
-) -> tuple[str, str] | None:
-    matches: list[tuple[str, str]] = []
+    semantic_keys: set[str],
+) -> tuple[str, dict[str, str]] | None:
+    matches: list[tuple[str, dict[str, str]]] = []
     for proposal in memory.get_pending_candidates(target, capability):
-        if len(proposal["claim_ids"]) != 1:
-            continue
+        claim_ids: dict[str, str] = {}
         for row in memory._conn.execute(
             """SELECT id,family,epistemic,value_json,host_id FROM claims
                WHERE proposal_id=? ORDER BY id""",
@@ -669,8 +882,11 @@ def _matching_pending_candidate(
                 row["family"], row["epistemic"],
                 json.loads(row["value_json"]), row["host_id"],
             )
-            if key == semantic_key:
-                matches.append((proposal["proposal_id"], row["id"]))
+            claim_ids[key] = row["id"]
+        if set(claim_ids) == semantic_keys and len(claim_ids) == len(
+            proposal["claim_ids"]
+        ):
+            matches.append((proposal["proposal_id"], claim_ids))
     return matches[0] if len(matches) == 1 else None
 
 
@@ -846,10 +1062,14 @@ def _has_conflict(
     families = {str(item["family"]) for item in conflict_delta}
     if not families:
         return False
-    delta_values: dict[tuple[str, str | None], set[str]] = {}
+    delta_values: dict[tuple[str, str | None, str | None], set[str]] = {}
     for item in conflict_delta:
         host_id = host_ids.get(str(item.get("host"))) if item.get("host") else None
-        delta_values.setdefault((item["family"], host_id), set()).add(
+        transport = (
+            item["value"].get("transport")
+            if item["family"] == "transport" else None
+        )
+        delta_values.setdefault((item["family"], host_id, transport), set()).add(
             json.dumps(item["value"], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         )
     if any(len(values) > 1 for values in delta_values.values()):
@@ -874,16 +1094,21 @@ def _has_conflict(
         ),
         (*claim_ids, *sorted(families)),
     )
-    current_values: dict[tuple[str, str | None], set[str]] = {}
+    current_values: dict[tuple[str, str | None, str | None], set[str]] = {}
     for row in rows:
-        key = (row["family"], row["host_id"])
+        value = json.loads(row["value_json"])
+        key = (
+            row["family"], row["host_id"],
+            value.get("transport") if row["family"] == "transport" else None,
+        )
         current_values.setdefault(key, set()).add(
-            json.dumps(json.loads(row["value_json"]), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         )
     return any(
         current_values.get((
             item["family"],
             host_ids.get(str(item.get("host"))) if item.get("host") else None,
+            item["value"].get("transport") if item["family"] == "transport" else None,
         ), set()) - {
             json.dumps(
                 item["value"], ensure_ascii=False, sort_keys=True,
@@ -898,6 +1123,7 @@ def finalize_discovery(
     memory: SQLiteOperationalMemory,
     *, target: str, capability: str, observations: Sequence[Mapping[str, Any]],
     evidence: Sequence[Mapping[str, Any]], provenance: Mapping[str, Any],
+    transport_trace: Mapping[str, Any] | None = None,
     recorded_at: str | None = None, knowledge_write_authority: bool = True,
     write_destination: str | None = WRITE_DESTINATION, authority_at_operation: str = WRITE_DESTINATION,
 ) -> DiscoveryFinalization:
@@ -932,6 +1158,25 @@ def finalize_discovery(
         )
     clean_evidence = _validate_evidence(evidence)
     host_ids, hosts_to_create = _host_plan(memory, target, normalized, clean_evidence)
+    clean_trace = _normalize_transport_trace(transport_trace)
+    validated_transport = (
+        _validated_transport_trace(
+            clean_trace, normalized, clean_evidence, host_ids
+        )
+        if clean_trace else None
+    )
+    if (
+        (clean_trace is not None and validated_transport is None)
+        or (_browser_trace_required(normalized) and validated_transport is None)
+    ):
+        return DiscoveryFinalization(
+            "NOT_SAVED", target, capability,
+            reason=(
+                "The transport ladder and available simpler transports were not "
+                "proven by this Discovery run."
+            ),
+            reason_code="TRANSPORT_POLICY_UNPROVEN",
+        )
     # A new scope has no accepted or pending Claims yet. It is created atomically
     # with the pending Candidate below, after authority and payload validation.
     try:
@@ -951,9 +1196,9 @@ def finalize_discovery(
     delta_keys = {semantic(item) for item in delta}
     pending_match = (
         _matching_pending_candidate(
-            memory, target, capability, semantic(delta[0])
+            memory, target, capability, delta_keys
         )
-        if len(delta) == 1 and semantic(delta[0]) in pending else None
+        if delta_keys <= pending else None
     )
     if delta_keys <= pending and pending_match is None:
         return DiscoveryFinalization(
@@ -982,9 +1227,10 @@ def finalize_discovery(
     contradiction_supports: dict[str, list[dict[str, Any]]] = {}
     validations: dict[str, dict[str, Any]] = {}
     for item in delta:
+        item_semantic = semantic(item)
         claim_id = (
-            pending_match[1] if pending_match
-            else f"clm:{target}:{capability}:discovery-{_digest(semantic(item))}"
+            pending_match[1][item_semantic] if pending_match
+            else f"clm:{target}:{capability}:discovery-{_digest(item_semantic)}"
         )
         claim = {
             "id": claim_id, "family": item["family"], "epistemic": item["epistemic"],
@@ -1024,13 +1270,25 @@ def finalize_discovery(
         pending_proposal_id=proposal_id if pending_match else None,
     )
     has_conflict = _has_conflict(memory, target, capability, delta, host_ids)
+    # A contradiction is a durable replacement, not ordinary new knowledge: it
+    # may only reach the accepted view through the replacement path. Transport
+    # Claims for different transports are parallel facts rather than conflicts,
+    # so `_has_conflict` alone would let an unproven replacement fall through to
+    # automatic promotion. A proven replacement still earns an operational
+    # proof, because `replace_candidate` -- not `promote_candidate` -- performs
+    # its Decision.
     automatic = (
         all(item["epistemic"] == "OBSERVED" for item in delta)
         and not has_conflict
+        and (
+            replacement_ready
+            or not any(item.get("contradiction") for item in delta)
+        )
     )
     proof_claim_ids = (
         _operational_proof_dependencies(
-            memory, target, capability, claims, clean_evidence
+            memory, target, capability, claims, clean_evidence,
+            validated_transport,
         )
         if automatic else None
     )
@@ -1084,25 +1342,40 @@ def finalize_discovery(
     enrichment_created = 0
     with memory.write_transaction() as writer:
         if pending_match:
-            enrichment = enrich_candidate(
-                memory, target=target, capability=capability,
-                proposal_id=proposal_id, claim_id=claims[0]["id"],
-                supporting_evidence=supports.get(claims[0]["id"], ()),
-                validation_context=validations.get(claims[0]["id"]),
-                contradicted_claim_id=(
-                    replacement_ids[0]
-                    if replacement_ids and contradicting else None
-                ),
-                contradicting_evidence=contradiction_supports.get(
-                    claims[0]["id"], ()
-                ),
-                contradiction_context=contradiction_contexts.get(claims[0]["id"]),
-                knowledge_write_authority=knowledge_write_authority,
-                write_destination=write_destination,
-                authority_at_operation=authority_at_operation,
-                _writer=writer,
-            )
-            enrichment_created = enrichment.records_created
+            pending_claim_ids = set(pending_match[1].values())
+            for claim in claims:
+                claim_id = claim["id"]
+                if claim_id not in pending_claim_ids:
+                    continue
+                enrichment = enrich_candidate(
+                    memory, target=target, capability=capability,
+                    proposal_id=proposal_id, claim_id=claim_id,
+                    supporting_evidence=supports.get(claim_id, ()),
+                    validation_context=validations.get(claim_id),
+                    contradicted_claim_id=(
+                        replacement_ids[0]
+                        if replacement_ids and claim_id in contradicting else None
+                    ),
+                    contradicting_evidence=contradiction_supports.get(claim_id, ()),
+                    contradiction_context=contradiction_contexts.get(claim_id),
+                    knowledge_write_authority=knowledge_write_authority,
+                    write_destination=write_destination,
+                    authority_at_operation=authority_at_operation,
+                    _writer=writer,
+                )
+                enrichment_created += enrichment.records_created
+            for claim in claims:
+                if claim["id"] in pending_claim_ids:
+                    continue
+                writer.claim({
+                    **claim,
+                    "target_id": f"tgt:{target}",
+                    "capability_id": f"cap:{target}:{capability}",
+                    "proposal_id": proposal_id,
+                    "recorded_at": recorded_at,
+                    "provenance": clean_provenance,
+                })
+                writer.proposal_claim(proposal_id, claim["id"])
         else:
             capture_candidate(
                 memory, target=target, capability=capability,
@@ -1135,7 +1408,7 @@ def finalize_discovery(
                 write_destination=write_destination,
                 authority_at_operation=authority_at_operation, _writer=writer,
             )
-        elif automatic and not pending_match:
+        elif automatic:
             promote_candidate(
                 memory,
                 target=target,
@@ -1150,7 +1423,10 @@ def finalize_discovery(
                 authority_at_operation=authority_at_operation,
                 _writer=writer,
             )
-    if pending_match and not replacement_ready and enrichment_created == 0:
+    if (
+        pending_match and not automatic and not replacement_ready
+        and enrichment_created == 0
+    ):
         return DiscoveryFinalization(
             "NOT_SAVED", target, capability, proposal_id, 0,
             reason="This knowledge is already pending confirmation before it can be used.",

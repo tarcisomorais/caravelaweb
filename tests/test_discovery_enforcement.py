@@ -102,6 +102,8 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
         self.assertIn("DIRECT_READ -> LIGHTPANDA -> CHROME", text)
         self.assertIn("After Chrome-based Discovery, SIMPLIFY is mandatory", text)
         self.assertIn("Runs that stayed in **Operation** do not call the finalizer", text)
+        self.assertIn("run-scoped `transport_trace`", text)
+        self.assertIn("never stored as Claims or other target knowledge", text)
 
     def test_missing_browser_control_never_authorizes_a_substitute_stack(self) -> None:
         for text in (SKILL.read_text(encoding="utf-8"), TRANSPORT.read_text(encoding="utf-8")):

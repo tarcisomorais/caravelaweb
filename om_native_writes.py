@@ -631,7 +631,7 @@ def enrich_candidate(
     authority_at_operation: str,
     _writer: Any | None = None,
 ) -> CandidateEnrichment:
-    """Add only missing structured support to one existing pending Candidate."""
+    """Add missing structured support to one Claim in a pending Candidate."""
     _require_boundary(
         memory, knowledge_write_authority=knowledge_write_authority,
         write_destination=write_destination, authority_at_operation=authority_at_operation,
@@ -652,13 +652,12 @@ def enrich_candidate(
     ):
         raise OMProposalError("pending Candidate scope does not match enrichment")
     candidate = {"host_id": claim_record.get("host_id"), "value": claim_record.get("value")}
-    proposal_claim_count = len(memory.proposal_claim_ids(proposal_id))
     pending_ids = {
         item["proposal_id"]
         for item in memory.get_pending_candidates(target, capability)
     }
-    if proposal_claim_count != 1 or proposal_id not in pending_ids:
-        raise OMProposalError("Candidate enrichment requires one pending Claim")
+    if proposal_id not in pending_ids:
+        raise OMProposalError("Candidate enrichment requires a pending Claim")
 
     def evidence_ids(
         writer: Any, records: Sequence[Mapping[str, Any]]

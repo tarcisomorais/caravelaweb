@@ -19,6 +19,13 @@ Discovery executes and delivers the caller's actual task while it learns — it 
 5. **VALIDATE** — confirm the discovered path is strong enough to become reusable knowledge: entrypoint works, query produces expected results, required fields present, completion condition observable, no exploratory recovery was needed, caller authority preserved. Proportional to capability/consequence — not exhaustive whole-site testing.
 6. **FINALIZE (mandatory)** — before declaring the Discovery complete, call `<python> <skill>/scripts/discovery-finalize` with reusable operational observations, evidence, and run provenance. Report only `SAVED`, `ALREADY_EXISTS`, or `NOT_SAVED`; successful knowledge is available to the next lookup immediately. A finalizer error leaves Discovery incomplete even if the task response can be delivered. Do not send task results, raw logs, or HTML to Operational Memory.
 
+   Browser-backed finalization also supplies the run-scoped
+   `transport_trace` from `SKILL.md`. The finalizer replays its evidenced
+   attempts through the hierarchy before any Candidate write. The trace and
+   preflight availability are discarded after validation; neither is target
+   knowledge. An available Lightpanda tier cannot be omitted from a durable
+   Chrome result.
+
 ### Stop conditions
 
 Success (capability reaches `UNDERSTOOD`/`OPERATIONAL`); authority boundary reached; external blocker (unavailable auth, human verification, blocked geography); path works too inconsistently to promote; target/capability proves unsuitable. Don't keep exploring just to produce more information.
@@ -60,6 +67,12 @@ claim nothing about one that does not.
 ### Escalation / de-escalation
 
 Escalate (`DIRECT_READ → LIGHTPANDA → CHROME`) only when evidence shows the simpler path can't satisfy the capability — stop as soon as the required capability works reliably; never escalate "for convenience." De-escalate (`CHROME → LIGHTPANDA → DIRECT_READ`) only after Discovery/revalidation proves the simpler path works, then update the profile.
+
+For finalization, `FAILED` and `INSUFFICIENT` are escalation evidence only;
+`FUNCTIONAL` is the sole candidate for the operational transport. A failed
+Direct Read and functional Chrome result are therefore compatible facts when
+the intervening available tiers were tested. Conflicting outcomes for the
+same transport, host, and material context still fail closed.
 
 ### Fallback policy
 

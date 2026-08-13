@@ -99,8 +99,12 @@ Local Operational Memory is writable by the installation's normal policy and is 
 An observation made during an active Discovery may guide that same Discovery, but it is accepted Operational Memory only once `discovery-finalize` succeeds. An earlier task's unfinalized observation -- something merely seen, not saved -- is never accepted knowledge: it does not satisfy `knowledge-lookup`, and it never substitutes for lookup or Discovery on a later task.
 
 The public Discovery payload is a closed contract. Unknown wrapper, evidence,
-provenance, validation-context, contradiction-value, proof, or family-value
-fields are rejected before Candidate construction. Family values use only:
+provenance, transport-trace, validation-context, contradiction-value, proof,
+or family-value fields are rejected before Candidate construction. A
+browser-backed result also carries the run-scoped `transport_trace` defined in
+`SKILL.md`; the finalizer validates its preflight availability and evidenced
+attempt order before writing, then discards it rather than storing runtime
+availability as target knowledge. Family values use only:
 
 - `transport`: `transport`, `outcome`, `requirement`;
 - `search_surface`: `surface`, `path`, `entrypoint`, `method`, `loading`;
@@ -155,6 +159,13 @@ For a multi-host target, record the affected host when behavior differs. Transpo
 An `OPERATIONAL` capability records enough evidence to reproduce the requested path: target and capability, access model, transport, entrypoint, observable completion condition, required output or action, critical constraints, and validation evidence. Browser-backed evidence also records the actually observed `agent-browser` and engine context when material.
 
 Discovery cannot assert lifecycle directly. The finalizer earns `OPERATIONAL` from accepted `OBSERVED` transport and authentication facts plus one canonical `validation` value: `{"operational_proof":{"entrypoint":"...","required_output":{"field_paths":{"field":"items[].field"}},"completion_condition":"...","critical_constraints":[]}}`; a string `required_action` may replace the output schema, but exactly one is required. Entrypoint and completion condition are strings; constraints are strings, with an empty array meaning none material were observed. Its validation outcome must be exactly `SUCCESS`, evidence references must be explicit, and browser transports require explicit engine and JavaScript context. The generated lifecycle Claim records its supporting Claim IDs. Lookup suppresses an unverified lifecycle assertion, or one whose supporting Claims are no longer current or are contradicted.
+
+Transport outcomes have asymmetric roles: `FAILED` and `INSUFFICIENT` prove
+why escalation was needed, while only `FUNCTIONAL` identifies a possible
+operational transport. Distinct transports may therefore coexist without
+conflict. A browser transport can support a new lifecycle only when the same
+finalization run proves the complete available ladder; a legacy browser Claim
+cannot gain `OPERATIONAL` from a later proof-only payload.
 
 `SAVED` and lookup `found` remain acceptance signals. Partial reusable facts keep both properties without becoming `OPERATIONAL`; a later Discovery may complete the proof from the current accepted facts plus its new delta.
 

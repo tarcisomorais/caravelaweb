@@ -80,7 +80,7 @@ knowledge-lookup
 
 bounded Discovery
   -> DIRECT_READ, then optional browser escalation
-  -> validate reusable observations and evidence
+  -> validate reusable observations, evidence, and run-scoped transport trace
   -> discovery-finalize
   -> pending or accepted Operational Memory state
   -> next knowledge-lookup sees accepted knowledge
@@ -117,7 +117,9 @@ DIRECT_READ -> LIGHTPANDA -> CHROME
 Direct reading is always attempted first. Escalation requires observed
 insufficiency, and platform absence is runtime state rather than target
 degradation. Chrome-based Discovery must test simpler available transports
-before finalizing a durable path.
+before finalizing a durable path. The finalizer enforces that sequence at the
+write boundary; it does not persist the trace or preflight availability as
+target knowledge.
 
 ## Fail-closed behavior
 

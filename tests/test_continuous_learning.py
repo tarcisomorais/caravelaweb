@@ -46,6 +46,38 @@ class ContinuousLearningTests(unittest.TestCase):
         self.addCleanup(self.memory.close)
 
     def finalize(self, observation, *, at=T1, run="001", evidence=None):
+        transport_trace = None
+        validation = observation.get("validation", {})
+        contradiction = observation.get("contradiction", {})
+        old_validation = contradiction.get("validation", {})
+        if (
+            validation.get("transport") in {"LIGHTPANDA", "CHROME"}
+            and old_validation.get("transport") == "DIRECT_READ"
+            and validation.get("evidence")
+            and old_validation.get("evidence")
+        ):
+            host = ({"host": observation["host"]} if observation.get("host") else {})
+            transport_trace = {
+                "availability": {
+                    "LIGHTPANDA": (
+                        "AVAILABLE"
+                        if validation["transport"] == "LIGHTPANDA"
+                        else "PLATFORM_UNSUPPORTED"
+                    ),
+                    "CHROME": "AVAILABLE",
+                },
+                "attempts": [
+                    {
+                        "transport": "DIRECT_READ", "outcome": "FAILED",
+                        "evidence": old_validation["evidence"], **host,
+                    },
+                    {
+                        "transport": validation["transport"],
+                        "outcome": "FUNCTIONAL",
+                        "evidence": validation["evidence"], **host,
+                    },
+                ],
+            }
         return finalize_discovery(
             self.memory, target="example", capability="search",
             observations=[observation],
@@ -62,6 +94,7 @@ class ContinuousLearningTests(unittest.TestCase):
             provenance={"run_id": f"run:example:{run}", "observed_at": at},
             recorded_at=at, knowledge_write_authority=True,
             write_destination=WRITE_DESTINATION,
+            transport_trace=transport_trace,
         )
 
     @staticmethod
@@ -112,6 +145,19 @@ class ContinuousLearningTests(unittest.TestCase):
             },
         }
         return item
+
+    def route_observed(self, *, context=None):
+        return self.observed(
+            "DIRECT_READ", family="search_surface", value={"path": "/old"},
+            context=context,
+        )
+
+    def route_replacement(self, **overrides):
+        return self.replacement(
+            family="search_surface", prior_value={"path": "/old"},
+            new_value={"path": "/new"}, prior_transport="DIRECT_READ",
+            new_transport="DIRECT_READ", **overrides,
+        )
 
     def test_safe_replacement_changes_current_and_preserves_history_idempotently(self):
         self.assertEqual("SAVED", self.finalize(self.observed("DIRECT_READ")).status)
@@ -182,7 +228,9 @@ class ContinuousLearningTests(unittest.TestCase):
 
     def test_concurrent_proposal_stays_pending(self):
         self.finalize(self.observed("DIRECT_READ"))
-        inferred = self.observed("LIGHTPANDA")
+        inferred = self.observed(
+            "DIRECT_READ", family="limitation", value={"state": "UNCONFIRMED"}
+        )
         inferred["epistemic"] = "INFERRED"
         self.assertEqual("NOT_SAVED", self.finalize(inferred, at=T2, run="002").status)
         self.assertEqual("NOT_SAVED", self.finalize(
@@ -209,7 +257,10 @@ class ContinuousLearningTests(unittest.TestCase):
             write_destination=WRITE_DESTINATION,
         )
         self.assertEqual("NOT_SAVED", result.status)
-        self.assertEqual([], self.memory.get_current("example", "search")["accepted_claim_ids"])
+        self.assertEqual("TRANSPORT_POLICY_UNPROVEN", result.reason_code)
+        self.assertEqual(0, self.memory._conn.execute(
+            "SELECT count(*) FROM targets"
+        ).fetchone()[0])
 
     def test_multiple_plausible_prior_claims_prevent_replacement(self):
         self.finalize(self.observed("DIRECT_READ"))
@@ -256,7 +307,7 @@ class ContinuousLearningTests(unittest.TestCase):
     def test_target_scope_and_two_hosts_remain_distinct(self):
         self.assertEqual("SAVED", self.finalize(self.observed("DIRECT_READ")).status)
         host_result = self.finalize(
-            self.observed("CHROME", host="app.example.com"), at=T2, run="002"
+            self.observed("DIRECT_READ", host="app.example.com"), at=T2, run="002"
         )
         self.assertEqual("SAVED", host_result.status)
         claims = self.memory.get_current("example", "search")["accepted_claims"]
@@ -278,13 +329,19 @@ class ContinuousLearningTests(unittest.TestCase):
         app = self.observed(
             "CHROME", host="app.example.com", evidence=["https://app.example.com/search"]
         )
+        app_direct = self.observed(
+            "DIRECT_READ", host="app.example.com",
+            evidence=["https://app.example.com/search"],
+        )
+        app_direct["value"]["outcome"] = "FAILED"
+        app_direct["validation"]["outcome"] = "FAILED"
         help_center = self.observed(
             "DIRECT_READ", host="help.example.com",
             evidence=["https://help.example.com/search"],
         )
         result = finalize_discovery(
             self.memory, target="example", capability="search",
-            observations=[app, help_center],
+            observations=[app_direct, app, help_center],
             evidence=[
                 {
                     "kind": "browser-validation", "locator": "https://app.example.com/search",
@@ -298,10 +355,27 @@ class ContinuousLearningTests(unittest.TestCase):
             provenance={"run_id": "run:example:two-hosts", "observed_at": T1},
             recorded_at=T1, knowledge_write_authority=True,
             write_destination=WRITE_DESTINATION,
+            transport_trace={
+                "availability": {
+                    "LIGHTPANDA": "PLATFORM_UNSUPPORTED", "CHROME": "AVAILABLE",
+                },
+                "attempts": [
+                    {
+                        "transport": "DIRECT_READ", "outcome": "FAILED",
+                        "host": "app.example.com",
+                        "evidence": ["https://app.example.com/search"],
+                    },
+                    {
+                        "transport": "CHROME", "outcome": "FUNCTIONAL",
+                        "host": "app.example.com",
+                        "evidence": ["https://app.example.com/search"],
+                    },
+                ],
+            },
         )
         self.assertEqual("SAVED", result.status)
         current = self.memory.get_current("example", "search")["accepted_claims"]
-        self.assertEqual(2, len(current))
+        self.assertEqual(3, len(current))
         self.assertEqual({"CHROME", "DIRECT_READ"}, {
             claim["value"]["transport"] for claim in current
         })
@@ -334,18 +408,18 @@ class ContinuousLearningTests(unittest.TestCase):
         )
 
     def test_only_new_path_evidence_stays_pending(self):
-        self.finalize(self.observed("DIRECT_READ"))
+        self.finalize(self.route_observed())
         result = self.finalize(
-            self.replacement(old_evidence=[]), at=T2, run="002"
+            self.route_replacement(old_evidence=[]), at=T2, run="002"
         )
         self.assertEqual("NOT_SAVED", result.status)
         self.assertEqual("INSUFFICIENT_BILATERAL_EVIDENCE", result.reason_code)
 
     def test_pending_unilateral_is_enriched_and_replaced_by_bilateral_discovery(self):
-        self.finalize(self.observed("DIRECT_READ"))
+        self.finalize(self.route_observed())
         old_id = self.memory.get_current("example", "search")["accepted_claim_ids"][0]
         unilateral = self.finalize(
-            self.replacement(old_evidence=[]), at=T2, run="002"
+            self.route_replacement(old_evidence=[]), at=T2, run="002"
         )
         self.assertEqual("NOT_SAVED", unilateral.status)
         pending = self.memory.get_pending_candidates("example", "search")
@@ -360,7 +434,7 @@ class ContinuousLearningTests(unittest.TestCase):
         }
 
         completed = self.finalize(
-            self.replacement(), at=T2, run="003"
+            self.route_replacement(), at=T2, run="003"
         )
         self.assertEqual("SAVED", completed.status)
         self.assertEqual(proposal_id, completed.proposal_id)
@@ -387,7 +461,7 @@ class ContinuousLearningTests(unittest.TestCase):
             )
         }
         repeated = self.finalize(
-            self.replacement(), at=T2, run="004"
+            self.route_replacement(), at=T2, run="004"
         )
         self.assertEqual("ALREADY_EXISTS", repeated.status)
         self.assertEqual(counts, {
@@ -398,8 +472,8 @@ class ContinuousLearningTests(unittest.TestCase):
         })
 
     def test_exact_pending_repeat_returns_already_pending_without_writes(self):
-        self.finalize(self.observed("DIRECT_READ"))
-        change = self.replacement(old_evidence=[])
+        self.finalize(self.route_observed())
+        change = self.route_replacement(old_evidence=[])
         self.assertEqual("NOT_SAVED", self.finalize(
             change, at=T2, run="002"
         ).status)
@@ -425,8 +499,8 @@ class ContinuousLearningTests(unittest.TestCase):
         })
 
     def test_multi_claim_pending_repeat_returns_already_pending_without_writes(self):
-        self.finalize(self.observed("DIRECT_READ"))
-        change = self.replacement(old_evidence=[])
+        self.finalize(self.route_observed())
+        change = self.route_replacement(old_evidence=[])
         self.finalize(change, at=T2, run="002")
         pending = self.memory.get_pending_candidates("example", "search")[0]
         extra_claim_id = "clm:example:search:pending-extra"
@@ -462,12 +536,12 @@ class ContinuousLearningTests(unittest.TestCase):
         })
 
     def test_insufficient_enrichment_is_preserved_once_and_remains_pending(self):
-        self.finalize(self.observed("DIRECT_READ"))
+        self.finalize(self.route_observed())
         staging = {"authentication": "PUBLIC", "environment": "STAGING"}
-        self.finalize(self.replacement(
+        self.finalize(self.route_replacement(
             context=staging, old_evidence=[]
         ), at=T2, run="002")
-        enriched_change = self.replacement(context=staging)
+        enriched_change = self.route_replacement(context=staging)
         enriched = self.finalize(
             enriched_change, at=T2, run="003"
         )
@@ -492,27 +566,29 @@ class ContinuousLearningTests(unittest.TestCase):
         )))
 
     def test_competing_different_pending_proposal_blocks_enriched_promotion(self):
-        self.finalize(self.observed("DIRECT_READ"))
-        self.finalize(self.replacement(old_evidence=[]), at=T2, run="002")
-        competing = self.observed("LIGHTPANDA")
+        self.finalize(self.route_observed())
+        self.finalize(self.route_replacement(old_evidence=[]), at=T2, run="002")
+        competing = self.observed(
+            "DIRECT_READ", family="limitation", value={"state": "UNCONFIRMED"}
+        )
         competing["epistemic"] = "INFERRED"
         self.finalize(
             competing, at=T2, run="003"
         )
         result = self.finalize(
-            self.replacement(), at=T2, run="004"
+            self.route_replacement(), at=T2, run="004"
         )
         self.assertEqual("NOT_SAVED", result.status)
         self.assertEqual(2, len(self.memory.get_pending_candidates(
             "example", "search"
         )))
-        self.assertEqual("DIRECT_READ", self.memory.get_current(
+        self.assertEqual({"path": "/old"}, self.memory.get_current(
             "example", "search"
-        )["accepted_claims"][0]["value"]["transport"])
+        )["accepted_claims"][0]["value"])
 
     def test_enrichment_and_promotion_failure_roll_back_together(self):
-        self.finalize(self.observed("DIRECT_READ"))
-        self.finalize(self.replacement(old_evidence=[]), at=T2, run="002")
+        self.finalize(self.route_observed())
+        self.finalize(self.route_replacement(old_evidence=[]), at=T2, run="002")
         before = tuple(self.memory._conn.execute(
             f"SELECT count(*) FROM {table}"
         ).fetchone()[0] for table in (
@@ -524,7 +600,7 @@ class ContinuousLearningTests(unittest.TestCase):
             BEGIN SELECT RAISE(ABORT, 'fixture'); END""")
         with self.assertRaises(Exception):
             self.finalize(
-                self.replacement(), at=T2, run="003"
+                self.route_replacement(), at=T2, run="003"
             )
         self.assertEqual(before, tuple(self.memory._conn.execute(
             f"SELECT count(*) FROM {table}"
@@ -534,9 +610,9 @@ class ContinuousLearningTests(unittest.TestCase):
         )))
 
     def test_only_old_failure_evidence_stays_pending(self):
-        self.finalize(self.observed("DIRECT_READ"))
+        self.finalize(self.route_observed())
         result = self.finalize(
-            self.replacement(new_evidence=[]), at=T2, run="002"
+            self.route_replacement(new_evidence=[]), at=T2, run="002"
         )
         self.assertEqual("NOT_SAVED", result.status)
         self.assertEqual("INSUFFICIENT_BILATERAL_EVIDENCE", result.reason_code)

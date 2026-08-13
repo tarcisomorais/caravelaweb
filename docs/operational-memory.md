@@ -41,6 +41,13 @@ observations, evidence, and run provenance. It rejects task results, raw page
 content, logs, credentials, private data, browser sessions, and platform-only
 state.
 
+Browser-backed results additionally require an evidenced, ordered
+`transport_trace`. The finalizer validates the current run's preflight
+availability and attempts before writing, but does not persist that trace or
+availability as a Claim or other target knowledge. Failed or insufficient
+transport observations may justify escalation; only a functional transport
+may support an operational lifecycle.
+
 The normal result strings are:
 
 - `SAVED` — reusable knowledge was saved and is available to lookup.
@@ -58,6 +65,8 @@ current and uncontradicted. Partial accepted knowledge remains lookup-visible.
 The public finalizer accepts only documented wrapper and family-value fields.
 Extraction output is represented as field-path/selector schema maps, never as
 returned records; unknown structured fields are rejected before persistence.
+An exact historical multi-Claim Candidate can be enriched and promoted on a
+later valid retry without duplicating its Claims or Proposal.
 
 ## Authority and safety
 

@@ -52,7 +52,9 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         return {
             "target": "example-news", "capability": "topic-search",
             "observations": observations or [
-                {"family": "transport", "value": {"transport": "CHROME", "outcome": "FUNCTIONAL"}},
+                {"family": "transport", "value": {
+                    "transport": "DIRECT_READ", "outcome": "FUNCTIONAL",
+                }},
                 {"family": "extraction", "value": {"structure": "JSON_LD"}},
             ],
             "evidence": [{"kind": "bounded-browser-validation", "locator": "https://www.example-news.com/busca/"}],
@@ -62,12 +64,42 @@ class DiscoveryFinalizeTests(unittest.TestCase):
 
     def finalize(self, payload=None):
         payload = payload or self.payload()
-        return finalize_discovery(
-            self.memory, target=payload["target"], capability=payload["capability"],
-            observations=payload["observations"], evidence=payload["evidence"], provenance=payload["provenance"],
-            recorded_at=payload["recorded_at"], knowledge_write_authority=True,
-            write_destination=WRITE_DESTINATION,
-        )
+        arguments = {
+            "target": payload["target"], "capability": payload["capability"],
+            "observations": payload["observations"], "evidence": payload["evidence"],
+            "provenance": payload["provenance"], "recorded_at": payload["recorded_at"],
+            "knowledge_write_authority": True, "write_destination": WRITE_DESTINATION,
+        }
+        if "transport_trace" in payload:
+            arguments["transport_trace"] = payload["transport_trace"]
+        return finalize_discovery(self.memory, **arguments)
+
+    @staticmethod
+    def transport_trace(*attempts, lightpanda="AVAILABLE", chrome="AVAILABLE"):
+        return {
+            "availability": {"LIGHTPANDA": lightpanda, "CHROME": chrome},
+            "attempts": [
+                {"transport": transport, "outcome": outcome, "evidence": [locator]}
+                for transport, outcome, locator in attempts
+            ],
+        }
+
+    @staticmethod
+    def transport_observation(transport, outcome, locator):
+        return {
+            "family": "transport",
+            "value": {"transport": transport, "outcome": outcome},
+            "validation": {
+                "transport": transport,
+                "outcome": outcome,
+                "engine": None if transport == "DIRECT_READ" else transport.lower(),
+                "javascript": transport != "DIRECT_READ",
+                "context": {
+                    "authentication": "PUBLIC", "environment": "PRODUCTION",
+                },
+                "evidence": [locator],
+            },
+        }
 
     def operational_payload(
         self, *, target="synthetic-operational", capability="extract-items",
@@ -85,7 +117,9 @@ class DiscoveryFinalizeTests(unittest.TestCase):
             "target": target,
             "capability": capability,
             "observations": observations or [
-                {"family": "transport", "value": {"transport": "DIRECT_READ"}},
+                {"family": "transport", "value": {
+                    "transport": "DIRECT_READ", "outcome": "FUNCTIONAL",
+                }},
                 {"family": "authentication", "value": {"access_model": "PUBLIC"}},
                 {
                     "family": "validation",
@@ -442,6 +476,248 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         current = self.memory.get_current("example-news", "topic-search")
         self.assertEqual(7, len(current["accepted_claims"]))
 
+    def test_transport_escalation_is_not_a_transport_conflict(self):
+        locator = "https://www.example-news.com/search"
+        payload = self.payload([
+            self.transport_observation("DIRECT_READ", "FAILED", locator),
+            self.transport_observation("LIGHTPANDA", "INSUFFICIENT", locator),
+            self.transport_observation("CHROME", "FUNCTIONAL", locator),
+        ])
+        payload["evidence"] = [{
+            "kind": "transport-validation", "locator": locator,
+        }]
+        payload["transport_trace"] = self.transport_trace(
+            ("DIRECT_READ", "FAILED", locator),
+            ("LIGHTPANDA", "INSUFFICIENT", locator),
+            ("CHROME", "FUNCTIONAL", locator),
+        )
+        result = self.finalize(payload)
+        self.assertEqual("SAVED", result.status)
+        self.assertEqual(
+            {"DIRECT_READ", "LIGHTPANDA", "CHROME"},
+            {
+                claim["value"]["transport"]
+                for claim in self.memory.get_current(
+                    "example-news", "topic-search"
+                )["accepted_claims"]
+            },
+        )
+        persisted = "\n".join(
+            row[0]
+            for table in (
+                "claims", "proposals", "decisions", "validations",
+                "observations", "evidence",
+            )
+            for row in self.memory._conn.execute(f"SELECT payload_json FROM {table}")
+        )
+        self.assertNotIn("transport_trace", persisted)
+        self.assertNotIn("availability", persisted)
+
+    def test_available_lightpanda_cannot_be_skipped_before_chrome(self):
+        locator = "https://www.example-news.com/search"
+        payload = self.payload([
+            self.transport_observation("DIRECT_READ", "FAILED", locator),
+            self.transport_observation("CHROME", "FUNCTIONAL", locator),
+        ])
+        payload["evidence"] = [{
+            "kind": "transport-validation", "locator": locator,
+        }]
+        payload["transport_trace"] = self.transport_trace(
+            ("DIRECT_READ", "FAILED", locator),
+            ("CHROME", "FUNCTIONAL", locator),
+        )
+        before = tuple(
+            self.memory._conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+            for table in ("claims", "proposals", "decisions", "evidence")
+        )
+        result = self.finalize(payload)
+        self.assertEqual("NOT_SAVED", result.status)
+        self.assertEqual("TRANSPORT_POLICY_UNPROVEN", result.reason_code)
+        self.assertEqual(before, tuple(
+            self.memory._conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+            for table in ("claims", "proposals", "decisions", "evidence")
+        ))
+
+    def test_unavailable_lightpanda_does_not_authorize_chrome(self):
+        locator = "https://www.example-news.com/search"
+        payload = self.payload([
+            self.transport_observation("DIRECT_READ", "INSUFFICIENT", locator),
+            self.transport_observation("CHROME", "FUNCTIONAL", locator),
+        ])
+        payload["evidence"] = [{
+            "kind": "transport-validation", "locator": locator,
+        }]
+        payload["transport_trace"] = self.transport_trace(
+            ("DIRECT_READ", "INSUFFICIENT", locator),
+            ("CHROME", "FUNCTIONAL", locator),
+            lightpanda="UNAVAILABLE",
+        )
+        before = tuple(
+            self.memory._conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+            for table in ("claims", "proposals", "decisions", "evidence")
+        )
+        result = self.finalize(payload)
+        self.assertEqual("NOT_SAVED", result.status)
+        self.assertEqual("TRANSPORT_POLICY_UNPROVEN", result.reason_code)
+        self.assertEqual(before, tuple(
+            self.memory._conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+            for table in ("claims", "proposals", "decisions", "evidence")
+        ))
+
+    def test_unproven_replacement_is_never_automatically_promoted(self):
+        # An operational proof is exempt from the family conflict gate, so only
+        # the contradiction gate keeps an unproven replacement out of the
+        # accepted view.
+        target, capability = "synthetic-unproven-replacement", "extract-items"
+        locator = f"https://{target}.example/items"
+        old_proof = {
+            "entrypoint": locator,
+            "required_action": "open the item list",
+            "completion_condition": "the item collection is present",
+            "critical_constraints": [],
+        }
+        new_proof = {**old_proof, "entrypoint": f"{locator}/v2"}
+        context = {"authentication": "PUBLIC", "environment": "PRODUCTION"}
+
+        def validation(outcome, evidence, **extra):
+            return {
+                "transport": "DIRECT_READ", "outcome": outcome, "engine": None,
+                "javascript": False, "context": context,
+                "evidence": [evidence], **extra,
+            }
+
+        first = {
+            "target": target, "capability": capability,
+            "observations": [
+                {"family": "transport", "value": {
+                    "transport": "DIRECT_READ", "outcome": "FUNCTIONAL",
+                }},
+                {"family": "authentication", "value": {"access_model": "PUBLIC"}},
+                {
+                    "family": "validation",
+                    "value": {"operational_proof": old_proof},
+                    "validation": validation("FUNCTIONAL", locator),
+                },
+            ],
+            "evidence": [{"kind": "synthetic-validation", "locator": locator}],
+            "provenance": {"run_id": f"run:{target}:001", "observed_at": RECORDED},
+            "recorded_at": RECORDED,
+        }
+        self.assertEqual("SAVED", self.finalize(first).status)
+        accepted = set(self.memory.get_current(target, capability)["accepted_claim_ids"])
+
+        # A second unrelated new Claim keeps the delta above the single-Claim
+        # replacement path, so no replacement Decision can prove the change.
+        second = {
+            "target": target, "capability": capability,
+            "observations": [
+                {
+                    "family": "validation",
+                    "value": {"operational_proof": new_proof},
+                    "validation": validation("FUNCTIONAL", f"{locator}/new"),
+                    "contradiction": {
+                        "prior_value": {"operational_proof": old_proof},
+                        "validation": validation(
+                            "FAILED", f"{locator}/old",
+                            failure_class="TARGET_CHANGED",
+                        ),
+                    },
+                },
+                {"family": "search_surface", "value": {"surface": "OFFICIAL_SEARCH"}},
+            ],
+            "evidence": [
+                {"kind": "synthetic-validation", "locator": f"{locator}/new"},
+                {"kind": "synthetic-validation", "locator": f"{locator}/old"},
+            ],
+            "provenance": {"run_id": f"run:{target}:002", "observed_at": RECORDED},
+            "recorded_at": RECORDED,
+        }
+        result = self.finalize(second)
+        self.assertEqual("NOT_SAVED", result.status)
+        self.assertEqual("REPLACEMENT_UNPROVEN", result.reason_code)
+        self.assertEqual(accepted, set(
+            self.memory.get_current(target, capability)["accepted_claim_ids"]
+        ))
+        self.assertFalse(self.memory.has_verified_operational_lifecycle(
+            target, capability
+        ))
+
+    def test_same_transport_incompatible_outcomes_remain_conflicting(self):
+        result = self.finalize(self.payload([
+            {"family": "transport", "value": {
+                "transport": "DIRECT_READ", "outcome": "FAILED",
+            }},
+            {"family": "transport", "value": {
+                "transport": "DIRECT_READ", "outcome": "FUNCTIONAL",
+            }},
+        ]))
+        self.assertEqual("NOT_SAVED", result.status)
+        self.assertEqual("CONFLICT_OR_AMBIGUITY", result.reason_code)
+
+    def test_exact_multi_claim_pending_escalation_can_be_retried(self):
+        direct_id = "clm:example-news:topic-search:pending-direct"
+        chrome_id = "clm:example-news:topic-search:pending-chrome"
+        proposal_id = "prop:example-news:topic-search:pending-escalation"
+        with self.memory.write_transaction() as writer:
+            for claim_id, transport, outcome in (
+                (direct_id, "DIRECT_READ", "FAILED"),
+                (chrome_id, "CHROME", "FUNCTIONAL"),
+            ):
+                writer.claim({
+                    "id": claim_id,
+                    "target_id": "tgt:example-news",
+                    "capability_id": "cap:example-news:topic-search",
+                    "family": "transport",
+                    "epistemic": "OBSERVED",
+                    "value": {"transport": transport, "outcome": outcome},
+                    "proposal_id": proposal_id,
+                    "recorded_at": RECORDED,
+                })
+            writer.proposal({
+                "id": proposal_id,
+                "target_id": "tgt:example-news",
+                "capability_id": "cap:example-news:topic-search",
+                "recorded_at": RECORDED,
+                "claim_ids": [direct_id, chrome_id],
+            })
+        before = {
+            table: self.memory._conn.execute(
+                f"SELECT count(*) FROM {table}"
+            ).fetchone()[0]
+            for table in ("claims", "proposals")
+        }
+
+        locator = "https://www.example-news.com/search"
+        payload = self.payload([
+            self.transport_observation("DIRECT_READ", "FAILED", locator),
+            self.transport_observation("CHROME", "FUNCTIONAL", locator),
+        ])
+        payload["evidence"] = [{
+            "kind": "transport-validation", "locator": locator,
+        }]
+        payload["transport_trace"] = self.transport_trace(
+            ("DIRECT_READ", "FAILED", locator),
+            ("CHROME", "FUNCTIONAL", locator),
+            lightpanda="PLATFORM_UNSUPPORTED",
+        )
+        result = self.finalize(payload)
+        self.assertEqual("SAVED", result.status)
+        self.assertEqual([], self.memory.get_pending_candidates(
+            "example-news", "topic-search"
+        ))
+        self.assertEqual(
+            {direct_id, chrome_id},
+            set(self.memory.get_current(
+                "example-news", "topic-search"
+            )["accepted_claim_ids"]),
+        )
+        self.assertEqual(before, {
+            table: self.memory._conn.execute(
+                f"SELECT count(*) FROM {table}"
+            ).fetchone()[0]
+            for table in before
+        })
+
     def test_extraction_paths_selectors_and_operational_constraints_remain_reusable(self):
         extraction = self.payload([{
             "family": "extraction",
@@ -517,6 +793,28 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         self.assertEqual(2, result.returncode)
         self.assertIn("unsupported fields", json.loads(result.stderr)["reason"])
 
+    def test_cli_accepts_run_scoped_transport_trace(self):
+        locator = "https://www.example-news.com/search"
+        payload = self.payload([
+            self.transport_observation("DIRECT_READ", "FAILED", locator),
+            self.transport_observation("CHROME", "FUNCTIONAL", locator),
+        ])
+        payload["evidence"] = [{
+            "kind": "transport-validation", "locator": locator,
+        }]
+        payload["transport_trace"] = self.transport_trace(
+            ("DIRECT_READ", "FAILED", locator),
+            ("CHROME", "FUNCTIONAL", locator),
+            lightpanda="PLATFORM_UNSUPPORTED",
+        )
+        result = subprocess.run(
+            [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root)],
+            input=json.dumps(payload), text=True, capture_output=True,
+            encoding="utf-8",
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("SAVED", json.loads(result.stdout)["status"])
+
     def test_invalid_payload_has_no_partial_write(self):
         before = tuple(self.memory._conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in ("claims", "proposals", "evidence"))
         payload = self.payload([{"family": "transport", "value": {"html": "<html>bad</html>"}}])
@@ -586,7 +884,7 @@ class DiscoveryFinalizeTests(unittest.TestCase):
     def test_example_news_fixture_retains_only_operational_facts(self):
         fixture = self.payload([
             {"family": "search_surface", "value": {"surface": "OFFICIAL_SEARCH"}},
-            {"family": "transport", "value": {"transport": "CHROME", "outcome": "FUNCTIONAL"}},
+            {"family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"}},
             {"family": "extraction", "value": {"structure": "JSON_LD"}},
             {"family": "paywall", "value": {"signal": "PAYWALL_MARKER"}},
             {"family": "limitation", "value": {"mode": "METADATA_ONLY"}},
@@ -604,11 +902,24 @@ class DiscoveryFinalizeTests(unittest.TestCase):
             "provenance": {"run_id": "run:maps:001", "observed_at": RECORDED},
             "evidence": [{"kind": "bounded-browser-validation", "locator": "https://maps.example.com/"}],
             "observations": [
-                {"family": "transport", "value": {"transport": "CHROME", "requirement": "BROWSER_REQUIRED"}},
+                self.transport_observation(
+                    "DIRECT_READ", "FAILED", "https://maps.example.com/"
+                ),
+                {**self.transport_observation(
+                    "CHROME", "FUNCTIONAL", "https://maps.example.com/"
+                ), "value": {
+                    "transport": "CHROME", "outcome": "FUNCTIONAL",
+                    "requirement": "BROWSER_REQUIRED",
+                }},
                 {"family": "search_surface", "value": {"surface": "RESULT_FEED", "loading": "PROGRESSIVE"}},
                 {"family": "extraction", "value": {"structure": "RESULT_CARDS"}},
                 {"family": "validation", "value": {"rule": "GEOGRAPHIC_MATCH"}},
             ]}
+        payload["transport_trace"] = self.transport_trace(
+            ("DIRECT_READ", "FAILED", "https://maps.example.com/"),
+            ("CHROME", "FUNCTIONAL", "https://maps.example.com/"),
+            lightpanda="PLATFORM_UNSUPPORTED",
+        )
         self.assertEqual("SAVED", self.finalize(payload).status)
         text = "\n".join(row[0] for row in self.memory._conn.execute("SELECT payload_json FROM claims WHERE target_id='tgt:example-maps'"))
         self.assertNotIn("store", text.lower())
@@ -675,9 +986,111 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         self.assertEqual(3, len(record["operational_proof"]["claim_ids"]))
         self.assertNotIn("items[].name", json.dumps(record["operational_proof"]))
 
+    def test_failed_transport_cannot_support_operational_lifecycle(self):
+        payload = self.operational_payload(target="synthetic-failed-transport")
+        payload["observations"][0]["value"]["outcome"] = "FAILED"
+        result = self.finalize(payload)
+        self.assertEqual("SAVED", result.status)
+        self.assertFalse(self.memory.has_verified_operational_lifecycle(
+            payload["target"], payload["capability"]
+        ))
+
+    def test_complete_chrome_ladder_can_earn_operational_lifecycle(self):
+        target = "synthetic-chrome-operational"
+        locator = f"https://{target}.example/items"
+        payload = self.operational_payload(target=target)
+        proof = payload["observations"][2]
+        proof["validation"].update({
+            "transport": "CHROME", "engine": "chromium", "javascript": True,
+        })
+        payload["observations"] = [
+            self.transport_observation("DIRECT_READ", "FAILED", locator),
+            self.transport_observation("LIGHTPANDA", "INSUFFICIENT", locator),
+            self.transport_observation("CHROME", "FUNCTIONAL", locator),
+            payload["observations"][1],
+            proof,
+        ]
+        payload["transport_trace"] = self.transport_trace(
+            ("DIRECT_READ", "FAILED", locator),
+            ("LIGHTPANDA", "INSUFFICIENT", locator),
+            ("CHROME", "FUNCTIONAL", locator),
+        )
+        result = self.finalize(payload)
+        self.assertEqual("SAVED", result.status)
+        self.assertTrue(self.memory.has_verified_operational_lifecycle(
+            target, payload["capability"]
+        ))
+        lifecycle = next(
+            claim for claim in self.memory.get_current(
+                target, payload["capability"]
+            )["accepted_claims"]
+            if claim["family"] == "lifecycle"
+        )
+        dependencies = [
+            self.memory.get_record(claim_id)
+            for claim_id in self.memory.get_record(
+                lifecycle["id"]
+            )["operational_proof"]["claim_ids"]
+        ]
+        self.assertEqual(
+            [{"outcome": "FUNCTIONAL", "transport": "CHROME"}],
+            [item["value"] for item in dependencies if item["family"] == "transport"],
+        )
+
+    def test_legacy_chrome_claim_cannot_be_promoted_by_proof_alone(self):
+        target = "legacy-chrome"
+        capability = "extract-items"
+        with self.memory.write_transaction() as writer:
+            writer.target({"id": f"tgt:{target}"})
+            writer.capability({
+                "id": f"cap:{target}:{capability}",
+                "target_id": f"tgt:{target}",
+                "key": capability,
+            })
+            for suffix, family, value in (
+                ("transport", "transport", {
+                    "transport": "CHROME", "outcome": "FUNCTIONAL",
+                }),
+                ("authentication", "authentication", {"access_model": "PUBLIC"}),
+            ):
+                claim_id = f"clm:{target}:{capability}:{suffix}"
+                writer.claim({
+                    "id": claim_id,
+                    "target_id": f"tgt:{target}",
+                    "capability_id": f"cap:{target}:{capability}",
+                    "family": family,
+                    "epistemic": "OBSERVED",
+                    "value": value,
+                    "recorded_at": RECORDED,
+                })
+                writer.decision({
+                    "id": f"dec:{target}:{capability}:{suffix}",
+                    "target_id": f"tgt:{target}",
+                    "capability_id": f"cap:{target}:{capability}",
+                    "action": "ACCEPT",
+                    "claim_ids": [claim_id],
+                    "effective_at": RECORDED,
+                    "recorded_at": RECORDED,
+                    "validity": {"valid_from": RECORDED, "valid_to": None},
+                })
+
+        payload = self.operational_payload(target=target)
+        payload["observations"] = [payload["observations"][2]]
+        payload["observations"][0]["validation"].update({
+            "transport": "CHROME", "engine": "chromium", "javascript": True,
+        })
+        result = self.finalize(payload)
+        self.assertEqual("NOT_SAVED", result.status)
+        self.assertEqual("TRANSPORT_POLICY_UNPROVEN", result.reason_code)
+        self.assertFalse(self.memory.has_verified_operational_lifecycle(
+            target, capability
+        ))
+
     def test_prior_accepted_facts_can_complete_a_later_operational_proof(self):
         first = self.operational_payload(observations=[
-            {"family": "transport", "value": {"transport": "DIRECT_READ"}},
+            {"family": "transport", "value": {
+                "transport": "DIRECT_READ", "outcome": "FUNCTIONAL",
+            }},
             {"family": "authentication", "value": {"access_model": "PUBLIC"}},
         ])
         self.assertEqual("SAVED", self.finalize(first).status)

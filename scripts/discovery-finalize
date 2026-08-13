@@ -24,7 +24,10 @@ def read_input(path: str) -> dict:
     value = json.loads(raw)
     if not isinstance(value, dict):
         raise DiscoveryFinalizationError("Discovery input must be a JSON object")
-    allowed = {"target", "capability", "observations", "evidence", "provenance", "recorded_at"}
+    allowed = {
+        "target", "capability", "observations", "evidence", "provenance",
+        "recorded_at", "transport_trace",
+    }
     unknown = set(value) - allowed
     if unknown:
         raise DiscoveryFinalizationError(
@@ -55,6 +58,7 @@ def main() -> int:
                 target=payload.get("target"), capability=payload.get("capability"),
                 observations=payload.get("observations"), evidence=payload.get("evidence"),
                 provenance=payload.get("provenance"), recorded_at=payload.get("recorded_at"),
+                transport_trace=payload.get("transport_trace"),
                 knowledge_write_authority=True,
                 write_destination=WRITE_DESTINATION,
             )
