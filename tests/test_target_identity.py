@@ -222,9 +222,28 @@ class TargetHostAssociationTests(unittest.TestCase):
         result = lookup.lookup("unrelated-brand.example", capability="public-homepage", use_operational_memory=True)
         self.assertIsNone(result.operational_context)
 
-    def test_multiple_target_matches_fail_closed(self) -> None:
+    def test_a_second_target_cannot_claim_a_known_hostname(self) -> None:
+        """The collision is refused while the caller can still fix the target."""
         self._finalize("gtolab-one", host="shared.example.com", run="001")
-        self._finalize("gtolab-two", host="shared.example.com", run="002")
+        with self.assertRaises(DiscoveryFinalizationError):
+            self._finalize("gtolab-two", host="shared.example.com", run="002")
+        self.assertEqual("tgt:gtolab-one", self.memory.resolve_target("shared.example.com"))
+        self.assertEqual(
+            1,
+            self.memory._conn.execute(
+                "SELECT count(*) FROM hosts WHERE hostname=?", ("shared.example.com",),
+            ).fetchone()[0],
+        )
+
+    def test_multiple_target_matches_fail_closed(self) -> None:
+        """Defence in depth for a database that already holds a collision."""
+        self._finalize("gtolab-one", host="shared.example.com", run="001")
+        self._finalize("gtolab-two", host="other.example.com", run="002")
+        with self.memory.write_transaction() as writer:
+            writer.host({
+                "id": "host:gtolab-two:collision", "target_id": "tgt:gtolab-two",
+                "hostname": "shared.example.com",
+            })
         with self.assertRaises(KeyError):
             self.memory.resolve_target("shared.example.com")
         lookup = KnowledgeLookupBoundary(self.root, self.db)
@@ -264,7 +283,12 @@ class TargetHostAssociationTests(unittest.TestCase):
         """A hostname shared by two targets must refuse to finalize under
         that hostname, and must not create or mutate any capability."""
         self._finalize("gtolab-one", host="shared.example.com", run="001")
-        self._finalize("gtolab-two", host="shared.example.com", run="002")
+        self._finalize("gtolab-two", host="other.example.com", run="002")
+        with self.memory.write_transaction() as writer:
+            writer.host({
+                "id": "host:gtolab-two:collision", "target_id": "tgt:gtolab-two",
+                "hostname": "shared.example.com",
+            })
         with self.assertRaises(DiscoveryFinalizationError):
             self._finalize("shared.example.com", capability="search", run="003")
         with self.assertRaises(KeyError):

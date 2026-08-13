@@ -26,6 +26,17 @@ Discovery executes and delivers the caller's actual task while it learns — it 
    knowledge. An available Lightpanda tier cannot be omitted from a durable
    Chrome result.
 
+   A trace ends at the first `FUNCTIONAL` transport or with the ladder
+   exhausted. A capability blocked on every transport is finalized with the
+   full trace, exactly as a working one is: it records the block and earns no
+   operational transport. A run that stopped while an available transport was
+   still untried proves neither, and stays unproven -- including the case
+   where the transport policy itself halted first, which is not exhaustion.
+   A ladder that reached no working transport must also carry a durable
+   failure class from the list below; `TRANSIENT_NETWORK`,
+   `UPSTREAM_TOOL_ERROR`, `LOCAL_ENVIRONMENT`, `PLATFORM_UNSUPPORTED`, and
+   `UNKNOWN` describe this run or this machine, so they save nothing.
+
 ### Stop conditions
 
 Success (capability reaches `UNDERSTOOD`/`OPERATIONAL`); authority boundary reached; external blocker (unavailable auth, human verification, blocked geography); path works too inconsistently to promote; target/capability proves unsuitable. Don't keep exploring just to produce more information.
@@ -107,6 +118,7 @@ Decision rule when authority permits ordinary browser observation:
 2. If the browser passes transparently and the capability works → classify based on the **capability outcome** (e.g. `ENGINE_INCOMPATIBILITY` for DIRECT_READ if the content is JS-rendered, not `SITE_BLOCKING`).
 3. If an interactive CAPTCHA / Turnstile / human-verification challenge appears → classify `SITE_BLOCKING`, record the evidence, and stop.
 4. **Never interact with or bypass human-verification controls** merely to complete Discovery — that stays outside this skill regardless of how convenient it would be.
+5. **Stopping means stopping.** Once the ladder is exhausted, do not continue the same investigation through a web-search tool, an external index, a cached or mirrored copy, or a third-party republisher. None of them is a transport in this hierarchy, and none observes the target. Report the block. A limited search may still locate a route to try through the hierarchy; the search output is a lead, never evidence about the target.
 
 This is not a generic "every 403 requires Chrome" rule. Classification remains evidence-driven and capability-scoped — a 403 from a genuinely blocked endpoint (rate limit, geo-restriction, permanent ban) should be classified directly without browser observation. The browser observation step applies specifically when the 403 page content suggests an auto-resolvable challenge rather than a hard block.
 

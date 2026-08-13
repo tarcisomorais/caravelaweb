@@ -73,6 +73,8 @@ Don't automatically follow external links (ads, user-posted contact info, unrela
 
 CAPTCHA, Cloudflare-style challenges, rate limits, regional gates: record as a target constraint and stop. Do not add stealth, evasion, or anti-bot bypass behavior as routine behavior — that decision sits outside this skill. A blocked capability may simply remain unsupported; that's an acceptable, honest outcome, not a failure to fix.
 
+Routing around the block is the same decision as bypassing it. Reaching the content through a web-search tool, an external index, a cached or mirrored copy, or a third-party republisher does not observe the target and is not a CaravelaWeb transport. Report the block instead, and keep the reported claim inside what the reached surfaces actually showed.
+
 ## Fail Closed for Consequential Actions
 
 Ambiguity defaults to *not acting* when consequence is high (unsure if a button submits → don't click; unsure if retry duplicates a purchase → don't retry; unsure if a link sends a message → inspect first). This does not mean being overly conservative on ordinary read/navigate tasks — the rule scales with consequence, not with every action.

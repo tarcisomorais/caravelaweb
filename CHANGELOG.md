@@ -45,8 +45,54 @@ under **Unreleased** until a version and tag are intentionally chosen.
   setup step. A `knowledge-lookup` result of `unresolved` now retries once
   after that sequence instead of stopping immediately.
 
+### Fixed
+
+- A fully blocked transport ladder can be finalized. `discovery-finalize`
+  required a trace to end at a `FUNCTIONAL` transport, so a capability blocked
+  on every transport was rejected with `TRANSPORT_POLICY_UNPROVEN` and the only
+  accepted payload was one with the browser observations deleted. A trace now
+  ends either at a `FUNCTIONAL` transport or with the ladder exhausted; an
+  exhausted ladder saves its block and earns no operational transport. A run
+  that stopped while an available transport was untried is still unproven.
+- A ladder that reached no working transport must classify why. `FAILED` alone
+  does not distinguish a target that blocked the run from a network that
+  dropped one request, and `references/transport-and-modes.md` has always
+  required classifying before mutating knowledge. `TRANSIENT_NETWORK`,
+  `UPSTREAM_TOOL_ERROR`, `LOCAL_ENVIRONMENT`, and `UNKNOWN` now save nothing
+  (`FAILURE_UNCLASSIFIED`); `PLATFORM_UNSUPPORTED` was already rejected
+  outright.
+- Exhausting the transport policy is no longer treated as exhausting the
+  ladder. `next_transport` halts at an `UNAVAILABLE` Lightpanda tier even when
+  Chrome exists, so a run that never reached Chrome can no longer report the
+  capability as blocked.
+- An `OBSERVED` `blocking` or `limitation` observation is checked for a
+  validation that names a transport and a complete authentication/environment
+  context. Every validation field is individually optional, so the previous
+  presence-only check accepted `{}` and proved nothing.
+- A second target can no longer claim a hostname already associated with
+  another target. The write is refused while the caller can still correct it,
+  instead of silently creating the collision that made the hostname
+  permanently unresolvable. The read-side guard is unchanged.
+
 ### Changed
 
+- A blocked capability is a complete answer. When the ladder is exhausted and
+  the result is a target block or an authority boundary, the contract requires
+  reporting the block and stopping. Continuing the same investigation through a
+  web-search tool, an external index, or a cached or mirrored copy is out of
+  scope: none of them is a CaravelaWeb transport. A limited search may still
+  locate a route to try; its output is a lead, never evidence about the target.
+- An `OBSERVED` `blocking` or `limitation` observation requires a `validation`
+  naming the transport and the authentication/environment context that saw it.
+  These two families assert a constraint or an absence, so an unvalidated one
+  is reported as `INFERRED` rather than stored as accepted fact.
+- The host-association rules state which half is machine-checked. The finalizer
+  verifies the evidence locator's hostname and refuses a hostname another
+  target claims; whether the operator is genuinely the same stays an executor
+  judgment, and the references now say so instead of implying enforcement.
+- The contract states that the target-only `knowledge-lookup` already returns
+  the accepted context of every capability, so the per-capability call confirms
+  one exact ID rather than fetching withheld knowledge.
 - The Claude plugin manifest declares no `version`, so Claude Code versions it
   by source commit. The Codex manifest uses explicit SemVer, starting at
   `0.1.0`; this change creates no Git tag.

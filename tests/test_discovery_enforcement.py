@@ -8,13 +8,16 @@ REPO = Path(__file__).resolve().parents[1]
 SKILL = REPO / "SKILL.md"
 TRANSPORT = REPO / "references" / "transport-and-modes.md"
 TARGET_PROFILE = REPO / "references" / "target-profile.md"
+SAFETY = REPO / "references" / "safety.md"
 
 # The contract is loaded on every CaravelaWeb task, so its length is capped
 # deliberately rather than allowed to drift. Detail belongs in references/.
 # Raised from 125 when the First run readiness sequence moved into the
 # contract: it must be read before the first command, so a reference file
-# cannot carry it.
-SKILL_LINE_BUDGET = 140
+# cannot carry it. Raised again from 140 for the blocked-ladder stop rule: an
+# agent decides whether to leave CaravelaWeb at the moment a transport is
+# blocked, which is before it would open a reference file.
+SKILL_LINE_BUDGET = 143
 
 
 class DiscoveryEnforcementContractTests(unittest.TestCase):
@@ -104,6 +107,101 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
         self.assertIn("Runs that stayed in **Operation** do not call the finalizer", text)
         self.assertIn("run-scoped `transport_trace`", text)
         self.assertIn("never stored as Claims or other target knowledge", text)
+
+    def test_a_blocked_ladder_stops_instead_of_switching_to_another_tool(self) -> None:
+        text = SKILL.read_text(encoding="utf-8")
+        self.assertIn("report the block and stop", text)
+        self.assertIn("A blocked capability may simply remain unsupported", text)
+        for substitute in (
+            "web-search tool", "an external index", "a cached or mirrored copy",
+        ):
+            self.assertIn(substitute, text)
+        self.assertIn("none of them is a CaravelaWeb transport", text)
+        # The same stop is stated where an agent classifies the block and where
+        # it reads the blocking policy, not only in the contract.
+        transport = TRANSPORT.read_text(encoding="utf-8")
+        self.assertIn("**Stopping means stopping.**", transport)
+        self.assertIn("None of them is a transport in this hierarchy", transport)
+        safety = SAFETY.read_text(encoding="utf-8")
+        self.assertIn(
+            "Routing around the block is the same decision as bypassing it", safety
+        )
+        self.assertIn("third-party republisher", safety)
+
+    def test_search_output_is_a_lead_and_never_target_evidence(self) -> None:
+        text = SKILL.read_text(encoding="utf-8")
+        self.assertIn("only a read of a target surface supports a claim about the target", text)
+        self.assertIn("search output is a lead, never evidence", text)
+        self.assertIn("no functional feed was found on the surfaces reached", text)
+
+    def test_a_fully_blocked_ladder_is_finalized_with_its_evidence(self) -> None:
+        text = SKILL.read_text(encoding="utf-8")
+        self.assertIn("A trace ends either at that `FUNCTIONAL` result or with the ladder exhausted", text)
+        self.assertIn("A fully blocked ladder is therefore finalized normally", text)
+        self.assertIn("it records the block and earns no operational transport", text)
+        self.assertIn("fix the payload, never the evidence", text)
+        profile = TARGET_PROFILE.read_text(encoding="utf-8")
+        self.assertIn(
+            "A ladder with no `FUNCTIONAL` transport is still a complete result when it was\nexhausted",
+            profile,
+        )
+        self.assertIn("Never delete an\nobservation", profile)
+        self.assertIn(
+            "A trace ends at the first `FUNCTIONAL` transport or with the ladder",
+            TRANSPORT.read_text(encoding="utf-8"),
+        )
+
+    def test_an_observed_constraint_names_what_observed_it(self) -> None:
+        text = SKILL.read_text(encoding="utf-8")
+        self.assertIn(
+            "`OBSERVED` requires a `validation` naming the transport and the "
+            "authentication/environment context that saw it",
+            text,
+        )
+        self.assertIn("durable identity claim that later lookups resolve through", text)
+        self.assertIn("never from name resemblance", text)
+        profile = TARGET_PROFILE.read_text(encoding="utf-8")
+        self.assertIn("Claiming `OBSERVED`\nfor one therefore requires a `validation`", profile)
+        self.assertIn("Keep the claim inside what\nwas actually seen", profile)
+        self.assertIn("Shared branding, a similar name, or a plausible relationship\nis not evidence", profile)
+
+    def test_the_unenforceable_half_of_the_host_rule_is_marked_as_such(self) -> None:
+        self.assertIn(
+            "the operator judgment is yours and is not machine-checked",
+            SKILL.read_text(encoding="utf-8"),
+        )
+        profile = TARGET_PROFILE.read_text(encoding="utf-8")
+        self.assertIn("Two of those rules are machine-checked and the third is not", profile)
+        self.assertIn(
+            "evidence served *from* a hostname proves the hostname exists, never that it\nbelongs to this brand",
+            profile,
+        )
+
+    def test_a_failed_ladder_must_classify_why_it_failed(self) -> None:
+        text = SKILL.read_text(encoding="utf-8")
+        self.assertIn("Reaching the policy's last step is not the same as exhausting the ladder", text)
+        self.assertIn("must also name the durable class it observed", text)
+        self.assertIn(
+            "a transient, tool, local-environment, or unclassified failure is runtime state",
+            text,
+        )
+        profile = TARGET_PROFILE.read_text(encoding="utf-8")
+        self.assertIn("Such a ladder must also classify why it failed", profile)
+        self.assertIn(
+            "`FAILED` alone does not distinguish a target that\nblocked this run from a network that dropped one request",
+            profile,
+        )
+        transport = TRANSPORT.read_text(encoding="utf-8")
+        self.assertIn("which is not exhaustion", transport)
+        self.assertIn("describe this run or this machine, so they save nothing", transport)
+
+    def test_the_two_lookup_calls_have_distinct_stated_purposes(self) -> None:
+        text = SKILL.read_text(encoding="utf-8")
+        self.assertIn(
+            "The target-only call already returns the accepted context of every capability",
+            text,
+        )
+        self.assertIn("Run it once per capability you selected", text)
 
     def test_missing_browser_control_never_authorizes_a_substitute_stack(self) -> None:
         for text in (SKILL.read_text(encoding="utf-8"), TRANSPORT.read_text(encoding="utf-8")):

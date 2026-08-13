@@ -45,6 +45,21 @@ target-wide (see Capability and Host Scope below). It is the same
 mechanism target-reference resolution reads from, but it is never collapsed
 into or derived from the target ID.
 
+Because resolution reads these associations, adding a second host to a target
+is a durable identity claim, not a convenience. Record it only from evidence
+that the same operator serves that host for this brand -- a link, redirect, or
+statement on an already-associated host, or matching operator identity on the
+new host itself. Shared branding, a similar name, or a plausible relationship
+is not evidence.
+
+Two of those rules are machine-checked and the third is not. The finalizer
+requires `TARGET_SURFACE` evidence whose locator is on the claimed hostname,
+and it refuses a hostname another target already claims, because two
+associations make that hostname unresolvable for both. Whether the operator is
+genuinely the same is an executor judgment that no check can make for you:
+evidence served *from* a hostname proves the hostname exists, never that it
+belongs to this brand.
+
 ## Capability ID Naming Convention
 
 Capability IDs are target-scoped, stable lower-kebab-case identifiers matching
@@ -167,11 +182,39 @@ conflict. A browser transport can support a new lifecycle only when the same
 finalization run proves the complete available ladder; a legacy browser Claim
 cannot gain `OPERATIONAL` from a later proof-only payload.
 
+A ladder with no `FUNCTIONAL` transport is still a complete result when it was
+exhausted -- every available transport attempted, each with its evidence. That
+finalizes normally and records the block; it identifies no operational
+transport, so it earns no `OPERATIONAL` lifecycle. Only a ladder abandoned
+while an available transport was untried stays unproven. Reaching the last
+step the transport policy permits is not exhaustion on its own: the policy
+halts at an `UNAVAILABLE` Lightpanda tier even when Chrome exists on the
+machine, and a run that never reached Chrome cannot report the capability as
+blocked.
+
+Such a ladder must also classify why it failed, using the vocabulary in
+`transport-and-modes.md`. `FAILED` alone does not distinguish a target that
+blocked this run from a network that dropped one request. Only a durable class
+saves: `TRANSIENT_NETWORK`, `UPSTREAM_TOOL_ERROR`, `LOCAL_ENVIRONMENT`,
+`PLATFORM_UNSUPPORTED`, and `UNKNOWN` describe the runtime or the machine, not
+the target, so a run classified that way records nothing. Never delete an
+observation, a `validation`, or an evidence item to satisfy the finalizer: a
+rejection means the payload is wrong, never that the evidence is unwelcome.
+
 `SAVED` and lookup `found` remain acceptance signals. Partial reusable facts keep both properties without becoming `OPERATIONAL`; a later Discovery may complete the proof from the current accepted facts plus its new delta.
 
 Readiness says a surface is ready to inspect; completion says the requested capability produced the required result. Use an observable readiness condition and bounded timeout when readiness is needed. A page load, HTTP 200, or elapsed sleep is never sufficient proof of completion.
 
 A well-understood blocked capability records its lifecycle, availability, relevant host, blocker/failure class, observed evidence, and conditions that would need to change. Do not invent operational fields that were never reached.
+
+`blocking` and `limitation` assert a constraint or an absence -- the claims
+that are easiest to overstate and hardest to reread later. Claiming `OBSERVED`
+for one therefore requires a `validation` naming the transport, engine, and
+context that saw it. Without that, report the constraint as `INFERRED`: an
+inference alone never becomes accepted knowledge. Keep the claim inside what
+was actually seen. "No functional feed was found on the surfaces reached" is
+supportable; "no official feed exists" claims the whole permitted scope and
+needs evidence covering it.
 
 ## Authentication
 

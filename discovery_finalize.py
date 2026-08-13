@@ -39,6 +39,20 @@ OPERATIONAL_FAMILIES = {
     "transport", "search_surface", "extraction", "pagination", "paywall",
     "authentication", "blocking", "validation", "limitation", "unknown",
 }
+# These two families assert a constraint or an absence -- the claims that are
+# hardest to reread later and easiest to overstate. Claiming OBSERVED for one
+# requires naming the transport and context that observed it; an unvalidated
+# constraint stays INFERRED or UNKNOWN rather than silently ranking as fact.
+_VALIDATION_REQUIRED_FAMILIES = frozenset({"blocking", "limitation"})
+# `references/transport-and-modes.md` classifies these as runtime, tool, or
+# environment state rather than target behavior, so none of them may turn a
+# failed ladder into durable target knowledge. A ladder that reached no working
+# transport must name a class outside this set before it is saved -- otherwise
+# one bad network minute is stored as a property of the target.
+_NON_DURABLE_FAILURE_CLASSES = frozenset({
+    "TRANSIENT_NETWORK", "UPSTREAM_TOOL_ERROR", "LOCAL_ENVIRONMENT",
+    "PLATFORM_UNSUPPORTED", "UNKNOWN",
+})
 _OPERATIONAL_PROOF_VERSION = 1
 _TASK_DATA_TEXT = re.compile(r"<(?:html|body|article|script)\b|\b(?:R\$|US\$)\s?\d|\b(?:articles?|stores?|shops?)\s+(?:found|returned)\b", re.I)
 _SCHEMA_FIELD_PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*|\[\d*\])+$")
@@ -405,6 +419,24 @@ def _normalize_observations(observations: Sequence[Mapping[str, Any]]) -> list[d
             raise DiscoveryFinalizationError("observation value must be a non-empty object")
         clean_value = _normalize_family_value(str(family), value)
         validation = _normalize_validation(item.get("validation"), field="observation.validation")
+        if family in _VALIDATION_REQUIRED_FAMILIES and epistemic == "OBSERVED":
+            # Every validation field is individually optional, so presence alone
+            # proves nothing: `{}` normalizes to an empty context and no
+            # transport. Require every field the rule actually asks for.
+            context = (validation or {}).get("context") or {}
+            if (
+                validation is None
+                or not _meaningful(validation.get("transport"))
+                or "engine" not in validation
+                or not isinstance(validation.get("javascript"), bool)
+                or set(context) != {"authentication", "environment"}
+                or any(not _meaningful(child) for child in context.values())
+            ):
+                raise DiscoveryFinalizationError(
+                    f"an OBSERVED {family} observation requires a validation "
+                    "naming the transport, engine, javascript, and "
+                    "authentication/environment context that observed it"
+                )
         contradiction = item.get("contradiction")
         clean_contradiction = None
         if contradiction is not None:
@@ -705,6 +737,37 @@ def _normalize_transport_trace(value: Any) -> dict[str, Any] | None:
     return {"availability": clean_availability, "attempts": clean_attempts}
 
 
+def _failed_without_a_working_transport(observations: Sequence[Mapping[str, Any]]) -> bool:
+    """True when this run recorded failures and reached nothing that worked."""
+    failed = False
+    for item in observations:
+        validation = item.get("validation")
+        if validation and validation.get("outcome") in {"FUNCTIONAL", "SUCCESS"}:
+            return False
+        if item["family"] != "transport":
+            continue
+        outcome = item["value"].get("outcome")
+        if outcome == "FUNCTIONAL":
+            return False
+        failed = failed or outcome in _TRANSPORT_FAILURES
+    return failed
+
+
+def _durable_failure_classified(observations: Sequence[Mapping[str, Any]]) -> bool:
+    """True when some observation says why the ladder failed, durably."""
+    classes: set[Any] = set()
+    for item in observations:
+        if item["family"] == "blocking":
+            classes.add(item["value"].get("failure_class"))
+        for source in (item.get("validation"), (item.get("contradiction") or {}).get("validation")):
+            if source:
+                classes.add(source.get("failure_class"))
+    return any(
+        isinstance(item, str) and item not in _NON_DURABLE_FAILURE_CLASSES
+        for item in classes
+    )
+
+
 def _browser_trace_required(observations: Sequence[Mapping[str, Any]]) -> bool:
     return any(
         transport in _BROWSER_TRANSPORTS
@@ -719,7 +782,14 @@ def _browser_trace_required(observations: Sequence[Mapping[str, Any]]) -> bool:
 def _validated_transport_trace(
     trace: Mapping[str, Any], observations: Sequence[Mapping[str, Any]],
     evidence: Sequence[Mapping[str, Any]], host_ids: Mapping[str, str],
-) -> tuple[str | None, str] | None:
+) -> tuple[bool, tuple[str | None, str] | None]:
+    """Return (ladder proven, operational transport).
+
+    A ladder is proven when it either reaches a `FUNCTIONAL` transport or is
+    exhausted with every available transport attempted. The second case is a
+    fully blocked capability: it is a complete, reusable observation that
+    identifies no operational transport, so it returns `(True, None)`.
+    """
     availability = trace["availability"]
     policy_attempts: dict[str, str] = {}
     selected: tuple[str | None, str] | None = None
@@ -751,15 +821,15 @@ def _validated_transport_trace(
         try:
             expected = next_transport(policy_attempts, availability)
         except TransportPolicyError:
-            return None
+            return False, None
         if expected != transport:
-            return None
+            return False, None
         policy_outcome = SATISFIED if outcome == "FUNCTIONAL" else INSUFFICIENT
         policy_attempts[transport] = policy_outcome
 
         references = set(attempt["evidence"])
         if not references <= evidence_locators:
-            return None
+            return False, None
         matches: list[dict[str, Any]] = []
         for candidate in observed:
             validation = candidate["validation"]
@@ -801,21 +871,37 @@ def _validated_transport_trace(
             matches.append(candidate)
         contexts = {_canonical(item["validation"]["context"]) for item in matches}
         if len(contexts) != 1:
-            return None
+            return False, None
         context = dict(matches[0]["validation"]["context"])
         if material_context is None:
             material_context = context
         elif material_context != context:
-            return None
+            return False, None
         if outcome == "FUNCTIONAL":
             selected = (
                 host_ids.get(str(attempt["host"])) if attempt["host"] else None,
                 transport,
             )
 
-    if selected is None or trace["attempts"][-1]["outcome"] != "FUNCTIONAL":
-        return None
-    return selected
+    if selected is None:
+        # No transport worked. The ladder still proves the capability's real
+        # state -- but only when it was actually exhausted. Two things must
+        # hold: the policy has no next step, and no transport this machine
+        # actually has was left untried. The second is not implied by the
+        # first. `next_transport` halts at an UNAVAILABLE Lightpanda tier even
+        # when Chrome is present, and a run that never reached Chrome cannot
+        # claim the capability is blocked.
+        try:
+            remaining = next_transport(policy_attempts, availability)
+        except TransportPolicyError:
+            return False, None
+        untried = {
+            transport for transport, status in availability.items()
+            if status == AVAILABLE and transport not in policy_attempts
+        }
+        if remaining is not None or untried:
+            return False, None
+    return True, selected
 
 
 def _referenced_evidence(
@@ -918,6 +1004,14 @@ def _host_plan(
         if not proven:
             raise DiscoveryFinalizationError(
                 "a new observation host requires TARGET_SURFACE evidence from that hostname"
+            )
+        # Target-reference resolution reads these associations, and it fails
+        # closed on more than one match. Creating the second one silently would
+        # make the hostname permanently unresolvable, so refuse it here where
+        # the caller can still correct the target.
+        if any(other != target_id for other in memory.target_ids_for_host(hostname)):
+            raise DiscoveryFinalizationError(
+                "this hostname is already associated with a different target"
             )
         host_id = f"host:{target}:{_digest(hostname)}"
         mapped[hostname] = host_id
@@ -1159,23 +1253,36 @@ def finalize_discovery(
     clean_evidence = _validate_evidence(evidence)
     host_ids, hosts_to_create = _host_plan(memory, target, normalized, clean_evidence)
     clean_trace = _normalize_transport_trace(transport_trace)
-    validated_transport = (
+    ladder_proven, validated_transport = (
         _validated_transport_trace(
             clean_trace, normalized, clean_evidence, host_ids
         )
-        if clean_trace else None
+        if clean_trace else (False, None)
     )
-    if (
-        (clean_trace is not None and validated_transport is None)
-        or (_browser_trace_required(normalized) and validated_transport is None)
-    ):
+    if (clean_trace is not None or _browser_trace_required(normalized)) and not ladder_proven:
         return DiscoveryFinalization(
             "NOT_SAVED", target, capability,
             reason=(
                 "The transport ladder and available simpler transports were not "
-                "proven by this Discovery run."
+                "proven by this Discovery run. Supply a run-scoped "
+                "transport_trace covering every transport this run attempted, "
+                "including a ladder where all of them were blocked. Never drop "
+                "an observation, validation, or evidence item to pass this gate."
             ),
             reason_code="TRANSPORT_POLICY_UNPROVEN",
+        )
+    if _failed_without_a_working_transport(normalized) and not _durable_failure_classified(normalized):
+        return DiscoveryFinalization(
+            "NOT_SAVED", target, capability,
+            reason=(
+                "This run reached no working transport and did not classify why. "
+                "Classify the failure first: a transient network fault, a tool "
+                "error, or a local environment problem is runtime state and "
+                "never becomes target knowledge. Record the durable class "
+                "(for example SITE_BLOCKING, AUTH_REQUIRED, or "
+                "AUTHORITY_BOUNDARY) that this run actually observed."
+            ),
+            reason_code="FAILURE_UNCLASSIFIED",
         )
     # A new scope has no accepted or pending Claims yet. It is created atomically
     # with the pending Candidate below, after authority and payload validation.

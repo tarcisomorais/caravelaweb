@@ -85,6 +85,17 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         }
 
     @staticmethod
+    def observing_validation(locator, transport="DIRECT_READ", outcome="OBSERVED"):
+        """The validation an OBSERVED blocking/limitation claim must carry."""
+        return {
+            "transport": transport, "outcome": outcome,
+            "engine": None if transport == "DIRECT_READ" else transport.lower(),
+            "javascript": transport != "DIRECT_READ",
+            "context": {"authentication": "PUBLIC", "environment": "PRODUCTION"},
+            "evidence": [locator],
+        }
+
+    @staticmethod
     def transport_observation(transport, outcome, locator):
         return {
             "family": "transport",
@@ -236,6 +247,34 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         self.assertEqual("found", lookup_body["status"])
         self.assertNotIn("lifecycle", lookup_body["operational_context"]["current"])
         self.assertEqual(before_lookup, self.memory._conn.execute("SELECT count(*) FROM targets").fetchone()[0])
+
+    def test_cli_blocked_capability_is_reusable_by_the_next_lookup(self):
+        # The next run must find the recorded block and reuse the stop instead
+        # of walking the same blocked ladder again.
+        (self.root / ".caravelaweb/read-authority-operational-memory").write_text(
+            "active", encoding="utf-8"
+        )
+        payload = self.root / "blocked-discovery.json"
+        payload.write_text(json.dumps(self.blocked_ladder_payload()), encoding="utf-8")
+        finalized = subprocess.run(
+            [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root),
+             "--input", str(payload)],
+            text=True, capture_output=True, encoding="utf-8",
+        )
+        self.assertEqual(0, finalized.returncode, finalized.stderr)
+        self.assertEqual("SAVED", json.loads(finalized.stdout)["status"])
+        lookup = subprocess.run(
+            [sys.executable, str(LOOKUP), "--knowledge-root", str(self.root),
+             "--target", "example-news", "--capability", "topic-search"],
+            text=True, capture_output=True, encoding="utf-8",
+        )
+        self.assertEqual(0, lookup.returncode, lookup.stderr)
+        body = json.loads(lookup.stdout)
+        self.assertEqual("found", body["status"])
+        current = body["operational_context"]["current"]
+        self.assertNotIn("lifecycle", current)
+        self.assertIn("SITE_BLOCKING", json.dumps(current))
+        self.assertIn("CHROME", json.dumps(current))
 
     def test_cli_errors_are_structured_without_a_traceback(self):
         payload = self.root / "invalid-discovery.json"
@@ -451,6 +490,7 @@ class DiscoveryFinalizeTests(unittest.TestCase):
                 self.finalize(case)
 
     def test_canonical_public_family_values_remain_accepted(self):
+        locator = "https://www.example-news.com/busca/"
         observations = [
             {"family": "transport", "value": {
                 "transport": "DIRECT_READ", "outcome": "FUNCTIONAL",
@@ -466,10 +506,10 @@ class DiscoveryFinalizeTests(unittest.TestCase):
             {"family": "paywall", "value": {"signal": "PAYWALL_MARKER"}},
             {"family": "blocking", "value": {
                 "failure_class": "TARGET_BLOCK", "condition": "a challenge page is shown",
-            }},
+            }, "validation": self.observing_validation(locator)},
             {"family": "limitation", "value": {
                 "kind": "FIELD_UNAVAILABLE", "constraint": "public pages omit private fields",
-            }},
+            }, "validation": self.observing_validation(locator)},
         ]
         result = self.finalize(self.payload(observations))
         self.assertEqual("SAVED", result.status)
@@ -512,6 +552,265 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         )
         self.assertNotIn("transport_trace", persisted)
         self.assertNotIn("availability", persisted)
+
+    def blocked_ladder_payload(self, locator="https://www.example-news.com/search"):
+        """The Reuters shape: every transport in the ladder was blocked."""
+        payload = self.payload([
+            self.transport_observation("DIRECT_READ", "FAILED", locator),
+            self.transport_observation("LIGHTPANDA", "FAILED", locator),
+            self.transport_observation("CHROME", "FAILED", locator),
+            {"family": "blocking", "value": {
+                "failure_class": "SITE_BLOCKING",
+                "signal": "INTERACTIVE_CHALLENGE",
+                "condition": "a human-verification challenge replaces the page",
+            }, "validation": self.observing_validation(
+                locator, transport="CHROME", outcome="FAILED")},
+        ])
+        payload["evidence"] = [{"kind": "transport-validation", "locator": locator}]
+        payload["transport_trace"] = self.transport_trace(
+            ("DIRECT_READ", "FAILED", locator),
+            ("LIGHTPANDA", "FAILED", locator),
+            ("CHROME", "FAILED", locator),
+        )
+        return payload
+
+    def test_fully_blocked_ladder_is_saved_with_its_transport_evidence(self):
+        # An exhausted ladder proves the capability is blocked. Rejecting it
+        # left the agent no way to record the block except by deleting the
+        # browser evidence that proved it.
+        result = self.finalize(self.blocked_ladder_payload())
+        self.assertEqual("SAVED", result.status)
+        claims = self.memory.get_current("example-news", "topic-search")["accepted_claims"]
+        self.assertEqual(
+            {"DIRECT_READ", "LIGHTPANDA", "CHROME"},
+            {claim["value"]["transport"] for claim in claims if claim["family"] == "transport"},
+        )
+        self.assertEqual(
+            ["SITE_BLOCKING"],
+            [claim["value"]["failure_class"] for claim in claims if claim["family"] == "blocking"],
+        )
+        self.assertFalse(self.memory.has_verified_operational_lifecycle(
+            "example-news", "topic-search"
+        ))
+
+    def test_a_blocked_chrome_ladder_saves_but_earns_no_operational_lifecycle(self):
+        # One variable against test_complete_chrome_ladder_can_earn_operational
+        # _lifecycle: the CHROME attempt is FAILED rather than FUNCTIONAL. The
+        # proof, the authentication fact, and the evidence are identical.
+        #
+        # The refusal is over-determined, and deliberately so: a blocked ladder
+        # has no FUNCTIONAL transport claim *and* its trace selects no
+        # transport. Those are one fact seen twice, not two gates, so this
+        # asserts the outcome rather than pretending to isolate a branch.
+        target = "synthetic-chrome-blocked"
+        locator = f"https://{target}.example/items"
+        payload = self.operational_payload(target=target)
+        proof = payload["observations"][2]
+        proof["validation"].update({
+            "transport": "CHROME", "engine": "chromium", "javascript": True,
+        })
+        payload["observations"] = [
+            self.transport_observation("DIRECT_READ", "FAILED", locator),
+            self.transport_observation("LIGHTPANDA", "INSUFFICIENT", locator),
+            self.transport_observation("CHROME", "FAILED", locator),
+            payload["observations"][1],
+            proof,
+            {"family": "blocking",
+             "value": {"failure_class": "SITE_BLOCKING",
+                       "condition": "a human-verification challenge replaces the page"},
+             "validation": self.observing_validation(
+                 locator, transport="CHROME", outcome="FAILED")},
+        ]
+        payload["transport_trace"] = self.transport_trace(
+            ("DIRECT_READ", "FAILED", locator),
+            ("LIGHTPANDA", "INSUFFICIENT", locator),
+            ("CHROME", "FAILED", locator),
+        )
+        result = self.finalize(payload)
+        self.assertEqual("SAVED", result.status)
+        self.assertFalse(self.memory.has_verified_operational_lifecycle(
+            target, payload["capability"]
+        ))
+        self.assertEqual(
+            ["SITE_BLOCKING"],
+            [
+                claim["value"]["failure_class"]
+                for claim in self.memory.get_current(target, payload["capability"])[
+                    "accepted_claims"
+                ]
+                if claim["family"] == "blocking"
+            ],
+        )
+
+    def test_a_ladder_stopped_before_exhaustion_stays_unproven(self):
+        # Only DIRECT_READ was attempted while Lightpanda was available, so the
+        # run proves neither a working path nor a blocked one.
+        locator = "https://www.example-news.com/search"
+        payload = self.payload([
+            self.transport_observation("DIRECT_READ", "FAILED", locator),
+        ])
+        payload["evidence"] = [{"kind": "transport-validation", "locator": locator}]
+        payload["transport_trace"] = self.transport_trace(
+            ("DIRECT_READ", "FAILED", locator)
+        )
+        result = self.finalize(payload)
+        self.assertEqual("NOT_SAVED", result.status)
+        self.assertEqual("TRANSPORT_POLICY_UNPROVEN", result.reason_code)
+
+    def exhausted_direct_read_payload(self, classified=True):
+        """One attempt, no browser on this machine, so the ladder is exhausted."""
+        locator = "https://www.example-news.com/search"
+        observations = [self.transport_observation("DIRECT_READ", "FAILED", locator)]
+        if classified:
+            observations.append({
+                "family": "blocking",
+                "value": {"failure_class": "AUTH_REQUIRED",
+                          "condition": "the route redirects to a sign-in page"},
+                "validation": self.observing_validation(locator, outcome="FAILED"),
+            })
+        payload = self.payload(observations)
+        payload["evidence"] = [{"kind": "transport-validation", "locator": locator}]
+        payload["transport_trace"] = self.transport_trace(
+            ("DIRECT_READ", "FAILED", locator),
+            lightpanda="PLATFORM_UNSUPPORTED", chrome="PLATFORM_UNSUPPORTED",
+        )
+        return payload
+
+    def test_exhausted_direct_read_only_ladder_is_saved(self):
+        self.assertEqual(
+            "SAVED", self.finalize(self.exhausted_direct_read_payload()).status
+        )
+
+    def test_a_failed_ladder_without_a_durable_class_is_not_saved(self):
+        # `FAILED` alone does not say whether the target blocked this run or
+        # the network dropped one request. Only the second is target knowledge.
+        result = self.finalize(self.exhausted_direct_read_payload(classified=False))
+        self.assertEqual("NOT_SAVED", result.status)
+        self.assertEqual("FAILURE_UNCLASSIFIED", result.reason_code)
+
+    def test_runtime_failure_classes_never_become_target_knowledge(self):
+        for failure_class in (
+            "TRANSIENT_NETWORK", "UPSTREAM_TOOL_ERROR", "LOCAL_ENVIRONMENT", "UNKNOWN",
+        ):
+            with self.subTest(failure_class=failure_class):
+                payload = self.exhausted_direct_read_payload(classified=False)
+                payload["observations"][0]["validation"]["failure_class"] = failure_class
+                result = self.finalize(payload)
+                self.assertEqual("NOT_SAVED", result.status)
+                self.assertEqual("FAILURE_UNCLASSIFIED", result.reason_code)
+        # PLATFORM_UNSUPPORTED never reaches that gate: an absent engine is
+        # machine state, and the payload validator rejects it outright.
+        payload = self.exhausted_direct_read_payload(classified=False)
+        payload["observations"][0]["validation"]["failure_class"] = "PLATFORM_UNSUPPORTED"
+        with self.assertRaises(DiscoveryFinalizationError):
+            self.finalize(payload)
+
+    def test_an_available_transport_left_untried_is_not_an_exhausted_ladder(self):
+        # `next_transport` halts at an UNAVAILABLE Lightpanda tier even when
+        # Chrome exists. Reaching that halt is not proof the target is blocked.
+        locator = "https://www.example-news.com/search"
+        payload = self.payload([
+            self.transport_observation("DIRECT_READ", "FAILED", locator),
+            {"family": "blocking",
+             "value": {"failure_class": "SITE_BLOCKING"},
+             "validation": self.observing_validation(locator, outcome="FAILED")},
+        ])
+        payload["evidence"] = [{"kind": "transport-validation", "locator": locator}]
+        payload["transport_trace"] = self.transport_trace(
+            ("DIRECT_READ", "FAILED", locator),
+            lightpanda="UNAVAILABLE", chrome="AVAILABLE",
+        )
+        result = self.finalize(payload)
+        self.assertEqual("NOT_SAVED", result.status)
+        self.assertEqual("TRANSPORT_POLICY_UNPROVEN", result.reason_code)
+
+    def test_an_empty_validation_object_does_not_satisfy_the_constraint_rule(self):
+        # Every validation field is optional, so `{}` normalizes cleanly and
+        # would otherwise pass a presence-only check.
+        locator = "https://www.example-news.com/busca/"
+        for validation in (
+            {},
+            {"outcome": "OBSERVED"},
+            {"transport": "DIRECT_READ"},
+            {"transport": "DIRECT_READ", "context": {"authentication": "PUBLIC"}},
+            {"context": {"authentication": "PUBLIC", "environment": "PRODUCTION"}},
+        ):
+            with self.subTest(validation=validation), self.assertRaises(DiscoveryFinalizationError):
+                self.finalize(self.payload([{
+                    "family": "blocking",
+                    "value": {"failure_class": "SITE_BLOCKING"},
+                    "validation": validation,
+                }]))
+        self.assertEqual("SAVED", self.finalize(self.payload([{
+            "family": "blocking",
+            "value": {"failure_class": "AUTH_REQUIRED"},
+            "validation": self.observing_validation(locator, outcome="FAILED"),
+        }])).status)
+
+    def test_observed_constraint_validation_requires_explicit_engine_and_javascript(self):
+        locator = "https://www.example-news.com/busca/"
+        direct_read = self.observing_validation(locator, outcome="FAILED")
+        self.assertEqual("SAVED", self.finalize(self.payload([{
+            "family": "blocking", "value": {"failure_class": "AUTH_REQUIRED"},
+            "validation": direct_read,
+        }])).status)
+        for validation in (
+            {key: value for key, value in direct_read.items() if key != "engine"},
+            {key: value for key, value in direct_read.items() if key != "javascript"},
+            {
+                "transport": "CHROME", "outcome": "FAILED",
+                "context": {"authentication": "PUBLIC", "environment": "PRODUCTION"},
+                "evidence": [locator],
+            },
+        ):
+            with self.subTest(validation=validation), self.assertRaises(DiscoveryFinalizationError):
+                self.finalize(self.payload([{
+                    "family": "blocking", "value": {"failure_class": "SITE_BLOCKING"},
+                    "validation": validation,
+                }]))
+
+    def test_removing_a_validation_never_rescues_a_rejected_payload(self):
+        # The failure that produced this gate: a rejected payload became
+        # acceptable by deleting the evidence the finalizer refused to accept.
+        locator = "https://www.example-news.com/search"
+        rejected = self.blocked_ladder_payload(locator)
+        del rejected["transport_trace"]
+        result = self.finalize(rejected)
+        self.assertEqual("NOT_SAVED", result.status)
+        self.assertEqual("TRANSPORT_POLICY_UNPROVEN", result.reason_code)
+        self.assertIn("Never drop an observation", result.reason)
+        stripped = self.payload([{
+            "family": "blocking",
+            "value": rejected["observations"][-1]["value"],
+        }])
+        stripped["evidence"] = rejected["evidence"]
+        with self.assertRaises(DiscoveryFinalizationError):
+            self.finalize(stripped)
+
+    def test_observed_constraint_requires_the_validation_that_observed_it(self):
+        # `blocking` and `limitation` assert a constraint or an absence. An
+        # unvalidated one may still be reported, but never as OBSERVED fact.
+        locator = "https://www.example-news.com/busca/"
+        for family, value in (
+            ("blocking", {"failure_class": "SITE_BLOCKING"}),
+            ("limitation", {"kind": "FIELD_UNAVAILABLE"}),
+        ):
+            with self.subTest(family=family, epistemic="OBSERVED"):
+                with self.assertRaises(DiscoveryFinalizationError):
+                    self.finalize(self.payload([{"family": family, "value": value}]))
+            with self.subTest(family=family, epistemic="INFERRED"):
+                result = self.finalize(self.payload([
+                    {"family": family, "epistemic": "INFERRED", "value": value},
+                ]))
+                self.assertEqual("NOT_SAVED", result.status)
+                self.assertEqual("INFERENCE_ONLY", result.reason_code)
+            with self.subTest(family=family, validated=True):
+                payload = self.payload([{
+                    "family": family, "value": dict(value, condition="observed once"),
+                    "validation": self.observing_validation(locator),
+                }])
+                payload["capability"] = f"{family}-scope"
+                self.assertEqual("SAVED", self.finalize(payload).status)
 
     def test_available_lightpanda_cannot_be_skipped_before_chrome(self):
         locator = "https://www.example-news.com/search"
@@ -887,7 +1186,9 @@ class DiscoveryFinalizeTests(unittest.TestCase):
             {"family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"}},
             {"family": "extraction", "value": {"structure": "JSON_LD"}},
             {"family": "paywall", "value": {"signal": "PAYWALL_MARKER"}},
-            {"family": "limitation", "value": {"mode": "METADATA_ONLY"}},
+            {"family": "limitation", "value": {"mode": "METADATA_ONLY"},
+             "validation": self.observing_validation(
+                 "https://www.example-news.com/busca/")},
         ])
         self.assertEqual("SAVED", self.finalize(fixture).status)
         text = "\n".join(row[0] for row in self.memory._conn.execute("SELECT payload_json FROM claims"))
