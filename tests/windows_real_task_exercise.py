@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SKILL = Path(__file__).resolve().parents[1]
+BEGIN = SKILL / "scripts" / "discovery-begin"
 FINALIZER = SKILL / "scripts" / "discovery-finalize"
 LOOKUP = SKILL / "scripts" / "knowledge-lookup"
 sys.path.insert(0, str(SKILL))
@@ -36,6 +37,17 @@ def _lookup(root: Path, target: str, capability: str) -> dict:
     if result.returncode != 0:
         raise AssertionError(f"knowledge-lookup failed: {result.stderr}")
     return json.loads(result.stdout)
+
+
+def _begin(root: Path, target: str, capability: str) -> str:
+    result = subprocess.run(
+        [sys.executable, str(BEGIN), "--knowledge-root", str(root),
+         "--target", target, "--capability", capability],
+        text=True, capture_output=True, encoding="utf-8",
+    )
+    if result.returncode != 0:
+        raise AssertionError(f"discovery-begin failed: {result.stderr}")
+    return json.loads(result.stdout)["run_id"]
 
 
 def _fetch(url: str) -> tuple[int, str]:
@@ -79,6 +91,7 @@ def operate(root: Path) -> dict:
     partial = _lookup(root, "example", "domain-homepage")
     if partial.get("status") != "found" or "lifecycle" in partial["operational_context"]["current"]:
         raise AssertionError(f"expected partial accepted context, got {partial}")
+    run_id = _begin(root, "example", "domain-homepage")
     started = time.monotonic()
     status, body = _fetch(TARGET_URL)
     if status != 200 or "Example Domain" not in body:
@@ -87,7 +100,7 @@ def operate(root: Path) -> dict:
     payload_path = root / "operation-discovery.json"
     payload_path.write_text(json.dumps({
         "target": "example", "capability": "domain-homepage", "recorded_at": observed_at,
-        "provenance": {"run_id": "run:windows-operation:001", "observed_at": observed_at},
+        "provenance": {"run_id": run_id, "observed_at": observed_at},
         "evidence": [{"kind": "direct-read-validation", "locator": TARGET_URL}],
         "observations": [
             {"family": "authentication", "value": {"access_model": "PUBLIC"}},
@@ -131,13 +144,14 @@ def discover(root: Path, payload_path: Path) -> dict:
     before = _lookup(root, "example", "reserved-notice")
     if before.get("status") != "not_found":
         raise AssertionError(f"expected not_found before Discovery, got {before}")
+    run_id = _begin(root, "example", "reserved-notice")
     status, body = _fetch(TARGET_URL)
     if status != 200 or "documentation examples" not in body.lower():
         raise AssertionError(f"real observation did not hold: status={status}")
     observed_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     payload = {
         "target": "example", "capability": "reserved-notice", "recorded_at": observed_at,
-        "provenance": {"run_id": "run:windows-evidence:001", "observed_at": observed_at},
+        "provenance": {"run_id": run_id, "observed_at": observed_at},
         "evidence": [{"kind": "direct-read-validation", "locator": TARGET_URL}],
         "observations": [{"family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"}}],
     }
@@ -152,6 +166,8 @@ def discover(root: Path, payload_path: Path) -> dict:
         return json.loads(stream)
 
     first = finalize()
+    payload["provenance"]["run_id"] = _begin(root, "example", "reserved-notice")
+    payload_path.write_text(json.dumps(payload), encoding="utf-8")
     second = finalize()
     after = _lookup(root, "example", "reserved-notice")
     if "lifecycle" in after.get("operational_context", {}).get("current", {}):

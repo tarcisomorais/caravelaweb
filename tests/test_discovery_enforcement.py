@@ -31,7 +31,7 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
 
     def test_operation_is_exempt_and_finalizer_failure_is_incomplete(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
-        self.assertIn("Runs that stayed in **Operation** do not call the finalizer", text)
+        self.assertIn("Operation calls neither `discovery-begin` nor `discovery-finalize`", text)
         self.assertIn("**Discovery finalization is incomplete**", text)
         self.assertIn("must never be silently described as a completed Discovery", text)
 
@@ -104,8 +104,8 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
         text = SKILL.read_text(encoding="utf-8")
         self.assertIn("DIRECT_READ -> LIGHTPANDA -> CHROME", text)
         self.assertIn("After Chrome-based Discovery, SIMPLIFY is mandatory", text)
-        self.assertIn("Runs that stayed in **Operation** do not call the finalizer", text)
-        self.assertIn("run-scoped `transport_trace`", text)
+        self.assertIn("Operation calls neither `discovery-begin` nor `discovery-finalize`", text)
+        self.assertIn("`transport_trace` is required", text)
         self.assertIn("never stored as Claims or other target knowledge", text)
 
     def test_a_blocked_ladder_stops_instead_of_switching_to_another_tool(self) -> None:
@@ -154,20 +154,19 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
     def test_an_observed_constraint_names_what_observed_it(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
         self.assertIn(
-            "`OBSERVED` requires a `validation` naming the transport and the "
-            "authentication/environment context that saw it",
+            "explicit transport, engine, JavaScript, authentication, and environment context",
             text,
         )
-        self.assertIn("durable identity claim that later lookups resolve through", text)
-        self.assertIn("never from name resemblance", text)
         profile = TARGET_PROFILE.read_text(encoding="utf-8")
+        self.assertIn("durable identity claim, not a convenience", profile)
+        self.assertIn("Shared branding, a similar name, or a plausible relationship\nis not evidence", profile)
         self.assertIn("Claiming `OBSERVED`\nfor one therefore requires a `validation`", profile)
         self.assertIn("Keep the claim inside what\nwas actually seen", profile)
         self.assertIn("Shared branding, a similar name, or a plausible relationship\nis not evidence", profile)
 
     def test_the_unenforceable_half_of_the_host_rule_is_marked_as_such(self) -> None:
         self.assertIn(
-            "the operator judgment is yours and is not machine-checked",
+            "not that operator judgment",
             SKILL.read_text(encoding="utf-8"),
         )
         profile = TARGET_PROFILE.read_text(encoding="utf-8")
@@ -176,6 +175,21 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
             "evidence served *from* a hostname proves the hostname exists, never that it\nbelongs to this brand",
             profile,
         )
+
+    def test_discovery_runs_are_visible_execution_identity_only(self) -> None:
+        text = SKILL.read_text(encoding="utf-8")
+        for rule in (
+            "scripts/discovery-begin --target <target-id> --capability <capability>",
+            "Use its `run_id` as `provenance.run_id`",
+            "if the run cannot be registered, stop",
+            "Any returned `SAVED`, `ALREADY_EXISTS`, or `NOT_SAVED` verdict closes only the matching run",
+            "schema or infrastructure errors leave it open",
+            "run identity is never knowledge identity",
+        ):
+            self.assertIn(rule, text)
+        profile = TARGET_PROFILE.read_text(encoding="utf-8")
+        self.assertIn("Concurrent runs for the same\ntarget and capability remain distinct", profile)
+        self.assertIn("Candidate and Claim identity stay\nsemantic", profile)
 
     def test_a_failed_ladder_must_classify_why_it_failed(self) -> None:
         text = SKILL.read_text(encoding="utf-8")

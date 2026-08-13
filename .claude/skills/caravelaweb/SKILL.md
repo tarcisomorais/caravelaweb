@@ -16,7 +16,8 @@ directory:
 
 - contract: `SKILL.md`
 - runtime: `scripts/init-knowledge-root`, `scripts/preflight`,
-  `scripts/knowledge-lookup`, `scripts/discovery-finalize`
+  `scripts/knowledge-lookup`, `scripts/discovery-begin`,
+  `scripts/discovery-finalize`
 - executor references: `references/`
 
 Use the interpreter reported by `scripts/preflight`, in the interpreter-prefixed

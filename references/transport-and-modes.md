@@ -10,6 +10,12 @@ Discovery does not expand authority — see `safety.md`. When a question can't b
 
 Discovery executes and delivers the caller's actual task while it learns — it is not a preparatory or throwaway run before the real work.
 
+After caller authorization and before the first target read, call
+`discovery-begin` for the selected target and capability. Its `run_id` follows
+that execution into finalization; inability to register the run is a blocker.
+Operation does not call it. Open markers are unfinished work, not target
+knowledge, and concurrent Discoveries have separate run IDs.
+
 ### Five conceptual phases (not separate tools/commands)
 
 1. **IDENTIFY** — canonical origin, actual entrypoint, requested capability, initial access state, immediate blockers. Don't explore unrelated sections yet.
@@ -17,7 +23,7 @@ Discovery executes and delivers the caller's actual task while it learns — it 
 3. **MAP** — describe how the capability works, small and declarative (`GET /projects?q={term}` → listing → `/project/{slug}` detail → `?page={n}` pagination), never an imperative click-script. Map only what the requested capability needs — not unrelated billing/messaging/settings pages.
 4. **SIMPLIFY (mandatory)** — after Chrome-based Discovery, actively test: does DIRECT_READ satisfy the capability? If not, does LIGHTPANDA? Only fall back to "Chrome remains necessary" once both are checked and fail. Don't force simplification — a "simpler" path must actually preserve the required semantics, not just return 200 once.
 5. **VALIDATE** — confirm the discovered path is strong enough to become reusable knowledge: entrypoint works, query produces expected results, required fields present, completion condition observable, no exploratory recovery was needed, caller authority preserved. Proportional to capability/consequence — not exhaustive whole-site testing.
-6. **FINALIZE (mandatory)** — before declaring the Discovery complete, call `<python> <skill>/scripts/discovery-finalize` with reusable operational observations, evidence, and run provenance. Report only `SAVED`, `ALREADY_EXISTS`, or `NOT_SAVED`; successful knowledge is available to the next lookup immediately. A finalizer error leaves Discovery incomplete even if the task response can be delivered. Do not send task results, raw logs, or HTML to Operational Memory.
+6. **FINALIZE (mandatory)** — before declaring the Discovery complete, call `<python> <skill>/scripts/discovery-finalize` with reusable operational observations, evidence, and the `run_id` returned by begin. Report only `SAVED`, `ALREADY_EXISTS`, or `NOT_SAVED`; every returned verdict closes that run, while payload or infrastructure errors leave it open. Successful knowledge is available to the next lookup immediately. Do not send task results, raw logs, or HTML to Operational Memory.
 
    Browser-backed finalization also supplies the run-scoped
    `transport_trace` from `SKILL.md`. The finalizer replays its evidenced

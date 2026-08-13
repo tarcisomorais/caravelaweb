@@ -109,11 +109,29 @@ Lookup is capability-scoped and performs no web action, transport selection, kno
 
 Only reusable operating observations, evidence, and provenance belong in Discovery finalization. When a bounded Discovery has none, use `"observations": []`; this closes as `NOT_SAVED`. Never include task results, raw page dumps, runtime logs, browser-session state, credentials, private user data, business logic, editorial judgment, or speculative facts presented as truth.
 
+### Discovery run markers
+
+After the mode decision and caller authorization, `discovery-begin` creates one
+local marker per run and returns its `run_id`. Concurrent runs for the same
+target and capability remain distinct. The finalizer refuses to write unless
+target, capability, and `provenance.run_id` match that open marker.
+
+Every returned `SAVED`, `ALREADY_EXISTS`, or `NOT_SAVED` verdict closes only
+its matching run. Payload and infrastructure errors leave it open. Lookup and
+preflight expose unfinished runs, but a marker is never accepted knowledge.
+The `run_id` identifies only the execution: Candidate and Claim identity stay
+semantic, so a later run with a new ID may enrich an earlier pending Candidate.
+Operation creates no marker.
+
 Local Operational Memory is writable by the installation's normal policy and is separate from web-action authority. Saving local knowledge never authorizes source-control publication, project-file changes, or external state changes. A successful, directly observed Discovery is available to the next lookup immediately; ambiguous or invalid knowledge is not used operationally. Diagnostic compatibility and repair procedures are not executor input.
 
 An observation made during an active Discovery may guide that same Discovery, but it is accepted Operational Memory only once `discovery-finalize` succeeds. An earlier task's unfinalized observation -- something merely seen, not saved -- is never accepted knowledge: it does not satisfy `knowledge-lookup`, and it never substitutes for lookup or Discovery on a later task.
 
-The public Discovery payload is a closed contract. Unknown wrapper, evidence,
+The public Discovery payload is a closed contract. Its wrapper is exactly
+`target`, `capability`, `observations`, `evidence`, `provenance`, optional
+`recorded_at`, and optional `transport_trace`. Each observation is exactly
+`{family, value, epistemic?, host?, validation?, contradiction?}`; evidence is
+`{kind, locator, scope?}` and provenance is `{run_id, observed_at}`. Unknown wrapper, evidence,
 provenance, transport-trace, validation-context, contradiction-value, proof,
 or family-value fields are rejected before Candidate construction. A
 browser-backed result also carries the run-scoped `transport_trace` defined in

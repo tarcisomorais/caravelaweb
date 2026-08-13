@@ -47,6 +47,11 @@ under **Unreleased** until a version and tag are intentionally chosen.
 
 ### Fixed
 
+- Discovery now opens a run-scoped local marker before target work. The
+  finalizer requires the matching canonical target, capability, and `run_id`;
+  every returned verdict closes only that run, while payload or infrastructure
+  errors remain visible through lookup and preflight. Run IDs identify
+  executions only and never Candidate or Claim identity.
 - A fully blocked transport ladder can be finalized. `discovery-finalize`
   required a trace to end at a `FUNCTIONAL` transport, so a capability blocked
   on every transport was rejected with `TRANSPORT_POLICY_UNPROVEN` and the only

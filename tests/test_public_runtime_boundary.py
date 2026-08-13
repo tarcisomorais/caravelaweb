@@ -2,8 +2,7 @@
 
 The repository root is the CaravelaWeb skill root, so the runtime modules sit
 directly beside `scripts/`. This test walks the import graph outward from the
-four public runtime CLI entry points and asserts the reachable set is exactly
-the eleven runtime modules this repository ships -- no more, no fewer.
+the public runtime CLI entry points and asserts the reachable set is exact.
 
 `scripts/register-host` is a separate concern (host discovery registration,
 not Knowledge Root/Operational Memory runtime -- see docs/architecture.md)
@@ -23,9 +22,10 @@ REPO = Path(__file__).resolve().parents[1]
 SKILL = REPO
 SCRIPTS = SKILL / "scripts"
 
-# The §2.2 runtime lock: exactly these 11 Python runtime modules.
+# The §2.2 runtime lock: exactly these Python runtime modules.
 EXPECTED_RUNTIME_CLOSURE = {
     "discovery_finalize",
+    "discovery_runs",
     "installation_init",
     "integration_bridge",
     "knowledge_write_freeze",
@@ -80,7 +80,10 @@ class PublicRuntimeBoundaryTests(unittest.TestCase):
             modules,
             [
                 SCRIPTS / name
-                for name in ("knowledge-lookup", "discovery-finalize", "preflight", "init-knowledge-root")
+                for name in (
+                    "knowledge-lookup", "discovery-begin", "discovery-finalize",
+                    "preflight", "init-knowledge-root",
+                )
             ],
         )
         entered = runtime_reached - EXPECTED_RUNTIME_CLOSURE

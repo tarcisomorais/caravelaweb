@@ -17,6 +17,7 @@ LOOKUP = SKILL / "scripts" / "knowledge-lookup"
 sys.path.insert(0, str(SKILL))
 
 from discovery_finalize import DiscoveryFinalizationError, finalize_discovery
+from discovery_runs import begin_discovery
 from om_native_writes import OMNativeWriteError, OMWriteAuthorityRequired, WRITE_DESTINATION
 from operational_memory.core import SQLiteOperationalMemory
 from platform_adapter import resolve_knowledge_root
@@ -73,6 +74,14 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         if "transport_trace" in payload:
             arguments["transport_trace"] = payload["transport_trace"]
         return finalize_discovery(self.memory, **arguments)
+
+    def open_payload(self, payload):
+        if isinstance(payload, Path):
+            payload = json.loads(payload.read_text(encoding="utf-8"))
+        return begin_discovery(
+            self.root, payload["target"], payload["capability"],
+            run_id=payload["provenance"]["run_id"], opened_at=RECORDED,
+        )
 
     @staticmethod
     def transport_trace(*attempts, lightpanda="AVAILABLE", chrome="AVAILABLE"):
@@ -231,6 +240,7 @@ class DiscoveryFinalizeTests(unittest.TestCase):
             "evidence": [{"kind": "direct-read-validation", "locator": "https://rss.example-portal.com/"}],
             "observations": [{"family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"}}],
         }), encoding="utf-8")
+        self.open_payload(payload)
         finalized = subprocess.run(
             [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root), "--input", str(payload)],
             text=True, capture_output=True, encoding="utf-8",
@@ -256,6 +266,7 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         )
         payload = self.root / "blocked-discovery.json"
         payload.write_text(json.dumps(self.blocked_ladder_payload()), encoding="utf-8")
+        self.open_payload(payload)
         finalized = subprocess.run(
             [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root),
              "--input", str(payload)],
@@ -295,6 +306,7 @@ class DiscoveryFinalizeTests(unittest.TestCase):
             "evidence": [{"kind": "direct-read-validation", "locator": "https://example.com/"}],
             "observations": [{"value": {"transport": "DIRECT_READ"}}],
         }), encoding="utf-8")
+        self.open_payload(payload)
         before = tuple(self.memory._conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in ("claims", "proposals"))
         result = subprocess.run(
             [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root), "--input", str(payload)],
@@ -316,6 +328,7 @@ class DiscoveryFinalizeTests(unittest.TestCase):
             "evidence": [{"kind": "direct-read-validation", "locator": "https://example.com/"}],
             "observations": [{"family": "prices", "value": {"transport": "DIRECT_READ"}}],
         }), encoding="utf-8")
+        self.open_payload(payload)
         before = tuple(self.memory._conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in ("claims", "proposals"))
         result = subprocess.run(
             [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root), "--input", str(payload)],
@@ -337,6 +350,7 @@ class DiscoveryFinalizeTests(unittest.TestCase):
             "evidence": [{"kind": "direct-read-validation", "locator": "https://rss.example-portal.com/"}],
             "observations": [{"family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"}}],
         }), encoding="utf-8")
+        self.open_payload(payload)
         result = subprocess.run(
             [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root), "--input", str(payload)],
             text=True, capture_output=True, encoding="utf-8",
@@ -355,6 +369,7 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         }), encoding="utf-8")
         payload = self.root / "authority-failure-discovery.json"
         payload.write_text(json.dumps(self.payload()), encoding="utf-8")
+        self.open_payload(payload)
         result = subprocess.run(
             [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root), "--input", str(payload)],
             text=True, capture_output=True, encoding="utf-8",
@@ -393,6 +408,7 @@ class DiscoveryFinalizeTests(unittest.TestCase):
             "provenance": {"run_id": "run:root:001", "observed_at": RECORDED},
             "recorded_at": RECORDED,
         }), encoding="utf-8")
+        self.open_payload(payload)
         result = subprocess.run(
             [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root), "--input", str(payload)],
             cwd=consumer, text=True, capture_output=True, encoding="utf-8",
@@ -1106,6 +1122,7 @@ class DiscoveryFinalizeTests(unittest.TestCase):
             ("CHROME", "FUNCTIONAL", locator),
             lightpanda="PLATFORM_UNSUPPORTED",
         )
+        self.open_payload(payload)
         result = subprocess.run(
             [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root)],
             input=json.dumps(payload), text=True, capture_output=True,

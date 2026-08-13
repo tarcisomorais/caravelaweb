@@ -60,9 +60,11 @@ the caller supplied.
    | --- | --- |
    | `OPERATIONAL` and task authority is sufficient | **Operation** — use the recorded path. |
    | An accepted `blocking` fact whose recorded conditions are unchanged | Reuse and report the blocker; do not retry or rediscover it. |
-   | `UNKNOWN`, `DEGRADED`, absent, or contradicted | **Discovery** — investigate only this capability, if authorized. |
+   | `UNKNOWN`, `DEGRADED`, absent, or contradicted | **Discovery** — if authorized, open one run as described below, then investigate only this capability. |
    | `RETIRED` | Reuse the known stop; rediscover only after explicit reactivation. |
    | Another non-operational state | Stop unless the caller authorizes the bounded investigation required. |
+
+   Every authorized entry into Discovery, including explicit reactivation, starts with `<python> <skill>/scripts/discovery-begin --target <target-id> --capability <capability>`. Use its `run_id` as `provenance.run_id`; if the run cannot be registered, stop. Operation calls neither `discovery-begin` nor `discovery-finalize`. Open runs reported by lookup or preflight are unfinished local work, never accepted knowledge.
 
    Operation does not become open-ended exploration when a known path fails. Classify the failure first; a transient failure alone does not invalidate accepted knowledge.
 
@@ -104,31 +106,28 @@ the caller supplied.
    <python> <skill>/scripts/discovery-finalize --input <discovery.json>
    ```
 
-   The finalizer resolves the same installation root as lookup and saves successful reusable operating knowledge in the installation's local Operational Memory. The capability ID says what reusable ability is being learned; Operational Memory says how that ability works; the task result is the current values returned by it and is never capability identity or reusable result data. For example, `instructor-list` may retain a reusable extraction procedure but never current instructor names. The input holds bounded reusable operating observations, evidence, run provenance, and, for a browser-backed result, a run-scoped `transport_trace`; when none are reusable, set `"observations": []`. Never include task results (found articles, shop lists, or current results or prices), raw logs, complete HTML, or browser-session state. This local write does not authorize Git, project files, or external state changes.
+   When no observation is reusable, finalize with `"observations": []`. Any returned `SAVED`, `ALREADY_EXISTS`, or `NOT_SAVED` verdict closes only the matching run; schema or infrastructure errors leave it open. The finalizer resolves target references and requires the marker matching the canonical target, capability, and `provenance.run_id`. A later Discovery uses a new `run_id` and may still enrich the same semantic Candidate -- run identity is never knowledge identity.
 
-   Report only `SAVED`, `ALREADY_EXISTS`, or `NOT_SAVED` to the normal user flow. `SAVED` is immediately available to lookup; `ALREADY_EXISTS` means no duplicate was created; `NOT_SAVED` means the result was not added to accepted knowledge. `SAVED` and lookup `found` mean accepted context exists, not that the capability is `OPERATIONAL`. A finalizer error means **Discovery finalization is incomplete** and must never be silently described as a completed Discovery, even if the task result can be reported. Runs that stayed in **Operation** do not call the finalizer.
-   `discovery.json` is closed: only `target`, `capability`, `observations`, `evidence`, `provenance`, optional `recorded_at`, and optional `transport_trace` are accepted. Each observation is exactly `{family, value, epistemic?, host?, validation?, contradiction?}`; `family` is one of `transport`, `search_surface`, `extraction`, `pagination`, `paywall`, `authentication`, `blocking`, `validation`, `limitation`, `unknown`, and its value must use the family contract in `references/target-profile.md`. Evidence is `{kind, locator, scope?}` and provenance is `{run_id, observed_at}`; unknown fields fail closed. `host` is an optional hostname for behavior that is not target-wide. A previously unknown host also needs evidence from that exact hostname with `"scope":"TARGET_SURFACE"`; third-party evidence is not a target host. Associating a second host with a target is a durable identity claim that later lookups resolve through: record it only from evidence that the same operator serves that host for this brand, never from name resemblance. The finalizer checks only that your locator is on that hostname and that no other target already claims it -- the operator judgment is yours and is not machine-checked. A `blocking` or `limitation` observation asserts a constraint or an absence, so `OBSERVED` requires a `validation` naming the transport and the authentication/environment context that saw it; without one, state it as `INFERRED` in the report rather than as accepted knowledge.
+   The finalizer resolves the same installation root as lookup and saves reusable operating knowledge in local Operational Memory. Capability says what reusable ability is learned; memory says how it works; task results are never identity or reusable knowledge. Never include found articles, shop lists, current results or prices, raw logs, complete HTML, or browser-session state. This local write does not authorize Git, project files, or external state changes.
+
+   Report only `SAVED`, `ALREADY_EXISTS`, or `NOT_SAVED` to the normal user flow. `SAVED` is immediately available to lookup; `ALREADY_EXISTS` means no duplicate was created; `NOT_SAVED` means the result was not added to accepted knowledge. `SAVED` and lookup `found` mean accepted context exists, not that the capability is `OPERATIONAL`. A finalizer error means **Discovery finalization is incomplete** and must never be silently described as a completed Discovery, even if the task result can be reported.
+   `discovery.json` is a closed schema defined in `references/target-profile.md`; read that reference when building the payload. Unknown fields fail closed. Host association remains a durable identity claim: record it only from evidence of the same operator and brand; the finalizer checks hostname evidence and collisions, not that operator judgment. An `OBSERVED` blocking or limitation constraint needs the explicit transport, engine, JavaScript, authentication, and environment context that saw it.
+
+   ```json
+   {"target":"example-site","capability":"search-results",
+    "observations":[{"family":"transport","value":{"transport":"DIRECT_READ","outcome":"FUNCTIONAL"},
+      "validation":{"transport":"DIRECT_READ","outcome":"FUNCTIONAL","engine":null,"javascript":false,
+        "context":{"authentication":"PUBLIC","environment":"PRODUCTION"},"evidence":["https://example.com/search"]}}],
+    "evidence":[{"kind":"direct-read-validation","locator":"https://example.com/search"}],
+    "provenance":{"run_id":"<from discovery-begin>","observed_at":"2026-08-13T19:02:11Z"}}
+   ```
 
    `transport_trace` is required before a browser-backed result can become `SAVED` or `OPERATIONAL`. It is exactly `{"availability":{"LIGHTPANDA":"AVAILABLE|UNAVAILABLE|PLATFORM_UNSUPPORTED","CHROME":"AVAILABLE|UNAVAILABLE|PLATFORM_UNSUPPORTED"},"attempts":[...]}`. Attempts are ordered and exactly `{transport,outcome,evidence,host?}`; `outcome` is `FAILED`, `INSUFFICIENT`, or `FUNCTIONAL`, and `evidence` contains locators from the top-level evidence list. Each attempt must match an `OBSERVED` validation in the same payload, host, authentication context, and environment. The sequence must follow `DIRECT_READ -> LIGHTPANDA -> CHROME`, skipping Lightpanda only when it is `PLATFORM_UNSUPPORTED`, and stop at the first `FUNCTIONAL` result. A trace ends either at that `FUNCTIONAL` result or with the ladder exhausted; a run that stopped while an available transport was still untried proves nothing. A fully blocked ladder is therefore finalized normally, with every attempt and its evidence: it records the block and earns no operational transport. Reaching the policy's last step is not the same as exhausting the ladder -- a transport this machine has but this run never tried leaves the result unproven. A run that reached no working transport must also name the durable class it observed (`SITE_BLOCKING`, `AUTH_REQUIRED`, `AUTHORITY_BOUNDARY`, `TARGET_CHANGED`, ...); a transient, tool, local-environment, or unclassified failure is runtime state and is never saved as target knowledge. Never drop an observation, a `validation`, or an evidence item to get past a finalizer rejection -- fix the payload, never the evidence. The trace and preflight availability are validated before Candidate writes and are never stored as Claims or other target knowledge.
 
-   `validation` records the observed `transport`, `outcome`, material `context` (`authentication` and `environment` only), and explicit `engine`/`javascript` values. Its optional `evidence` array references locators from the top-level evidence list. A capability earns runtime-generated `lifecycle=OPERATIONAL` only from one `validation` observation whose value is `{"operational_proof":{"entrypoint":"...","required_output":{"field_paths":{"field":"items[].field"}},"completion_condition":"...","critical_constraints":[]}}` (use a string `required_action` instead of `required_output`, never both), whose validation has `outcome: "SUCCESS"`, matching accepted `transport` and `authentication.value.access_model` facts, and explicit linked evidence; browser transports also require engine and JavaScript context. Constraints are strings; `[]` means none material were observed. Caller-supplied `lifecycle` observations are rejected. To report a durable replacement, add `contradiction: {prior_value, validation}` using the same family value contract: its validation describes the old path's directly observed failure and classified `failure_class`. The successful new path and failed old path each require their own non-overlapping evidence references. Omit `contradiction` for ordinary new knowledge. Transient, tool, session, environment, ambiguous, one-sided, or context-incomparable changes remain unaccepted.
+   `validation`, operational-proof, contradiction, evidence-linkage, and replacement rules live in `references/target-profile.md`. Caller-supplied lifecycle is rejected; only a complete runtime-verified path earns `OPERATIONAL`.
 
    `FAILED` or `INSUFFICIENT` transport observations justify escalation but cannot support `OPERATIONAL`; only a matching `FUNCTIONAL` transport can. Different transports in one valid ladder are parallel evidence, not contradictions. Incompatible outcomes for the same transport and scope remain conflicting.
-   Re-running the same pending Claim set without new material returns `NOT_SAVED`; a later Discovery may add missing Validation, evidence, contradiction, or valid transport-trace material to that exact pending Candidate without creating another Candidate. If the complete set then passes the automatic gates, the existing Candidate is promoted atomically.
-   Example:
-
-   ```json
-   {"target": "example-site", "capability": "search-results",
-    "observations": [{"family": "transport", "host": "www.example.com",
-      "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"},
-      "validation": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL",
-        "engine": null, "javascript": false,
-        "context": {"authentication": "PUBLIC", "environment": "PRODUCTION"},
-        "evidence": ["https://www.example.com/search"]}}],
-    "evidence": [{"kind": "direct-read-validation", "locator": "https://www.example.com/search",
-      "scope": "TARGET_SURFACE"}],
-    "provenance": {"run_id": "run:example-site:001", "observed_at": "2026-07-28T12:00:00Z"}}
-   ```
+   Re-running the same pending Claim set without new material returns `NOT_SAVED`; a later Discovery with a new run may add missing Validation, evidence, contradiction, or valid transport-trace material to that exact Candidate. If complete, it is promoted atomically.
 
    Values must hold reusable operational facts only — never task results, prices, HTML, logs, or browser-session state. On a schema-only rejection, fix the JSON and re-run only the interpreter-prefixed `discovery-finalize` command — never repeat navigation or extraction.
 
@@ -139,4 +138,4 @@ the caller supplied.
 - `references/safety.md` — action classes, consequential-action gate, secrets, and prompt-injection stance.
 
 The public runtime is `init-knowledge-root`, `knowledge-lookup`,
-`discovery-finalize`, and `preflight` plus their import closure.
+`discovery-begin`, `discovery-finalize`, and `preflight` plus their import closure.

@@ -16,6 +16,7 @@ SKILL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SKILL_ROOT))
 
 from knowledge_write_freeze import freeze_marker
+from discovery_runs import list_open_discoveries
 from operational_memory.core import SCHEMA_VERSION
 from platform_adapter import (
     configure_utf8_stdio,
@@ -270,10 +271,12 @@ def build_report(override: str | None) -> dict[str, object]:
         "invocation": {
             "preflight": f'"{sys.executable}" "{Path(__file__).resolve()}"',
             "knowledge_lookup": f'"{sys.executable}" "{SKILL_ROOT / "scripts" / "knowledge-lookup"}"',
+            "discovery_begin": f'"{sys.executable}" "{SKILL_ROOT / "scripts" / "discovery-begin"}"',
             "discovery_finalize": f'"{sys.executable}" "{SKILL_ROOT / "scripts" / "discovery-finalize"}"',
         },
         "knowledge_root": root_report,
         "operational_memory": memory,
+        "open_discovery": list_open_discoveries(root) if root else [],
         "transports": browser["transports"],
         "browser_control": browser["browser_control"],
         "browser_engine": browser["browser_engine"],
@@ -307,6 +310,7 @@ def main() -> int:
         print(f"knowledge_root: {report['knowledge_root']['path']}")
         print(f"filesystem: {report['knowledge_root']['filesystem_class']}")
         print(f"operational_memory: {'READY' if report['operational_memory'].get('ready') else 'NOT_READY'}")
+        print(f"open_discovery: {len(report['open_discovery'])}")
         print(
             "transports: "
             + ", ".join(

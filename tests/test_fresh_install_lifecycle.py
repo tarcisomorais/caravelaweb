@@ -2,7 +2,7 @@
 
 Exercises the supported current-product lifecycle through the real CLI
 surface only (init-knowledge-root, preflight, knowledge-lookup,
-discovery-finalize). No imported-installation receipt is fabricated here;
+discovery-begin, discovery-finalize). No imported-installation receipt is fabricated here;
 this file proves the end-to-end lifecycle a real fresh installation follows.
 
 Every subprocess call runs with an isolated HOME/LOCALAPPDATA (see
@@ -26,6 +26,7 @@ SKILL = REPO
 INIT = SKILL / "scripts" / "init-knowledge-root"
 PREFLIGHT = SKILL / "scripts" / "preflight"
 LOOKUP = SKILL / "scripts" / "knowledge-lookup"
+BEGIN = SKILL / "scripts" / "discovery-begin"
 FINALIZER = SKILL / "scripts" / "discovery-finalize"
 sys.path.insert(0, str(SKILL))
 
@@ -89,6 +90,21 @@ def discovery_payload(target: str, capability: str = "public-homepage") -> dict:
     }
 
 
+def begin_for_payload(
+    payload_path: Path, *root_arguments: str,
+    cwd: Path | None = None, env: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    result = run(
+        BEGIN, *root_arguments, "--target", payload["target"],
+        "--capability", payload["capability"], cwd=cwd, env=env,
+    )
+    if result.returncode == 0:
+        payload["provenance"]["run_id"] = json.loads(result.stdout)["run_id"]
+        payload_path.write_text(json.dumps(payload), encoding="utf-8")
+    return result
+
+
 class FreshInstallEndToEndTests(unittest.TestCase):
     """A CaravelaWeb code checkout and a separate empty Knowledge Root."""
 
@@ -123,6 +139,10 @@ class FreshInstallEndToEndTests(unittest.TestCase):
 
         payload_path = self.root.parent / "discovery.json"
         payload_path.write_text(json.dumps(discovery_payload("acme")), encoding="utf-8")
+        begun = begin_for_payload(
+            payload_path, "--knowledge-root", str(self.root), env=self.env,
+        )
+        self.assertEqual(0, begun.returncode, begun.stderr)
         finalize = run(FINALIZER, "--knowledge-root", str(self.root), "--input", str(payload_path), env=self.env)
         self.assertEqual(0, finalize.returncode, finalize.stderr)
         self.assertEqual("SAVED", json.loads(finalize.stdout)["status"])
@@ -146,6 +166,7 @@ class FreshInstallEndToEndTests(unittest.TestCase):
             self.assertNotIn(migration_field, authority)
         self.assertEqual(
             {
+                "open-discovery",
                 "operational_memory.db",
                 "read-authority-operational-memory",
                 "write-authority.json",
@@ -193,6 +214,8 @@ class FreshInstallEndToEndTests(unittest.TestCase):
 
         payload_path = self.home.parent / "discovery.json"
         payload_path.write_text(json.dumps(discovery_payload("acme")), encoding="utf-8")
+        begun = begin_for_payload(payload_path, cwd=unrelated_cwd, env=no_override_env)
+        self.assertEqual(0, begun.returncode, begun.stderr)
         finalize = run(FINALIZER, "--input", str(payload_path), cwd=unrelated_cwd, env=no_override_env)
         self.assertEqual(0, finalize.returncode, finalize.stderr)
         self.assertEqual("SAVED", json.loads(finalize.stdout)["status"])
@@ -239,6 +262,8 @@ class FreshInstallEndToEndTests(unittest.TestCase):
 
         payload_path = self.root.parent / "env-discovery.json"
         payload_path.write_text(json.dumps(discovery_payload("acme")), encoding="utf-8")
+        begun = begin_for_payload(payload_path, cwd=unrelated_cwd, env=session_env)
+        self.assertEqual(0, begun.returncode, begun.stderr)
         finalize = run(FINALIZER, "--input", str(payload_path), cwd=unrelated_cwd, env=session_env)
         self.assertEqual(0, finalize.returncode, finalize.stderr)
         self.assertEqual("SAVED", json.loads(finalize.stdout)["status"])
@@ -348,6 +373,11 @@ class SourceAndKnowledgeRootIndependenceTests(unittest.TestCase):
 
         payload_path = self.base / "discovery.json"
         payload_path.write_text(json.dumps(discovery_payload("only-in-a")), encoding="utf-8")
+        begun = begin_for_payload(
+            payload_path, "--knowledge-root", str(root_a),
+            cwd=unrelated_cwd, env=self.env,
+        )
+        self.assertEqual(0, begun.returncode, begun.stderr)
         finalize = run(
             FINALIZER, "--knowledge-root", str(root_a), "--input", str(payload_path),
             cwd=unrelated_cwd, env=self.env,

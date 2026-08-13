@@ -12,6 +12,7 @@ SKILL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SKILL_ROOT))
 
 from integration_bridge import BridgeError, KnowledgeLookupBoundary
+from discovery_runs import list_open_discoveries
 from operational_memory import MemoryError
 from platform_adapter import configure_utf8_stdio, resolve_knowledge_root
 
@@ -41,16 +42,20 @@ def main() -> int:
     except (BridgeError, MemoryError, KeyError) as error:
         emit("bridge_error", message=str(error), target=args.target)
         return 2
+    open_discovery = list_open_discoveries(
+        root, target=result.target, capability=result.capability,
+    )
+    visibility = {"open_discovery": open_discovery} if open_discovery else {}
     if result.source == "legacy":
         if result.profile_path is None:
-            emit("not_found", source="legacy", target=args.target)
+            emit("not_found", source="legacy", target=args.target, **visibility)
             return 0
-        emit("found", source="legacy", profile=result.profile_path, target=args.target)
+        emit("found", source="legacy", profile=result.profile_path, target=args.target, **visibility)
         return 0
     if result.operational_context is None:
-        emit("not_found", source="operational-memory", target=args.target)
+        emit("not_found", source="operational-memory", target=args.target, **visibility)
         return 0
-    emit("found", source="operational-memory", target=args.target, capability=result.capability, operational_context=result.operational_context, markdown_projection=result.markdown_projection)
+    emit("found", source="operational-memory", target=args.target, capability=result.capability, operational_context=result.operational_context, markdown_projection=result.markdown_projection, **visibility)
     return 0
 
 if __name__ == "__main__":

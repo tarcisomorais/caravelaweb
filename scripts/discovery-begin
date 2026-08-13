@@ -1,0 +1,39 @@
+#!/usr/bin/env python3
+"""Open one run-scoped bounded Discovery marker."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+SKILL_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SKILL_ROOT))
+
+from discovery_runs import DiscoveryRunError, begin_discovery
+from platform_adapter import configure_utf8_stdio, resolve_knowledge_root
+
+configure_utf8_stdio()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Register the start of one bounded Discovery run")
+    parser.add_argument("--knowledge-root")
+    parser.add_argument("--target", required=True)
+    parser.add_argument("--capability", required=True)
+    args = parser.parse_args()
+    try:
+        root = resolve_knowledge_root(args.knowledge_root, start=__file__)
+        if root is None:
+            raise DiscoveryRunError("no usable CaravelaWeb knowledge root could be resolved")
+        record = begin_discovery(root, args.target, args.capability)
+    except DiscoveryRunError as exc:
+        print(json.dumps({"status": "NOT_OPEN", "reason": str(exc)}, ensure_ascii=False, sort_keys=True), file=sys.stderr)
+        return 2
+    print(json.dumps({"status": "DISCOVERY_OPEN", **record}, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -11,6 +11,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 SKILL = REPO
 FINALIZER = SKILL / "scripts" / "discovery-finalize"
+BEGIN = SKILL / "scripts" / "discovery-begin"
 sys.path.insert(0, str(SKILL))
 
 from operational_memory import SQLiteOperationalMemory
@@ -70,6 +71,17 @@ class CliPortabilityTests(unittest.TestCase):
                 encoding="utf-8",
             )
             environment = {**os.environ, "PYTHONIOENCODING": "cp1252"}
+            def open_run(body):
+                opened = subprocess.run([
+                    sys.executable, str(BEGIN), "--knowledge-root", str(root),
+                    "--target", body["target"], "--capability", body["capability"],
+                ], capture_output=True, env=environment)
+                self.assertEqual(0, opened.returncode, opened.stderr.decode("utf-8"))
+                body["provenance"]["run_id"] = json.loads(
+                    opened.stdout.decode("utf-8")
+                )["run_id"]
+                payload.write_text(json.dumps(body), encoding="utf-8")
+
             command = [
                 sys.executable,
                 str(FINALIZER),
@@ -78,16 +90,18 @@ class CliPortabilityTests(unittest.TestCase):
                 "--input",
                 str(payload),
             ]
+            body = json.loads(payload.read_text(encoding="utf-8"))
+            open_run(body)
             first = subprocess.run(command, capture_output=True, env=environment)
+            open_run(body)
             second = subprocess.run(command, capture_output=True, env=environment)
             self.assertEqual("SAVED", json.loads(first.stdout.decode("utf-8"))["status"])
             self.assertEqual("ALREADY_EXISTS", json.loads(second.stdout.decode("utf-8"))["status"])
 
-            body = json.loads(payload.read_text(encoding="utf-8"))
             body["target"] = "utf8-empty"
             body["observations"] = []
             body["evidence"] = []
-            payload.write_text(json.dumps(body), encoding="utf-8")
+            open_run(body)
             empty = subprocess.run(command, capture_output=True, env=environment)
             self.assertEqual("NOT_SAVED", json.loads(empty.stdout.decode("utf-8"))["status"])
 

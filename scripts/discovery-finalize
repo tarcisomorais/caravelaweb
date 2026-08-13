@@ -11,7 +11,10 @@ from pathlib import Path
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SKILL_ROOT))
 
-from discovery_finalize import DiscoveryFinalizationError, finalize_discovery
+from discovery_finalize import (
+    DiscoveryFinalizationError, _resolve_target_argument, finalize_discovery,
+)
+from discovery_runs import DiscoveryRunError, close_discovery, require_open_discovery
 from om_native_writes import WRITE_DESTINATION
 from operational_memory import SQLiteOperationalMemory
 from platform_adapter import configure_utf8_stdio, resolve_knowledge_root
@@ -51,18 +54,35 @@ def main() -> int:
         root = resolve_root(args.knowledge_root)
         if root is None:
             raise OSError("no usable CaravelaWeb knowledge root could be resolved")
+        provenance = payload.get("provenance")
+        run_id = provenance.get("run_id") if isinstance(provenance, dict) else None
         db = Path(args.operational_memory_db) if args.operational_memory_db else root / ".caravelaweb" / "operational_memory.db"
         with SQLiteOperationalMemory(db, create=False, knowledge_root=root) as memory:
+            target = _resolve_target_argument(memory, payload.get("target"))
+            require_open_discovery(
+                root, target, payload.get("capability"), run_id
+            )
             result = finalize_discovery(
                 memory,
-                target=payload.get("target"), capability=payload.get("capability"),
+                target=target, capability=payload.get("capability"),
                 observations=payload.get("observations"), evidence=payload.get("evidence"),
                 provenance=payload.get("provenance"), recorded_at=payload.get("recorded_at"),
                 transport_trace=payload.get("transport_trace"),
                 knowledge_write_authority=True,
                 write_destination=WRITE_DESTINATION,
             )
-    except DiscoveryFinalizationError as exc:
+        try:
+            close_discovery(
+                root, result.target, result.capability, str(run_id)
+            )
+        except DiscoveryRunError as exc:
+            print(json.dumps({
+                "status": "FINALIZATION_INCOMPLETE",
+                "knowledge_status": result.status,
+                "reason": str(exc),
+            }, ensure_ascii=False, sort_keys=True), file=sys.stderr)
+            return 2
+    except (DiscoveryFinalizationError, DiscoveryRunError) as exc:
         # Payload validation refusals already carry a specific, non-internal
         # reason. Surface it so the caller can fix the payload without
         # re-running Discovery. Authority/database/infrastructure failures

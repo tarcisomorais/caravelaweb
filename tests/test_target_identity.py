@@ -33,6 +33,7 @@ from write_authority import MIGRATED_WRITE_AUTHORITY_KIND
 RECORDED = "2026-08-09T00:00:00Z"
 INIT = SKILL / "scripts" / "init-knowledge-root"
 LOOKUP = SKILL / "scripts" / "knowledge-lookup"
+BEGIN = SKILL / "scripts" / "discovery-begin"
 FINALIZER = SKILL / "scripts" / "discovery-finalize"
 
 
@@ -389,6 +390,13 @@ class TargetIdentityCrossProcessTests(unittest.TestCase):
             "recorded_at": RECORDED,
         }
         payload_path = self.root.parent / "discovery.json"
+        payload_path.write_text(json.dumps(payload), encoding="utf-8")
+        begun = run(
+            BEGIN, "--knowledge-root", str(self.root), "--target", payload["target"],
+            "--capability", payload["capability"], env=self.env,
+        )
+        self.assertEqual(0, begun.returncode, begun.stderr)
+        payload["provenance"]["run_id"] = json.loads(begun.stdout)["run_id"]
         payload_path.write_text(json.dumps(payload), encoding="utf-8")
         finalize = run(FINALIZER, "--knowledge-root", str(self.root), "--input", str(payload_path), env=self.env)
         self.assertEqual(0, finalize.returncode, finalize.stderr)
