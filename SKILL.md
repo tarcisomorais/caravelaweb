@@ -43,7 +43,7 @@ the caller supplied.
    <python> <skill>/scripts/knowledge-lookup --target <target-id> --capability <capability>
    ```
 
-   Resolve the script relative to this skill. Add `--knowledge-root <path>` only when the caller supplied that override; otherwise the root remembered from `init-knowledge-root` is found automatically, with no path repeated on every command.
+   Resolve the script relative to this skill. Add `--knowledge-root <path>` only when the caller supplied that override; otherwise the fixed per-user Knowledge Root is found automatically, with no path repeated on every command.
 
    | Result | Next action |
    | --- | --- |

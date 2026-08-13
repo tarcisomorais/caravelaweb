@@ -164,20 +164,24 @@ Use one interpreter for every CaravelaWeb command; `preflight` reports the
 exact interpreter path it ran under. On native Windows, use `python` or `py -3`
 instead of `python3`. Each script supports `--help`.
 
-To create or select another Knowledge Root:
+To create and use another Knowledge Root:
 
 ```bash
 python3 scripts/init-knowledge-root --knowledge-root /path/to/root --json
 export CARAVELAWEB_KNOWLEDGE_ROOT=/path/to/root
 ```
 
-Resolution is deterministic:
+Both lines are required. Creating a root elsewhere never makes it the
+default, so the environment variable (or `--knowledge-root` on every command)
+is what reaches it. This keeps concurrent sessions independent: no command
+can change which Knowledge Root another session resolves.
+
+Resolution is deterministic, and derives the default rather than storing it:
 
 ```text
 explicit --knowledge-root
 -> CARAVELAWEB_KNOWLEDGE_ROOT
--> remembered root
--> .caravelaweb-knowledge-root marker walk-up
+-> the fixed per-user default location above
 ```
 
 The initialized layout is installation-owned:

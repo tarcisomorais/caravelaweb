@@ -383,13 +383,13 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         self.assertNotIn("Traceback", result.stderr)
 
     def test_default_root_resolution_is_independent_of_the_consumer_cwd(self):
-        # Root resolution (env/remembered-default/marker-walk from the
-        # script's own path) must not depend on the caller's cwd. It does
-        # NOT default to this repository checkout -- H2 deliberately made a
-        # fresh clone unable to auto-identify itself as a Knowledge Root, so
-        # the expectation here is computed the same way the script computes
-        # it, not hardcoded to REPO or to any particular resolved value.
-        expected = resolve_knowledge_root(None, start=str(FINALIZER))
+        # Root resolution (env var, then the fixed per-user default) must not
+        # depend on the caller's cwd. It does NOT default to this repository
+        # checkout -- H2 deliberately made a fresh clone unable to
+        # auto-identify itself as a Knowledge Root, so the expectation here is
+        # computed the same way the script computes it, not hardcoded to REPO
+        # or to any particular resolved value.
+        expected = resolve_knowledge_root(None)
         consumer = self.root / "consumer"
         consumer.mkdir()
         previous_cwd = Path.cwd()

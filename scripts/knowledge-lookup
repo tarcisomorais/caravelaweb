@@ -32,7 +32,7 @@ def main() -> int:
     parser.add_argument("--use-operational-memory", action="store_true", help="deprecated diagnostic assertion of Operational Memory")
     parser.add_argument("--use-legacy", action="store_true", help="diagnostic-only compatibility lookup from targets/; never an automatic fallback")
     args = parser.parse_args()
-    root = resolve_knowledge_root(args.knowledge_root, start=__file__)
+    root = resolve_knowledge_root(args.knowledge_root)
     if root is None:
         emit("unresolved", target=args.target)
         return 2

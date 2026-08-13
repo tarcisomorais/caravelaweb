@@ -6,9 +6,9 @@ discovery-begin, discovery-finalize). No imported-installation receipt is fabric
 this file proves the end-to-end lifecycle a real fresh installation follows.
 
 Every subprocess call runs with an isolated HOME/LOCALAPPDATA (see
-``fake_home_env``): a successful init-knowledge-root now persists a
-per-user default-Knowledge-Root pointer, and these tests must never read or
-write the real machine's own pointer.
+``fake_home_env``): the default Knowledge Root location is derived from the
+user's home directory, and these tests must never read or write the real
+machine's own installation.
 """
 
 from __future__ import annotations
@@ -54,9 +54,9 @@ def run(
 
 def fake_home_env(home: Path, **overrides: str) -> dict[str, str]:
     """An isolated subprocess environment: a private HOME (and Windows
-    equivalents) so the persisted per-user default Knowledge Root pointer
-    never reads or writes this machine's real state, and each test's
-    automatic resolution is hermetic and deterministic."""
+    equivalents) so the per-user default Knowledge Root never reads or
+    writes this machine's real state, and each test's automatic resolution
+    is hermetic and deterministic."""
     env = dict(os.environ)
     env["HOME"] = str(home)
     env["USERPROFILE"] = str(home)
@@ -180,7 +180,7 @@ class FreshInstallEndToEndTests(unittest.TestCase):
         # write counter to go stale in the first place.
         self.assertFalse(automatic_legacy_rollback_allowed(self.root))
 
-    def test_default_location_is_remembered_across_separate_process_invocations(self) -> None:
+    def test_default_location_is_found_across_separate_process_invocations(self) -> None:
         """The primary onboarding path: init with no --knowledge-root, then
         every later command finds the same installation automatically, with
         neither a repeated flag nor a temporary environment variable -- each
@@ -199,7 +199,7 @@ class FreshInstallEndToEndTests(unittest.TestCase):
         self.assertTrue(default_root.is_relative_to(self.home.resolve()))
         self.assertFalse(default_root.is_relative_to(REPO))
 
-        unrelated_cwd = self.home.parent  # no .caravelaweb-knowledge-root here to walk up to
+        unrelated_cwd = self.home.parent  # an unrelated directory; resolution ignores cwd
         no_override_env = {k: v for k, v in self.env.items() if k != KNOWLEDGE_ROOT_ENV}
 
         preflight = run(PREFLIGHT, "--json", cwd=unrelated_cwd, env=no_override_env)
@@ -224,32 +224,48 @@ class FreshInstallEndToEndTests(unittest.TestCase):
         self.assertEqual(0, found.returncode, found.stderr)
         self.assertEqual("found", json.loads(found.stdout)["status"])
 
-    def test_explicit_knowledge_root_overrides_the_persisted_default(self) -> None:
+    def test_an_explicit_root_never_changes_what_later_commands_resolve(self) -> None:
+        """The isolation guarantee. Initializing a root somewhere else -- as a
+        concurrent session on the same machine does -- must not move anyone's
+        default. Only the flag or the environment variable reaches it."""
         default_init = run(INIT, "--json", env=self.env)
         self.assertEqual(0, default_init.returncode, default_init.stderr)
         default_root = Path(json.loads(default_init.stdout)["knowledge_root"])
 
         other_init = run(INIT, "--knowledge-root", str(self.root), "--json", env=self.env)
         self.assertEqual(0, other_init.returncode, other_init.stderr)
+        self.assertNotEqual(default_root, self.root)
 
-        # Explicit --knowledge-root selects self.root, not the (now also
-        # persisted) default from the first init. Compare against the
+        # Explicit --knowledge-root selects self.root. Compare against the
         # resolved form: the product canonicalizes the supplied path.
         preflight = run(PREFLIGHT, "--knowledge-root", str(self.root), "--json", env=self.env)
         self.assertEqual(str(self.root.resolve()), json.loads(preflight.stdout)["knowledge_root"]["path"])
-        self.assertNotEqual(default_root, self.root)
 
-        # With no override at all, resolution falls back to the persisted
-        # default -- which now points at the *second* init (self.root),
-        # since remembering always reflects the most recently initialized root.
+        # With no override, resolution still finds the fixed default -- the
+        # second init changed nothing for anybody.
         no_override = run(PREFLIGHT, "--json", env=self.env)
-        self.assertEqual(str(self.root.resolve()), json.loads(no_override.stdout)["knowledge_root"]["path"])
+        self.assertEqual(str(default_root), json.loads(no_override.stdout)["knowledge_root"]["path"])
+
+        # And it reports the state of the default root, not of self.root: a
+        # target saved in self.root is invisible without the override.
+        payload_path = self.root.parent / "explicit-discovery.json"
+        payload_path.write_text(json.dumps(discovery_payload("acme")), encoding="utf-8")
+        begun = begin_for_payload(payload_path, "--knowledge-root", str(self.root), env=self.env)
+        self.assertEqual(0, begun.returncode, begun.stderr)
+        finalize = run(
+            FINALIZER, "--knowledge-root", str(self.root), "--input", str(payload_path), env=self.env
+        )
+        self.assertEqual(0, finalize.returncode, finalize.stderr)
+
+        unseen = run(LOOKUP, "--target", "acme", env=self.env)
+        self.assertEqual(0, unseen.returncode, unseen.stderr)
+        self.assertEqual("not_found", json.loads(unseen.stdout)["status"])
 
     def test_env_var_still_works_as_an_advanced_override(self) -> None:
         initialize = run(INIT, "--knowledge-root", str(self.root), "--json", env=self.env)
         self.assertEqual(0, initialize.returncode, initialize.stderr)
 
-        unrelated_cwd = self.root.parent  # no .caravelaweb-knowledge-root here to walk up to
+        unrelated_cwd = self.root.parent  # an unrelated directory; resolution ignores cwd
         session_env = {**self.env, KNOWLEDGE_ROOT_ENV: str(self.root)}
 
         preflight = run(PREFLIGHT, "--json", cwd=unrelated_cwd, env=session_env)
@@ -399,71 +415,55 @@ class SourceAndKnowledgeRootIndependenceTests(unittest.TestCase):
         self.assertFalse((REPO / "knowledge-root").exists())
 
 
-class RememberedRootPersistenceFailureTests(unittest.TestCase):
-    """The Knowledge Root and the remembered-default pointer are two
-    separate writes: init-knowledge-root must never roll back a fully valid
-    installation just because the second, best-effort one failed."""
+class ExplicitRootTouchesNoUserStateTests(unittest.TestCase):
+    """Initializing an explicit root writes inside that root and nowhere
+    else: it stores no per-user default, so an unusable home directory
+    cannot make it fail, and no other session can be affected by it."""
 
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name)
         # A plain file where the per-user app directory needs a directory
-        # component, so mkdir(parents=True) for the pointer always fails
-        # with NotADirectoryError -- while an explicit --knowledge-root
-        # elsewhere is entirely unaffected and still succeeds normally.
+        # component, so any write under HOME would fail with
+        # NotADirectoryError. Initialization must not attempt one.
         blocker = self.base / "blocked-home-parent"
         blocker.write_text("not a directory\n", encoding="utf-8")
         self.env = fake_home_env(blocker / "home")
 
-    def test_partial_success_is_reported_without_losing_the_installation(self) -> None:
+    def test_an_unwritable_home_does_not_affect_an_explicit_root(self) -> None:
         root = self.base / "kr"
         result = run(INIT, "--knowledge-root", str(root), "--json", env=self.env)
-        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
-        report = json.loads(result.stdout)
-        self.assertEqual("INITIALIZED", report["status"])
-        self.assertFalse(report["remembered"])
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         # The product resolves the supplied path (e.g. a Windows short
         # 8.3-alias segment like "RUNNER~1" canonicalizes to its long form);
         # compare against that same canonical form, not the raw input.
-        self.assertEqual(str(root.resolve()), report["knowledge_root"])
-        self.assertIn("could not be remembered", report["warning"])
-        self.assertTrue(any(str(root.resolve()) in step for step in report["next_steps"]))
+        self.assertEqual(
+            {
+                "status": "INITIALIZED",
+                "knowledge_root": str(root.resolve()),
+                "default_location": False,
+            },
+            json.loads(result.stdout),
+        )
 
-        # The installation itself is fully valid and immediately usable via
-        # an explicit --knowledge-root, exactly as if remembering had
-        # succeeded -- nothing about it was rolled back or left half-built.
         preflight = run(PREFLIGHT, "--knowledge-root", str(root), "--json", env=self.env)
         self.assertEqual(0, preflight.returncode, preflight.stderr)
-        preflight_report = json.loads(preflight.stdout)
-        self.assertEqual("READY", preflight_report["status"])
-        self.assertEqual([], preflight_report["errors"])
+        self.assertEqual("READY", json.loads(preflight.stdout)["status"])
 
         # It also remains reachable through the advanced env-var override.
         env_override = {**self.env, KNOWLEDGE_ROOT_ENV: str(root)}
         via_env = run(PREFLIGHT, "--json", env=env_override)
         self.assertEqual("READY", json.loads(via_env.stdout)["status"])
 
-    def test_human_readable_output_states_the_warning_and_a_way_forward(self) -> None:
+    def test_human_readable_output_says_the_root_is_not_the_default(self) -> None:
         root = self.base / "kr2"
         result = run(INIT, "--knowledge-root", str(root), env=self.env)
-        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertIn("status: INITIALIZED", result.stdout)
-        self.assertIn("warning:", result.stdout)
-        self.assertIn("could not be remembered", result.stdout)
+        self.assertIn("not the default", result.stdout)
         self.assertIn(str(root.resolve()), result.stdout)
         self.assertIn(KNOWLEDGE_ROOT_ENV, result.stdout)
-
-    def test_full_success_is_unaffected_when_the_pointer_write_works(self) -> None:
-        """Same command shape, a writable home: exit 0, remembered: true, no warning."""
-        writable_env = fake_home_env(self.base / "writable-home")
-        root = self.base / "kr3"
-        result = run(INIT, "--knowledge-root", str(root), "--json", env=writable_env)
-        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-        report = json.loads(result.stdout)
-        self.assertEqual(
-            {"status": "INITIALIZED", "knowledge_root": str(root.resolve()), "remembered": True}, report
-        )
 
 
 if __name__ == "__main__":

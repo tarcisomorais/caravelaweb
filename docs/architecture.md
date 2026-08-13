@@ -77,7 +77,7 @@ dependencies. It is developer tooling, not the public install path. See
 init-knowledge-root
   -> create Knowledge Root markers
   -> create local SQLite Operational Memory
-  -> remember the selected root
+  -> write nothing outside that root
 
 knowledge-lookup
   -> resolve Knowledge Root
@@ -104,8 +104,10 @@ browser state.
 ### Knowledge Root
 
 Contains installation-owned markers, SQLite state, and the local `targets/`
-directory. Resolution order is explicit flag, environment variable,
-remembered root, then marker walk-up.
+directory. Resolution order is explicit flag, environment variable, then the
+fixed per-user default location. Nothing is persisted and nothing is
+inferred from a marker near the running code, so every project on a machine
+resolves the same folder, and no session can move another session's root.
 
 ### Web authority
 

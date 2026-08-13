@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,7 +17,6 @@ from platform_adapter import (
     TARGETS_DIRECTORY,
     default_knowledge_root,
     validate_knowledge_root,
-    write_configured_knowledge_root,
 )
 from read_authority import read_cutover_marker
 from write_authority import FRESH_INSTALL_WRITE_AUTHORITY_KIND, write_authority_marker
@@ -33,21 +31,6 @@ _LEGACY_INPUT_DIRECTORIES = (TARGETS_DIRECTORY, "candidates")
 
 class InitializationRefusedError(RuntimeError):
     """The target location cannot be truthfully classified as uninitialized."""
-
-
-@dataclass(frozen=True)
-class InitializationResult:
-    """A valid, fully created Knowledge Root, and whether it was remembered.
-
-    ``remembered`` is False only when the installation itself succeeded but
-    the separate, best-effort convenience write of the remembered-root
-    pointer failed (e.g. an unwritable home directory). The installation is
-    never rolled back for that: ``root`` is always genuinely valid here.
-    """
-
-    root: Path
-    remembered: bool
-    remember_error: str | None = None
 
 
 def _now() -> str:
@@ -97,15 +80,16 @@ def assert_initializable(root: Path) -> None:
             )
 
 
-def initialize_knowledge_root(knowledge_root: str | Path | None = None) -> InitializationResult:
+def initialize_knowledge_root(knowledge_root: str | Path | None = None) -> Path:
     """Create a new Knowledge Root with fresh-install (NONE -> OPERATIONAL_MEMORY) provenance.
 
-    With no explicit location, uses the recommended per-user default so a
-    normal user does not need to make a technical decision. Either way, the
-    resulting root is remembered as the default for future sessions -- unless
-    that best-effort convenience write fails, in which case the (still fully
-    valid) installation is reported with ``remembered=False`` rather than
-    raised as a failure.
+    With no explicit location, uses the fixed per-user default so a normal
+    user does not need to make a technical decision, and so every project on
+    the machine resolves that same folder afterwards. An explicit location is
+    used for this call only: initialization never records a default anywhere,
+    so it cannot change what any later command -- in this session or another
+    -- resolves. Reach a non-default root with --knowledge-root or the
+    CARAVELAWEB_KNOWLEDGE_ROOT environment variable.
     """
     # Resolve uniformly for both branches: on Windows, an unresolved default
     # (built from %LOCALAPPDATA%) can be a short 8.3-alias path (observed on
@@ -168,20 +152,11 @@ def initialize_knowledge_root(knowledge_root: str | Path | None = None) -> Initi
 
     if validate_knowledge_root(root) != root:
         raise InitializationRefusedError(f"initialized root failed post-initialization validation: {root}")
-    # The root itself is now valid and fully initialized; remembering it as
-    # the default is a convenience on top, not part of the safety-gated
-    # creation above. A failure here must not unwind the real, already-valid
-    # installation -- report it instead of hiding or escalating it.
-    try:
-        write_configured_knowledge_root(root)
-    except OSError as error:
-        return InitializationResult(root=root, remembered=False, remember_error=str(error))
-    return InitializationResult(root=root, remembered=True)
+    return root
 
 
 __all__ = [
     "InitializationRefusedError",
-    "InitializationResult",
     "assert_initializable",
     "initialize_knowledge_root",
 ]

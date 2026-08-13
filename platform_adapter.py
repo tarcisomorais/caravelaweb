@@ -7,7 +7,6 @@ import os
 import platform
 import stat
 import sys
-import tempfile
 from pathlib import Path
 from typing import Mapping
 
@@ -15,11 +14,8 @@ PYTHON_FLOOR = (3, 11)
 KNOWLEDGE_ROOT_MARKER = ".caravelaweb-knowledge-root"
 TARGETS_DIRECTORY = "targets"
 # An advanced, session-scoped override -- e.g. to point at a second
-# installation temporarily without disturbing the remembered default below.
+# installation temporarily without disturbing the fixed per-user default.
 KNOWLEDGE_ROOT_ENV = "CARAVELAWEB_KNOWLEDGE_ROOT"
-# Distinct from default_knowledge_root()'s "knowledge-root" data directory,
-# both under the same per-user app directory.
-_CONFIGURED_ROOT_FILE_NAME = "config"
 
 
 def configure_utf8_stdio() -> None:
@@ -77,9 +73,9 @@ def validate_knowledge_root(candidate: str | Path) -> Path | None:
 
 
 def _user_app_directory() -> Path:
-    """Per-user CaravelaWeb application directory: default Knowledge Root
-    parent and home for the remembered-root pointer file. Never the source
-    checkout or a project directory -- purely user/installation-owned."""
+    """Per-user CaravelaWeb application directory: the default Knowledge Root
+    parent. Never the source checkout or a project directory -- purely
+    user/installation-owned."""
     if os.name == "nt":
         base = os.environ.get("LOCALAPPDATA")
         return (Path(base) if base else Path.home() / "AppData" / "Local") / "CaravelaWeb"
@@ -92,56 +88,23 @@ def default_knowledge_root() -> Path:
     return _user_app_directory() / "knowledge-root"
 
 
-def configured_knowledge_root_file() -> Path:
-    """Where the remembered Knowledge Root choice is persisted across sessions."""
-    return _user_app_directory() / _CONFIGURED_ROOT_FILE_NAME
+def resolve_knowledge_root(override: str | Path | None = None) -> Path | None:
+    """Explicit flag, then session environment variable, then the fixed
+    per-user default location. Nothing else.
 
-
-def read_configured_knowledge_root() -> Path | None:
-    path = configured_knowledge_root_file()
-    try:
-        marker_stat = os.lstat(path)
-    except OSError:
-        return None
-    if not safe_marker_stat(marker_stat):
-        return None
-    try:
-        text = path.read_text(encoding="utf-8").strip()
-    except OSError:
-        return None
-    return Path(text) if text else None
-
-
-def write_configured_knowledge_root(root: str | Path) -> Path:
-    """Remember ``root`` as the default Knowledge Root for future sessions."""
-    path = configured_knowledge_root_file()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    temporary = Path(temp_name)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(f"{Path(root)}\n")
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
-    return path
-
-
-def resolve_knowledge_root(
-    override: str | Path | None = None, *, start: str | Path | None = None
-) -> Path | None:
+    Deliberately no persisted pointer and no marker walk-up. A per-user
+    pointer file is shared mutable state: any session that initialized a
+    root repointed every other session on the machine, including sessions
+    of unrelated projects. Walking up from a script's own path resolved the
+    source checkout, which must never hold a user's corpus (see
+    docs/architecture.md). The default location is derived, not stored, so
+    every project resolves the same folder with no state to corrupt.
+    """
     if override is not None:
         return validate_knowledge_root(override)
     if env_value := os.environ.get(KNOWLEDGE_ROOT_ENV):
         return validate_knowledge_root(env_value)
-    if (configured := read_configured_knowledge_root()) is not None:
-        if resolved := validate_knowledge_root(configured):
-            return resolved
-    origin = Path(start or __file__).resolve()
-    for parent in origin.parents:
-        if _exact_child(parent, KNOWLEDGE_ROOT_MARKER, directory=False):
-            return validate_knowledge_root(parent)
-    return None
+    return validate_knowledge_root(default_knowledge_root())
 
 
 def knowledge_root_marker_present(root: str | Path) -> bool:
@@ -187,15 +150,12 @@ __all__ = [
     "KNOWLEDGE_ROOT_ENV",
     "PYTHON_FLOOR",
     "configure_utf8_stdio",
-    "configured_knowledge_root_file",
     "default_knowledge_root",
     "filesystem_class",
     "is_wsl",
     "knowledge_root_marker_present",
     "platform_identity",
-    "read_configured_knowledge_root",
     "resolve_knowledge_root",
     "safe_marker_stat",
     "validate_knowledge_root",
-    "write_configured_knowledge_root",
 ]

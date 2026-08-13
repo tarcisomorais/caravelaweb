@@ -24,7 +24,7 @@ def main() -> int:
     parser.add_argument("--capability", required=True)
     args = parser.parse_args()
     try:
-        root = resolve_knowledge_root(args.knowledge_root, start=__file__)
+        root = resolve_knowledge_root(args.knowledge_root)
         if root is None:
             raise DiscoveryRunError("no usable CaravelaWeb knowledge root could be resolved")
         record = begin_discovery(root, args.target, args.capability)

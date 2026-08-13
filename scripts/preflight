@@ -245,7 +245,7 @@ def build_report(override: str | None) -> dict[str, object]:
     warnings: list[str] = []
     if not identity["python_meets_floor"]:
         errors.append(f"Python {identity['python']} is below the required 3.11 floor")
-    root = resolve_knowledge_root(override, start=__file__)
+    root = resolve_knowledge_root(override)
     root_report: dict[str, object] = {
         "path": str(root) if root else None,
         "marker_present": knowledge_root_marker_present(root) if root else False,

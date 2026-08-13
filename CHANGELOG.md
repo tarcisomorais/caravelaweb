@@ -47,6 +47,18 @@ under **Unreleased** until a version and tag are intentionally chosen.
 
 ### Fixed
 
+- Knowledge Root resolution no longer depends on shared mutable state, so
+  concurrent sessions on one machine stay independent. `init-knowledge-root`
+  used to record every initialized root, including one passed with
+  `--knowledge-root`, in a single per-user pointer file. Any session that
+  initialized a root therefore silently moved the default of every other
+  session, across unrelated projects. Resolution also walked up from the
+  running script's own path, which could select the source checkout as a
+  Knowledge Root. Both mechanisms are removed: the chain is now
+  `--knowledge-root`, then `CARAVELAWEB_KNOWLEDGE_ROOT`, then the fixed
+  per-user default location, which is derived and never stored. An explicit
+  root is used for that call only and changes nothing for later commands. An
+  existing pointer file is ignored, not deleted.
 - Discovery now opens a run-scoped local marker before target work. The
   finalizer requires the matching canonical target, capability, and `run_id`;
   every returned verdict closes only that run, while payload or infrastructure

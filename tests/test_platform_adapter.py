@@ -12,15 +12,13 @@ sys.path.insert(0, str(SKILL))
 
 from platform_adapter import (
     KNOWLEDGE_ROOT_ENV,
-    configured_knowledge_root_file,
+    TARGETS_DIRECTORY,
     default_knowledge_root,
     filesystem_class,
     is_wsl,
     platform_identity,
-    read_configured_knowledge_root,
     resolve_knowledge_root,
     validate_knowledge_root,
-    write_configured_knowledge_root,
 )
 
 
@@ -71,12 +69,7 @@ class PlatformAdapterTests(unittest.TestCase):
             root = Path(directory)
             (root / "targets").mkdir()
             with patch.dict("os.environ", {KNOWLEDGE_ROOT_ENV: str(root)}, clear=True):
-                self.assertEqual(root.resolve(), resolve_knowledge_root(start=root))
-            # Without the env var (and with no marker to walk up to), unresolved.
-            with patch.dict("os.environ", {}, clear=True), patch(
-                "platform_adapter.read_configured_knowledge_root", return_value=None
-            ):
-                self.assertIsNone(resolve_knowledge_root(start=root))
+                self.assertEqual(root.resolve(), resolve_knowledge_root())
 
     def test_explicit_override_wins_over_the_env_var(self) -> None:
         with tempfile.TemporaryDirectory() as env_directory, tempfile.TemporaryDirectory() as override_directory:
@@ -92,8 +85,8 @@ class PlatformAdapterTests(unittest.TestCase):
                 self.assertIsNone(resolve_knowledge_root())
 
 
-class PersistedDefaultRootTests(unittest.TestCase):
-    """The per-user default Knowledge Root location and its remembered pointer."""
+class DefaultRootResolutionTests(unittest.TestCase):
+    """The fixed per-user default location, and the whole resolution chain."""
 
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
@@ -106,8 +99,8 @@ class PersistedDefaultRootTests(unittest.TestCase):
                 "USERPROFILE": str(self.home),
                 # On native Windows, _user_app_directory() reads LOCALAPPDATA,
                 # not HOME/USERPROFILE -- without isolating it too, these
-                # tests read and write this machine's real per-user pointer
-                # file instead of a disposable one, and pollute each other.
+                # tests read this machine's real default Knowledge Root
+                # instead of a disposable one, and pollute each other.
                 "LOCALAPPDATA": str(self.home / "AppData" / "Local"),
             },
             clear=False,
@@ -145,47 +138,47 @@ class PersistedDefaultRootTests(unittest.TestCase):
     # by the real native-Windows CI runner (tests/windows_real_task_exercise.py),
     # not a simulated unit test.
 
-    def test_configured_root_file_is_distinct_from_the_default_data_directory(self) -> None:
-        # The pointer file and the default Knowledge Root data directory
-        # must never collide -- os.replace()-ing the pointer must not clobber
-        # (or be blocked by) an actual installation directory of the same name.
-        self.assertNotEqual(default_knowledge_root(), configured_knowledge_root_file())
-        self.assertEqual(default_knowledge_root().parent, configured_knowledge_root_file().parent)
+    def make_root(self, path: Path) -> Path:
+        (path / TARGETS_DIRECTORY).mkdir(parents=True)
+        return path.resolve()
 
-    def test_write_then_read_round_trips(self) -> None:
-        with tempfile.TemporaryDirectory() as other:
-            root = Path(other)
-            self.assertIsNone(read_configured_knowledge_root())
-            write_configured_knowledge_root(root)
-            self.assertEqual(root, read_configured_knowledge_root())
-            # A later init overwrites the remembered choice, it does not merge.
-            second = Path(other) / "elsewhere"
-            write_configured_knowledge_root(second)
-            self.assertEqual(second, read_configured_knowledge_root())
+    def test_the_default_location_resolves_with_no_override_and_no_stored_state(self) -> None:
+        root = self.make_root(default_knowledge_root())
+        self.assertEqual(root, resolve_knowledge_root())
 
-    def test_resolve_falls_back_to_the_persisted_default_below_the_env_var(self) -> None:
-        with tempfile.TemporaryDirectory() as configured, tempfile.TemporaryDirectory() as via_env:
-            configured_root, env_root = Path(configured), Path(via_env)
-            (configured_root / "targets").mkdir()
-            (env_root / "targets").mkdir()
-            write_configured_knowledge_root(configured_root)
+    def test_nothing_is_resolved_implicitly_when_the_default_does_not_exist(self) -> None:
+        # No walk-up: the source checkout is a valid Knowledge Root on a
+        # developer machine, and it must never be selected implicitly.
+        resolved = resolve_knowledge_root()
+        self.assertIsNone(resolved)
+        self.assertNotEqual(SKILL, resolved)
 
-            # No override, no env var: the persisted default resolves.
-            self.assertEqual(configured_root.resolve(), resolve_knowledge_root(start=self.home))
+    def test_env_var_wins_over_the_default_location(self) -> None:
+        self.make_root(default_knowledge_root())
+        env_root = self.make_root(Path(self.temp.name) / "via-env")
+        with patch.dict("os.environ", {KNOWLEDGE_ROOT_ENV: str(env_root)}):
+            self.assertEqual(env_root, resolve_knowledge_root())
 
-            # The env var still wins over the persisted default when set.
-            with patch.dict("os.environ", {KNOWLEDGE_ROOT_ENV: str(env_root)}):
-                self.assertEqual(env_root.resolve(), resolve_knowledge_root(start=self.home))
+    def test_explicit_override_wins_over_the_env_var_and_the_default(self) -> None:
+        self.make_root(default_knowledge_root())
+        env_root = self.make_root(Path(self.temp.name) / "via-env")
+        override = self.make_root(Path(self.temp.name) / "explicit")
+        with patch.dict("os.environ", {KNOWLEDGE_ROOT_ENV: str(env_root)}):
+            self.assertEqual(override, resolve_knowledge_root(override))
 
-            # An explicit override always wins over both.
-            self.assertEqual(
-                env_root.resolve(), resolve_knowledge_root(env_root, start=self.home)
-            )
+    def test_a_leftover_pointer_file_is_inert_and_is_never_removed(self) -> None:
+        # Older versions persisted a chosen root in a per-user "config" file,
+        # which any session could repoint under any other session's feet.
+        # Resolution must ignore that file -- and must leave the user's own
+        # file exactly where it is.
+        default = self.make_root(default_knowledge_root())
+        elsewhere = self.make_root(Path(self.temp.name) / "elsewhere")
+        pointer = default_knowledge_root().parent / "config"
+        pointer.write_text(f"{elsewhere}\n", encoding="utf-8")
 
-    def test_resolve_ignores_a_persisted_pointer_at_a_no_longer_valid_location(self) -> None:
-        with tempfile.TemporaryDirectory() as gone:
-            write_configured_knowledge_root(Path(gone) / "moved-away")
-            self.assertIsNone(resolve_knowledge_root(start=self.home))
+        self.assertEqual(default, resolve_knowledge_root())
+        self.assertTrue(pointer.is_file())
+        self.assertEqual(f"{elsewhere}\n", pointer.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

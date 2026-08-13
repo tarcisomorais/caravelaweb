@@ -40,7 +40,7 @@ def read_input(path: str) -> dict:
 
 
 def resolve_root(override: str | None) -> Path | None:
-    return resolve_knowledge_root(override, start=__file__)
+    return resolve_knowledge_root(override)
 
 
 def main() -> int:
