@@ -32,6 +32,14 @@ under **Unreleased** until a version and tag are intentionally chosen.
   `/plugin marketplace add tarcisomorais/caravelaweb` followed by
   `/plugin install caravelaweb@caravelaweb`, identical on Windows, Linux,
   WSL2, and macOS, with no symlink, junction, or `PATH` change.
+- Native Codex plugin distribution: `.agents/plugins/marketplace.json`
+  publishes the repository root and `.codex-plugin/plugin.json` exposes the
+  shared `skills/caravelaweb/` adapter. Codex CLI 0.147.0 and newer
+  install it globally with `codex plugin marketplace add` followed by
+  `codex plugin add`, without a symlink or duplicated runtime.
+- One shared `skills/caravelaweb/SKILL.md` plugin adapter for Codex and Claude
+  plugin installs. The root `SKILL.md` remains the only canonical contract;
+  `.agents/skills/` and `.claude/skills/` remain checkout-local adapters.
 - A **First run** section in `SKILL.md`: the executor runs `preflight` and, if
   no Knowledge Root resolves, `init-knowledge-root`, so neither is a user
   setup step. A `knowledge-lookup` result of `unresolved` now retries once
@@ -39,12 +47,14 @@ under **Unreleased** until a version and tag are intentionally chosen.
 
 ### Changed
 
-- The plugin manifest declares no `version`, so Claude Code versions the plugin
-  by source commit until a numbered release policy is chosen.
+- The Claude plugin manifest declares no `version`, so Claude Code versions it
+  by source commit. The Codex manifest uses explicit SemVer, starting at
+  `0.1.0`; this change creates no Git tag.
 - `<skill>` in the contract is defined as the skill root for any host: the
   cached plugin directory (`${CLAUDE_PLUGIN_ROOT}`) when installed as a Claude
-  Code plugin, and the repository root from a checkout or a link to one. No
-  runtime path became host-specific.
+  Code plugin, `../..` from the shared plugin adapter, `../../..` from the
+  checkout-local `.agents` adapter, and the repository root otherwise. No path
+  resolves from the process working directory.
 - `scripts/register-host` is documented as developer tooling rather than the
   install path. Its behavior is unchanged.
 - Every tracked file is checked out with LF endings. A CRLF checkout, the Git

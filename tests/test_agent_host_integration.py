@@ -1,11 +1,15 @@
 """Agent-host discovery, checked structurally.
 
-Three independent surfaces are covered here:
+Four independent surfaces are covered here:
 
 - Plugin distribution (Claude Code): the public install reads
   ``.claude-plugin/marketplace.json`` and ``.claude-plugin/plugin.json`` from
-  a fresh clone, and loads the repository-root ``SKILL.md`` as the plugin's
-  single skill. See ``PluginDistributionTests`` below.
+  a fresh clone and discovers the shared ``skills/caravelaweb/SKILL.md``
+  adapter. See ``PluginDistributionTests`` below.
+
+- Plugin distribution (Codex): the public install reads
+  ``.agents/plugins/marketplace.json`` and ``.codex-plugin/plugin.json`` and
+  loads the same shared plugin adapter.
 
 - Checkout-local discovery: a host opened directly in a fresh clone must find
   CaravelaWeb with no registration step. That depends on tracked files: root
@@ -33,6 +37,9 @@ REPO = Path(__file__).resolve().parents[1]
 REGISTER_HOST = REPO / "scripts" / "register-host"
 PLUGIN_MANIFEST = Path(".claude-plugin/plugin.json")
 MARKETPLACE_MANIFEST = Path(".claude-plugin/marketplace.json")
+CODEX_PLUGIN_MANIFEST = Path(".codex-plugin/plugin.json")
+CODEX_MARKETPLACE_MANIFEST = Path(".agents/plugins/marketplace.json")
+PLUGIN_ADAPTER = Path("skills/caravelaweb/SKILL.md")
 
 ADAPTERS = (
     Path(".claude/skills/caravelaweb/SKILL.md"),  # Claude Code, and OpenCode
@@ -65,8 +72,14 @@ def tracked_root_entries() -> set[str]:
 
 
 class CheckoutLocalDiscoveryTests(unittest.TestCase):
-    def test_repository_root_stays_the_canonical_skill(self) -> None:
+    def test_repository_root_stays_the_only_canonical_contract(self) -> None:
         self.assertEqual("caravelaweb", frontmatter_name(REPO / "SKILL.md"))
+        for relative in (*ADAPTERS, PLUGIN_ADAPTER):
+            with self.subTest(adapter=relative):
+                self.assertIn(
+                    "not the CaravelaWeb contract",
+                    " ".join((REPO / relative).read_text(encoding="utf-8").split()),
+                )
 
     def test_project_local_discovery_files_are_tracked(self) -> None:
         files = tracked()
@@ -83,8 +96,16 @@ class CheckoutLocalDiscoveryTests(unittest.TestCase):
                 path = REPO / relative
                 self.assertEqual("caravelaweb", frontmatter_name(path))
                 body = path.read_text(encoding="utf-8")
-                self.assertIn("canonical contract is `SKILL.md` at the repository root", body)
-                self.assertIn("repository root", body)
+                self.assertIn("canonical contract is `SKILL.md`", body)
+
+                if relative == Path(".agents/skills/caravelaweb/SKILL.md"):
+                    self.assertIn(
+                        "`../../..` from the directory holding this adapter",
+                        " ".join(body.split()),
+                    )
+                    self.assertIn("never from the current working directory", body)
+                else:
+                    self.assertIn("repository root", body)
 
                 siblings = {child.name for child in path.parent.iterdir()}
                 self.assertEqual({"SKILL.md"}, siblings, f"adapter is not thin: {siblings}")
@@ -97,7 +118,7 @@ class CheckoutLocalDiscoveryTests(unittest.TestCase):
     def test_no_nested_historical_skill_root_returns(self) -> None:
         nested = [name for name in tracked() if "skills" in Path(name).parts]
         self.assertEqual(
-            sorted(relative.as_posix() for relative in ADAPTERS),
+            sorted(relative.as_posix() for relative in (*ADAPTERS, PLUGIN_ADAPTER)),
             sorted(nested),
             "only the host discovery adapters may live under a nested skills/ path",
         )
@@ -118,7 +139,7 @@ class PluginDistributionTests(unittest.TestCase):
     A consumer never sees this working tree: Claude Code clones the
     repository, reads the marketplace catalog, and copies the plugin source
     into its own cache. Every assertion here therefore runs against tracked
-    content and the documented single-skill-at-plugin-root layout.
+    content and the documented shared plugin-skill layout.
     """
 
     def setUp(self) -> None:
@@ -145,13 +166,18 @@ class PluginDistributionTests(unittest.TestCase):
         self.assertEqual("caravelaweb", self.marketplace["plugins"][0]["name"])
         self.assertEqual("caravelaweb", self.plugin["name"])
         self.assertEqual("caravelaweb", frontmatter_name(REPO / "SKILL.md"))
+        self.assertEqual("caravelaweb", frontmatter_name(REPO / PLUGIN_ADAPTER))
 
-    def test_single_skill_at_plugin_root_layout_is_preserved(self) -> None:
-        # Claude Code loads a root SKILL.md as the plugin's single skill only
-        # while the plugin declares no skills/ directory and no skills field.
+    def test_exactly_one_shared_plugin_skill_defers_to_the_root_contract(self) -> None:
         self.assertNotIn("skills", self.plugin)
         self.assertNotIn("skills", self.marketplace["plugins"][0])
-        self.assertFalse((REPO / "skills").exists(), "a skills/ tree would shadow the root SKILL.md")
+        plugin_skills = sorted((REPO / "skills").glob("*/SKILL.md"))
+        self.assertEqual([REPO / PLUGIN_ADAPTER], plugin_skills)
+        body = plugin_skills[0].read_text(encoding="utf-8")
+        self.assertIn("canonical contract is `SKILL.md` at the plugin root", body)
+        self.assertIn("`../..` from the", body)
+        for tree in RUNTIME_TREES:
+            self.assertFalse(plugin_skills[0].parent.joinpath(tree).exists())
 
     def test_published_files_are_checked_out_with_lf_endings(self) -> None:
         # Claude Code clones this repository to install the plugin. With a
@@ -159,7 +185,12 @@ class PluginDistributionTests(unittest.TestCase):
         # parser misses `name:` and falls back to the install directory name,
         # which is the version string, so the skill stops being invocable as
         # `caravelaweb` on native Windows only.
-        published = ("SKILL.md", PLUGIN_MANIFEST.as_posix(), MARKETPLACE_MANIFEST.as_posix())
+        published = (
+            "SKILL.md",
+            PLUGIN_ADAPTER.as_posix(),
+            PLUGIN_MANIFEST.as_posix(),
+            MARKETPLACE_MANIFEST.as_posix(),
+        )
         attributes = subprocess.run(
             ["git", "-C", str(REPO), "check-attr", "eol", "--", *published],
             text=True, capture_output=True, check=True,
@@ -174,6 +205,64 @@ class PluginDistributionTests(unittest.TestCase):
         for name in (".caravelaweb", ".caravelaweb-knowledge-root", "targets"):
             with self.subTest(entry=name):
                 self.assertNotIn(name, tracked_root_entries())
+
+
+class CodexPluginDistributionTests(unittest.TestCase):
+    """The native Codex marketplace uses the shared plugin adapter."""
+
+    def setUp(self) -> None:
+        self.plugin = json.loads((REPO / CODEX_PLUGIN_MANIFEST).read_text(encoding="utf-8"))
+        self.marketplace = json.loads(
+            (REPO / CODEX_MARKETPLACE_MANIFEST).read_text(encoding="utf-8")
+        )
+
+    def test_native_manifests_are_tracked(self) -> None:
+        files = tracked()
+        for relative in (CODEX_PLUGIN_MANIFEST, CODEX_MARKETPLACE_MANIFEST):
+            with self.subTest(file=relative):
+                self.assertIn(relative.as_posix(), files, f"untracked: {relative}")
+
+    def test_native_marketplace_publishes_one_repository_root_plugin(self) -> None:
+        entries = self.marketplace["plugins"]
+        self.assertEqual("caravelaweb", self.marketplace["name"])
+        self.assertEqual(1, len(entries), f"expected exactly one plugin entry: {entries}")
+        self.assertEqual("caravelaweb", entries[0]["name"])
+        self.assertEqual("./", entries[0]["source"])
+        self.assertEqual("AVAILABLE", entries[0]["policy"]["installation"])
+        self.assertNotIn("authentication", entries[0]["policy"])
+
+    def test_native_plugin_has_release_version_and_shared_skill_layout(self) -> None:
+        self.assertEqual("caravelaweb", self.plugin["name"])
+        self.assertRegex(self.plugin["version"], r"^\d+\.\d+\.\d+$")
+        self.assertEqual("./skills/", self.plugin["skills"])
+        self.assertEqual("caravelaweb", frontmatter_name(REPO / PLUGIN_ADAPTER))
+
+    def test_native_plugin_has_required_interface_metadata(self) -> None:
+        interface = self.plugin["interface"]
+        required = {
+            "displayName",
+            "shortDescription",
+            "longDescription",
+            "developerName",
+            "category",
+            "capabilities",
+            "defaultPrompt",
+        }
+        self.assertEqual(set(), required - set(interface))
+
+    def test_native_published_files_are_checked_out_with_lf_endings(self) -> None:
+        published = (
+            CODEX_PLUGIN_MANIFEST.as_posix(),
+            CODEX_MARKETPLACE_MANIFEST.as_posix(),
+            PLUGIN_ADAPTER.as_posix(),
+        )
+        attributes = subprocess.run(
+            ["git", "-C", str(REPO), "check-attr", "eol", "--", *published],
+            text=True, capture_output=True, check=True,
+        ).stdout
+        for line in attributes.splitlines():
+            with self.subTest(attribute=line):
+                self.assertTrue(line.endswith(": eol: lf"), f"not pinned to LF: {line}")
 
 
 def fake_home_env(home: Path) -> dict[str, str]:

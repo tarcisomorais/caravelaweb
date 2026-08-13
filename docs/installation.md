@@ -1,16 +1,42 @@
 # Installation
 
-The supported public install is the Claude Code plugin. This page also covers
-alternative installs, developer mode, first-run behavior, optional browser
-transports, and removal.
+The supported public installs are the native Codex and Claude Code plugins.
+This page also covers alternative installs, developer mode, first-run behavior,
+optional browser transports, and removal.
 
 ## Prerequisites
 
 - Python 3.11 or newer, including the standard-library `sqlite3` module
-- Claude Code 2.1.142 or newer
+- Codex CLI 0.147.0 or newer, or Claude Code 2.1.142 or newer
 - Windows, Linux, WSL2, or macOS
 
 CaravelaWeb has no package-installation step and no Python dependencies.
+
+## Install as a Codex plugin
+
+From any project:
+
+```bash
+codex plugin marketplace add tarcisomorais/caravelaweb
+codex plugin add caravelaweb@caravelaweb
+```
+
+The commands are identical on every supported platform. Codex copies the
+plugin into its per-user cache and exposes the declared skill `caravelaweb` in
+projects unrelated to this repository. Codex CLI 0.147.0 renders that installed
+skill as `caravelaweb:caravelaweb` in model-visible prompt input. The first name
+in `caravelaweb@caravelaweb` is the plugin; the second is the marketplace.
+
+The Codex manifest carries an explicit semantic version. Public releases bump
+that version. For a GitHub marketplace install, request a marketplace refresh
+with:
+
+```bash
+codex plugin marketplace upgrade caravelaweb
+```
+
+CaravelaWeb does not use unchanged-version content replacement as a supported
+release path.
 
 ## Install as a Claude Code plugin
 
@@ -30,8 +56,9 @@ claude plugin install caravelaweb@caravelaweb
 
 The commands are identical on every supported platform. No symlink, junction,
 `PATH` entry, or elevated privilege is involved: Claude Code copies the plugin
-into its own versioned cache and loads the repository-root `SKILL.md` as the
-skill.
+into its own versioned cache and discovers
+`skills/caravelaweb/SKILL.md`. That thin adapter reads the canonical root
+`SKILL.md`; it does not duplicate the contract.
 
 The plugin declares no `version`, so Claude Code versions it by the source
 commit. `/plugin update caravelaweb@caravelaweb` therefore moves you to the
@@ -119,7 +146,9 @@ runtime code and point back to the repository-root [SKILL.md](../SKILL.md). A
 checkout that is installed and also opened locally may show both entries; they
 resolve to the same canonical file, so this is expected.
 
-Codex and OpenCode have no verified global installation in this repository.
+OpenCode has no verified global installation in this repository. Codex IDE
+extensions do not load plugins; checkout-local discovery remains available
+through `.agents/skills/caravelaweb/SKILL.md`.
 
 ## Runtime commands (advanced)
 
@@ -191,6 +220,15 @@ See [platform support](platform-support.md) and
 [`references/external-dependencies.md`](../references/external-dependencies.md).
 
 ## Uninstall
+
+Codex:
+
+```bash
+codex plugin remove caravelaweb@caravelaweb
+codex plugin marketplace remove caravelaweb
+```
+
+Claude Code:
 
 Remove the plugin:
 

@@ -1,6 +1,7 @@
-"""The skill-selection description stays identical across all three copies.
+"""The skill-selection description stays identical across all four copies.
 
-`SKILL.md` is the canonical contract; `.claude/skills/caravelaweb/SKILL.md` and
+`SKILL.md` is the canonical contract; `skills/caravelaweb/SKILL.md`,
+`.claude/skills/caravelaweb/SKILL.md`, and
 `.agents/skills/caravelaweb/SKILL.md` are thin discovery adapters that hold no
 runtime code and defer to the root file for content. Their frontmatter
 `description` is what a host's skill matcher actually reads to decide whether
@@ -20,6 +21,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 DESCRIPTION_FILES = (
     REPO / "SKILL.md",
+    REPO / "skills" / "caravelaweb" / "SKILL.md",
     REPO / ".claude" / "skills" / "caravelaweb" / "SKILL.md",
     REPO / ".agents" / "skills" / "caravelaweb" / "SKILL.md",
 )

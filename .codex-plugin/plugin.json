@@ -1,0 +1,34 @@
+{
+  "name": "caravelaweb",
+  "version": "0.1.0",
+  "description": "Conservative web access for agents: capability-scoped operating knowledge in a local Operational Memory, a DIRECT_READ -> LIGHTPANDA -> CHROME transport order, and caller authority preserved on every run.",
+  "author": {
+    "name": "Tarciso Morais",
+    "url": "https://github.com/tarcisomorais"
+  },
+  "homepage": "https://github.com/tarcisomorais/caravelaweb",
+  "repository": "https://github.com/tarcisomorais/caravelaweb",
+  "license": "Apache-2.0",
+  "keywords": [
+    "web",
+    "browser",
+    "research",
+    "operational-memory"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "CaravelaWeb",
+    "shortDescription": "Conservative web access for agents",
+    "longDescription": "Use the simplest reliable web transport, reuse accepted operating knowledge, and preserve caller authority on every run.",
+    "developerName": "Tarciso Morais",
+    "category": "Productivity",
+    "capabilities": [
+      "Instructions"
+    ],
+    "websiteURL": "https://github.com/tarcisomorais/caravelaweb",
+    "defaultPrompt": [
+      "Read a live website conservatively and cite the source page.",
+      "Check what CaravelaWeb already knows before investigating a web capability."
+    ]
+  }
+}

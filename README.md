@@ -19,7 +19,17 @@ If the command is missing or the version is older, install Python first from
 [python.org/downloads](https://www.python.org/downloads/). Nothing else is
 required: web reading works with no browser installed.
 
-## Install
+## Install with Codex
+
+Use Codex CLI 0.147.0 or newer. From any project, on Windows, Linux, WSL2, or
+macOS:
+
+```bash
+codex plugin marketplace add tarcisomorais/caravelaweb
+codex plugin add caravelaweb@caravelaweb
+```
+
+## Install with Claude Code
 
 Open Claude Code in any project and run these two commands:
 
@@ -44,11 +54,20 @@ Ask for what you want in plain language, from any project:
 Check the opening hours published on example-museum.org and tell me the source page.
 ```
 
-Claude picks CaravelaWeb when a task touches a live website. The first run
+The agent picks CaravelaWeb when a task touches a live website. The first run
 prepares a small local memory on your machine and tells you where it is. You
 run no setup commands.
 
 ## Update and uninstall
+
+Codex:
+
+```bash
+codex plugin marketplace upgrade caravelaweb
+codex plugin remove caravelaweb@caravelaweb
+```
+
+Claude Code:
 
 ```text
 /plugin update caravelaweb@caravelaweb

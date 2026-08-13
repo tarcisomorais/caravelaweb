@@ -1,0 +1,16 @@
+{
+  "name": "caravelaweb",
+  "interface": {
+    "displayName": "CaravelaWeb"
+  },
+  "plugins": [
+    {
+      "name": "caravelaweb",
+      "source": "./",
+      "policy": {
+        "installation": "AVAILABLE"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

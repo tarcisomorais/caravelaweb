@@ -1,8 +1,9 @@
 # Architecture
 
 CaravelaWeb separates source code, local reusable knowledge, and web-action
-authority. The repository root is the skill root; there is no nested skill
-directory and no package-installation layer.
+authority. The repository root is the canonical skill root; nested skill
+directories contain discovery adapters only, and there is no package-installation
+layer.
 
 ## Public runtime boundary
 
@@ -33,25 +34,31 @@ conformance query harness and synthetic fixture.
 
 ## Distribution
 
-The repository is the unit of distribution. `.claude-plugin/marketplace.json`
-publishes one plugin whose source is the repository root, and
-`.claude-plugin/plugin.json` names it. The repository is therefore both the
-marketplace and the plugin, and the root `SKILL.md` is loaded as the plugin's
-single skill.
+The repository is the unit of distribution. Claude Code reads
+`.claude-plugin/marketplace.json` and `.claude-plugin/plugin.json`. Codex reads
+the native `.agents/plugins/marketplace.json` and `.codex-plugin/plugin.json`.
+Both discover the shared `skills/caravelaweb/SKILL.md` plugin adapter and
+publish the repository root, so runtime and references stay canonical and
+unduplicated. The root `SKILL.md` remains the only contract.
 
 Claude Code copies an installed plugin into its own versioned cache, so the
 skill root differs per install:
 
 | Install | Skill root |
 | --- | --- |
-| Plugin | The cached copy, addressable as `${CLAUDE_PLUGIN_ROOT}` |
+| Claude plugin | The cached copy, addressable as `${CLAUDE_PLUGIN_ROOT}` |
+| Codex plugin | `../..` from the installed `skills/caravelaweb/SKILL.md` adapter directory |
+| Checkout through `.agents` | `../../..` from the `.agents/skills/caravelaweb/SKILL.md` adapter directory |
 | Personal skill directory, or a link into it | The checkout |
 | Checkout opened directly | The checkout |
 
-The contract refers to that root as `<skill>` in every host, so no runtime path
-is host-specific. The cached root is replaced on update and must never hold
-state; every writable path CaravelaWeb owns lives under the Knowledge Root and
-the per-user application directory instead.
+The contract refers to that root as `<skill>` in every host. Its resolution is
+the only host adapter: Claude retains its validated plugin-root variable;
+installed plugins derive `../..` from the shared adapter; checkout-local Codex,
+IDE, and OpenCode derive `../../..` from the `.agents` adapter. None use the
+process working directory. The cached root must never hold state; every
+writable path CaravelaWeb owns lives under the Knowledge Root and the per-user
+application directory instead.
 
 ## Host registration
 

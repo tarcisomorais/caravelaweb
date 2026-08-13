@@ -7,10 +7,10 @@ description: Use for any task that reads, navigates, or acts on a live web targe
 
 Use this skill for requested web access. It is a routing policy, not a browser framework: use the simplest reliable transport that proves the requested capability.
 
-In commands below, `<python>` is the concrete interpreter shown by `preflight`
-and `<skill>` is the skill root holding this file and `scripts/`: for a plugin
-install that root is `${CLAUDE_PLUGIN_ROOT}`, otherwise the repository root.
-Always use the interpreter-prefixed form.
+In commands below, `<python>` is the interpreter shown by `preflight`. Resolve
+`<skill>` without cwd: `${CLAUDE_PLUGIN_ROOT}` for Claude plugins; `../..` from
+the `skills/caravelaweb/` adapter; `../../..` from `.agents/skills/caravelaweb/`;
+and the repository root otherwise. Always use the interpreter-prefixed form.
 
 ## First run
 
