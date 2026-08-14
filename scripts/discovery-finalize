@@ -15,7 +15,6 @@ from discovery_finalize import (
     DiscoveryFinalizationError, _resolve_target_argument, finalize_discovery,
 )
 from discovery_runs import DiscoveryRunError, close_discovery, require_open_discovery
-from om_native_writes import WRITE_DESTINATION
 from operational_memory import SQLiteOperationalMemory
 from platform_adapter import configure_utf8_stdio, resolve_knowledge_root
 
@@ -47,6 +46,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Save reusable Discovery knowledge in local Operational Memory")
     parser.add_argument("--input", default="-", help="JSON file, or - for stdin")
     parser.add_argument("--knowledge-root")
+    parser.add_argument(
+        "--validate", action="store_true",
+        help="predict the finalize result without persisting anything; leaves the run open",
+    )
     parser.add_argument("--operational-memory-db", help="diagnostic DB override for tests; not part of the supported interface")
     args = parser.parse_args()
     try:
@@ -68,20 +71,29 @@ def main() -> int:
                 observations=payload.get("observations"), evidence=payload.get("evidence"),
                 provenance=payload.get("provenance"), recorded_at=payload.get("recorded_at"),
                 transport_trace=payload.get("transport_trace"),
-                knowledge_write_authority=True,
-                write_destination=WRITE_DESTINATION,
+                dry_run=args.validate,
             )
-        try:
-            close_discovery(
-                root, result.target, result.capability, str(run_id)
-            )
-        except DiscoveryRunError as exc:
+        if args.validate:
             print(json.dumps({
-                "status": "FINALIZATION_INCOMPLETE",
-                "knowledge_status": result.status,
-                "reason": str(exc),
-            }, ensure_ascii=False, sort_keys=True), file=sys.stderr)
-            return 2
+                "status": "VALID",
+                "would_finalize_as": result.status,
+                "would_reason_code": result.reason_code,
+                "run_state": "OPEN",
+            }, ensure_ascii=False, sort_keys=True))
+            return 0
+        if result.closes_run:
+            try:
+                close_discovery(
+                    root, result.target, result.capability, str(run_id)
+                )
+            except DiscoveryRunError as exc:
+                print(json.dumps({
+                    "status": "FINALIZATION_INCOMPLETE",
+                    "knowledge_status": result.status,
+                    "run_state": "OPEN",
+                    "reason": str(exc),
+                }, ensure_ascii=False, sort_keys=True), file=sys.stderr)
+                return 2
     except (DiscoveryFinalizationError, DiscoveryRunError) as exc:
         # Payload validation refusals already carry a specific, non-internal
         # reason. Surface it so the caller can fix the payload without
@@ -89,6 +101,7 @@ def main() -> int:
         # fall through to the generic branch below.
         print(json.dumps({
             "status": "NOT_SAVED",
+            "run_state": "OPEN",
             "reason": str(exc),
         }, ensure_ascii=False, sort_keys=True), file=sys.stderr)
         return 2
@@ -97,6 +110,7 @@ def main() -> int:
         # in the normal user flow.
         print(json.dumps({
             "status": "NOT_SAVED",
+            "run_state": "OPEN",
             "reason": "Discovery could not be finalized in local Operational Memory.",
         }, ensure_ascii=False, sort_keys=True), file=sys.stderr)
         return 2

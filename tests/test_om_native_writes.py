@@ -17,15 +17,12 @@ from om_native_writes import (
     OMAmbiguousCandidateError,
     OMProposalError,
     OMStaleBaseError,
-    OMWriteAuthorityRequired,
-    OMWriteDestinationRequired,
-    WRITE_DESTINATION,
     capture_candidate,
     promote_candidate,
     review_token,
 )
 from operational_memory.core import SQLiteOperationalMemory
-from write_authority import MIGRATED_WRITE_AUTHORITY_KIND
+from write_authority import MIGRATED_WRITE_AUTHORITY_KIND, WriteAuthorityStateError
 
 NOW = "2030-01-01T00:00:00Z"
 RECORDED = "2026-07-28T12:00:00Z"
@@ -157,9 +154,6 @@ class OMNativeWritesTest(unittest.TestCase):
             claims=self.claims(),
             provenance={"source": "reviewed structured candidate", "actor": "test"},
             recorded_at=RECORDED,
-            knowledge_write_authority=True,
-            write_destination=WRITE_DESTINATION,
-            authority_at_operation="OPERATIONAL_MEMORY",
         )
 
     def promote(self, proposal_id: str, token: str, decision_id: str = "dec:alpha:read:promote-c"):
@@ -172,9 +166,6 @@ class OMNativeWritesTest(unittest.TestCase):
             decision_id=decision_id,
             recorded_at="2026-07-28T13:00:00Z",
             effective_at="2026-07-28T13:00:00Z",
-            knowledge_write_authority=True,
-            write_destination=WRITE_DESTINATION,
-            authority_at_operation="OPERATIONAL_MEMORY",
         )
 
     def test_review_token_is_stable_and_independent_of_physical_order(self) -> None:
@@ -250,9 +241,6 @@ class OMNativeWritesTest(unittest.TestCase):
                 claims=bad,
                 provenance={"source": "test"},
                 recorded_at=RECORDED,
-                knowledge_write_authority=True,
-                write_destination=WRITE_DESTINATION,
-                authority_at_operation="OPERATIONAL_MEMORY",
             )
         after_counts = tuple(
             self.memory._conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
@@ -363,9 +351,6 @@ class OMNativeWritesTest(unittest.TestCase):
                 decision_id="dec:alpha:other:wrong",
                 recorded_at="2026-07-28T14:00:00Z",
                 effective_at="2026-07-28T14:00:00Z",
-                knowledge_write_authority=True,
-                write_destination=WRITE_DESTINATION,
-                authority_at_operation="OPERATIONAL_MEMORY",
             )
         with self.assertRaises(OMAmbiguousCandidateError):
             capture_candidate(
@@ -382,9 +367,6 @@ class OMNativeWritesTest(unittest.TestCase):
                 ],
                 provenance={"source": "test"},
                 recorded_at=RECORDED,
-                knowledge_write_authority=True,
-                write_destination=WRITE_DESTINATION,
-                authority_at_operation="OPERATIONAL_MEMORY",
             )
 
     def test_promote_candidate_treats_close_action_decisions_as_resolved(self) -> None:
@@ -422,9 +404,6 @@ class OMNativeWritesTest(unittest.TestCase):
             ],
             provenance={"source": "test"},
             recorded_at=RECORDED,
-            knowledge_write_authority=True,
-            write_destination=WRITE_DESTINATION,
-            authority_at_operation="OPERATIONAL_MEMORY",
         )
         with self.memory.write_transaction() as writer:
             writer.decision(
@@ -455,39 +434,68 @@ class OMNativeWritesTest(unittest.TestCase):
                 decision_id="dec:alpha:read:degrade-regression-promote",
                 recorded_at="2026-07-28T13:00:00Z",
                 effective_at="2026-07-28T13:00:00Z",
-                knowledge_write_authority=True,
-                write_destination=WRITE_DESTINATION,
-                authority_at_operation="OPERATIONAL_MEMORY",
             )
         self.assertEqual(
             decisions_before,
             self.memory._conn.execute("SELECT count(*) FROM decisions").fetchone()[0],
         )
 
-    def test_explicit_authority_destination_and_freeze_are_enforced(self) -> None:
-        kwargs = dict(
-            memory=self.memory,
-            target="alpha",
-            capability="read",
-            proposal_id="prop:alpha:read:authority",
-            claims=self.claims(),
-            provenance={"source": "test"},
-            recorded_at=RECORDED,
+    def test_missing_malformed_and_suspended_markers_fail_closed_with_no_partial_write(
+        self,
+    ) -> None:
+        # Authority is now derived solely from the real marker at
+        # memory.knowledge_root -- there is no caller-supplied flag left to
+        # assert or bypass it. Detailed marker-parsing edge cases (unknown
+        # kind, absent-marker-is-LEGACY, ...) are covered exhaustively in
+        # test_write_authority.py; this proves the write *boundary* actually
+        # consults that real state before touching any table.
+        write_authority_path = self.root / ".caravelaweb" / "write-authority.json"
+        original = write_authority_path.read_bytes()
+        before = tuple(
+            self.memory._conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+            for table in ("targets", "capabilities", "claims", "proposals", "decisions")
         )
-        with self.assertRaises(OMWriteAuthorityRequired):
-            capture_candidate(
-                **kwargs,
-                knowledge_write_authority=False,
-                write_destination=WRITE_DESTINATION,
-                authority_at_operation="OPERATIONAL_MEMORY",
-            )
-        with self.assertRaises(OMWriteDestinationRequired):
-            capture_candidate(
-                **kwargs,
-                knowledge_write_authority=True,
-                write_destination=None,
-                authority_at_operation="OPERATIONAL_MEMORY",
-            )
+        cases = {
+            "missing": None,
+            "malformed": "not json",
+            "suspended": json.dumps({
+                "kind": MIGRATED_WRITE_AUTHORITY_KIND, "status": "SUSPENDED",
+                "previous_write_authority": "LEGACY", "write_authority": "OPERATIONAL_MEMORY",
+                "om_authoritative_writes": 0, "first_om_write": "NOT_PERFORMED",
+            }),
+        }
+        try:
+            for label, body in cases.items():
+                with self.subTest(marker=label):
+                    if body is None:
+                        write_authority_path.unlink()
+                    else:
+                        write_authority_path.write_text(body, encoding="utf-8")
+                    with self.assertRaises(WriteAuthorityStateError):
+                        capture_candidate(
+                            self.memory, target="alpha", capability="read",
+                            proposal_id=f"prop:alpha:read:authority-{label}",
+                            claims=self.claims(), provenance={"source": "test"},
+                            recorded_at=RECORDED,
+                        )
+                    with self.assertRaises(WriteAuthorityStateError):
+                        self.promote("prop:alpha:read:authority-nonexistent", "irrelevant-token")
+        finally:
+            write_authority_path.write_bytes(original)
+        after = tuple(
+            self.memory._conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+            for table in ("targets", "capabilities", "claims", "proposals", "decisions")
+        )
+        self.assertEqual(before, after)
+        self.assertEqual(self.legacy_before, self._legacy_bytes())
+        # The restored ACTIVE marker grants write authority again.
+        captured = self.capture()
+        self.assertEqual(
+            [captured.proposal_id],
+            [item["proposal_id"] for item in self.memory.get_pending_candidates("alpha", "read")],
+        )
+
+    def test_write_freeze_blocks_capture_and_promotion_with_no_partial_write(self) -> None:
         captured = self.capture()
         token = review_token(self.memory, target="alpha", capability="read")
         enable_freeze(self.root, reason="read validation remains active")
@@ -497,10 +505,9 @@ class OMNativeWritesTest(unittest.TestCase):
         )
         with self.assertRaises(KnowledgeWriteFrozenError):
             capture_candidate(
-                **kwargs,
-                knowledge_write_authority=True,
-                write_destination=WRITE_DESTINATION,
-                authority_at_operation="OPERATIONAL_MEMORY",
+                self.memory, target="alpha", capability="read",
+                proposal_id="prop:alpha:read:frozen", claims=self.claims(),
+                provenance={"source": "test"}, recorded_at=RECORDED,
             )
         with self.assertRaises(KnowledgeWriteFrozenError):
             self.promote(captured.proposal_id, token)

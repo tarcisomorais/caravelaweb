@@ -25,7 +25,6 @@ sys.path.insert(0, str(SKILL))
 
 from discovery_finalize import DiscoveryFinalizationError, finalize_discovery
 from integration_bridge import KnowledgeLookupBoundary
-from om_native_writes import WRITE_DESTINATION
 from operational_memory import SQLiteOperationalMemory, TargetIdentityError
 from operational_memory.core import is_canonical_target_id, normalize_host_reference
 from write_authority import MIGRATED_WRITE_AUTHORITY_KIND
@@ -180,8 +179,7 @@ class TargetHostAssociationTests(unittest.TestCase):
                 "scope": "TARGET_SURFACE",
             }],
             provenance={"run_id": f"run:synthetic:{run}", "observed_at": RECORDED},
-            recorded_at=RECORDED, knowledge_write_authority=True,
-            write_destination=WRITE_DESTINATION,
+            recorded_at=RECORDED,
         )
 
     def test_first_time_discovery_requires_the_stable_canonical_id(self) -> None:
@@ -348,8 +346,7 @@ class TargetHostAssociationTests(unittest.TestCase):
                 "scope": "TARGET_SURFACE",
             }],
             provenance={"run_id": "run:synthetic:unicode", "observed_at": RECORDED},
-            recorded_at=RECORDED, knowledge_write_authority=True,
-            write_destination=WRITE_DESTINATION,
+            recorded_at=RECORDED,
         )
         self.assertEqual("SAVED", unicode_result.status)
         idna_rows = list(self.memory._conn.execute(

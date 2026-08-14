@@ -44,6 +44,23 @@ under **Unreleased** until a version and tag are intentionally chosen.
   no Knowledge Root resolves, `init-knowledge-root`, so neither is a user
   setup step. A `knowledge-lookup` result of `unresolved` now retries once
   after that sequence instead of stopping immediately.
+- `run_state` (`"OPEN"` or `"CLOSED"`) on every `scripts/discovery-finalize`
+  response, so a caller no longer infers marker state from the exit code,
+  output stream, status, or reason code. `TRANSPORT_POLICY_UNPROVEN` and
+  `FAILURE_UNCLASSIFIED` now leave the matching run open: a corrected payload
+  can be resubmitted under the same `run_id` instead of losing the run.
+- `scripts/discovery-finalize --validate --input <discovery.json>`: predicts
+  the real finalization result by running the identical write path and
+  rolling it back before commit. It never calls `close_discovery` and never
+  persists a database or marker change.
+- `$.field` explicit-root form for `field_paths` (for example `$.headline`,
+  `$.article.full_text`), so a single-record extraction can name a field at
+  the root of the record without a synthetic wrapper.
+- `references/discovery-payload-examples.md`: complete, copyable
+  `discovery.json` payloads for functional `DIRECT_READ`, single-record and
+  collection extraction, first-time host association, browser escalation,
+  a fully blocked ladder, and an observed limitation constraint. A
+  deterministic test finalizes every documented payload for real.
 
 ### Fixed
 
@@ -93,6 +110,23 @@ under **Unreleased** until a version and tag are intentionally chosen.
 
 ### Changed
 
+- The Operational-Memory write boundary (`finalize_discovery`,
+  `capture_candidate`, `enrich_candidate`, `replace_candidate`,
+  `promote_candidate`) no longer accepts `knowledge_write_authority`,
+  `write_destination`, or `authority_at_operation` arguments. Write authority
+  is derived solely from the real write-authority marker at
+  `memory.knowledge_root`; no caller could previously assert or bypass it in
+  a way that changed persisted behavior, and the parameters are removed along
+  with the synthetic `prop:authority-check` Candidate call that exercised
+  them. This is an internal Python API change only -- the CLI flags, output
+  contract, and public finalization statuses are unchanged.
+- Four validation errors now name the accepted form instead of stating only
+  that a value was rejected: a symbolic-value error shows the grammar and an
+  example; a rejected schema field path lists the accepted `$.field`,
+  dotted, and collection forms; a validation-context error names the
+  unsupported keys and lists the accepted ones; a host-evidence mismatch
+  reports the claimed Observation Host, the public hostnames found in
+  evidence, and the exact `scope`/hostname match it requires.
 - A blocked capability is a complete answer. When the ladder is exhausted and
   the result is a target block or an authority boundary, the contract requires
   reporting the block and stopping. Continuing the same investigation through a

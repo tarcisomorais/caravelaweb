@@ -14,7 +14,6 @@ sys.path.insert(0, str(SKILL))
 from discovery_finalize import DiscoveryFinalizationError, finalize_discovery
 from om_native_writes import (
     OMProposalError,
-    WRITE_DESTINATION,
     capture_candidate,
     replace_candidate,
     review_token,
@@ -45,7 +44,24 @@ class ContinuousLearningTests(unittest.TestCase):
         )
         self.addCleanup(self.memory.close)
 
-    def finalize(self, observation, *, at=T1, run="001", evidence=None):
+    # All durable Operational Memory tables `--validate` must leave untouched.
+    _SNAPSHOT_TABLES = (
+        "targets", "hosts", "capabilities", "evidence", "validations",
+        "observations", "observation_evidence", "claims", "claim_observations",
+        "proposals", "proposal_claims", "decisions", "decision_claims",
+        "contradictions",
+    )
+
+    def _table_snapshot(self):
+        return {
+            table: sorted(
+                json.dumps(dict(row), sort_keys=True, default=str)
+                for row in self.memory._conn.execute(f"SELECT * FROM {table}").fetchall()
+            )
+            for table in self._SNAPSHOT_TABLES
+        }
+
+    def finalize(self, observation, *, at=T1, run="001", evidence=None, dry_run=False):
         transport_trace = None
         validation = observation.get("validation", {})
         contradiction = observation.get("contradiction", {})
@@ -92,9 +108,9 @@ class ContinuousLearningTests(unittest.TestCase):
                 },
             ],
             provenance={"run_id": f"run:example:{run}", "observed_at": at},
-            recorded_at=at, knowledge_write_authority=True,
-            write_destination=WRITE_DESTINATION,
+            recorded_at=at,
             transport_trace=transport_trace,
+            dry_run=dry_run,
         )
 
     @staticmethod
@@ -186,6 +202,27 @@ class ContinuousLearningTests(unittest.TestCase):
             f"SELECT count(*) FROM {table}"
         ).fetchone()[0] for table in ("claims", "proposals", "decisions")))
 
+    def test_validate_rolls_back_the_replace_candidate_branch(self):
+        # `dry_run` must roll back replace_candidate exactly like any other
+        # write inside the same transaction: distinct from the enrichment and
+        # capture_candidate branches covered in test_discovery_finalize.py.
+        self.assertEqual("SAVED", self.finalize(self.observed("DIRECT_READ")).status)
+        old_id = self.memory.get_current("example", "search")["accepted_claim_ids"][0]
+        before = self._table_snapshot()
+
+        predicted = self.finalize(self.replacement(), at=T2, run="002", dry_run=True)
+        self.assertEqual("SAVED", predicted.status)
+        self.assertEqual(before, self._table_snapshot())
+        current = self.memory.get_current("example", "search")
+        self.assertEqual([old_id], current["accepted_claim_ids"])
+        self.assertEqual("DIRECT_READ", current["accepted_claims"][0]["value"]["transport"])
+
+        real = self.finalize(self.replacement(), at=T2, run="002")
+        self.assertEqual("SAVED", real.status)
+        current = self.memory.get_current("example", "search")
+        self.assertNotIn(old_id, current["accepted_claim_ids"])
+        self.assertEqual("CHROME", current["accepted_claims"][0]["value"]["transport"])
+
     def test_replacement_failure_rolls_back_candidate_and_decisions(self):
         self.finalize(self.observed("DIRECT_READ"))
         self.memory._conn.execute("""CREATE TRIGGER refuse_supersede BEFORE INSERT ON decisions
@@ -253,8 +290,7 @@ class ContinuousLearningTests(unittest.TestCase):
                 "scope": "TARGET_SURFACE",
             }],
             provenance={"run_id": "run:example:mixed", "observed_at": T1},
-            recorded_at=T1, knowledge_write_authority=True,
-            write_destination=WRITE_DESTINATION,
+            recorded_at=T1,
         )
         self.assertEqual("NOT_SAVED", result.status)
         self.assertEqual("TRANSPORT_POLICY_UNPROVEN", result.reason_code)
@@ -353,8 +389,7 @@ class ContinuousLearningTests(unittest.TestCase):
                 },
             ],
             provenance={"run_id": "run:example:two-hosts", "observed_at": T1},
-            recorded_at=T1, knowledge_write_authority=True,
-            write_destination=WRITE_DESTINATION,
+            recorded_at=T1,
             transport_trace={
                 "availability": {
                     "LIGHTPANDA": "PLATFORM_UNSUPPORTED", "CHROME": "AVAILABLE",
@@ -680,9 +715,7 @@ class ContinuousLearningTests(unittest.TestCase):
                 "value": {"state": "NEW"}, "host_id": host_id,
             }],
             provenance={"run_id": "run:direct", "observed_at": T2},
-            recorded_at=T2, knowledge_write_authority=True,
-            write_destination=WRITE_DESTINATION,
-            authority_at_operation=WRITE_DESTINATION,
+            recorded_at=T2,
             supporting_evidence={claim_id: [{
                 "id": f"ev:direct:new:{family}:{host_id or 'target'}",
                 "kind": "new-path", "locator": NEW_EVIDENCE, "recorded_at": T2,
@@ -724,9 +757,6 @@ class ContinuousLearningTests(unittest.TestCase):
                 ),
                 decision_id="dec:example:search:direct-family",
                 recorded_at=T2, effective_at=T2,
-                knowledge_write_authority=True,
-                write_destination=WRITE_DESTINATION,
-                authority_at_operation=WRITE_DESTINATION,
             )
 
     def test_direct_replace_rejects_cross_host(self):
@@ -740,9 +770,6 @@ class ContinuousLearningTests(unittest.TestCase):
                 ),
                 decision_id="dec:example:search:direct-host",
                 recorded_at=T2, effective_at=T2,
-                knowledge_write_authority=True,
-                write_destination=WRITE_DESTINATION,
-                authority_at_operation=WRITE_DESTINATION,
             )
 
     def test_direct_replace_rejects_distinct_ids_with_same_locator(self):
@@ -758,7 +785,4 @@ class ContinuousLearningTests(unittest.TestCase):
                 ),
                 decision_id="dec:example:search:direct-same-locator",
                 recorded_at=T2, effective_at=T2,
-                knowledge_write_authority=True,
-                write_destination=WRITE_DESTINATION,
-                authority_at_operation=WRITE_DESTINATION,
             )

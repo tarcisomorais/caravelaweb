@@ -198,6 +198,39 @@ class DiscoveryRunTests(unittest.TestCase):
             self.assertEqual(initial_proposal, memory._conn.execute("SELECT id FROM proposals").fetchone()[0])
             self.assertEqual(1, memory._conn.execute("SELECT count(*) FROM evidence").fetchone()[0])
 
+    def test_abandoned_retryable_run_stays_visible_to_lookup_and_preflight(self):
+        # Documents current behavior: an abandoned retryable/invalid run's
+        # marker is not expired or cleaned up automatically -- it remains
+        # open and visible until a caller retries or explicitly abandons it.
+        opened = self.begin("abandoned-target", "article-read")
+        payload = self.payload(opened, observations=[{
+            "family": "transport",
+            "value": {"transport": "DIRECT_READ", "outcome": "FAILED"},
+        }])
+        payload["transport_trace"] = {
+            "availability": {"LIGHTPANDA": "AVAILABLE", "CHROME": "AVAILABLE"},
+            "attempts": [{
+                "transport": "DIRECT_READ", "outcome": "FAILED",
+                "evidence": ["https://example.com/"],
+            }],
+        }
+        result = self.finalize(payload)
+        self.assertEqual(0, result.returncode, result.stderr)
+        body = json.loads(result.stdout)
+        self.assertEqual("TRANSPORT_POLICY_UNPROVEN", body["reason_code"])
+        self.assertEqual("OPEN", body["run_state"])
+        self.assertEqual([opened["run_id"]], [
+            item["run_id"] for item in list_open_discoveries(self.root)
+        ])
+        lookup = self.run_cli(LOOKUP, "--target", "abandoned-target", "--capability", "article-read")
+        self.assertEqual([opened["run_id"]], [
+            item["run_id"] for item in json.loads(lookup.stdout)["open_discovery"]
+        ])
+        preflight = self.run_cli(PREFLIGHT, "--json")
+        self.assertIn(opened["run_id"], [
+            item["run_id"] for item in json.loads(preflight.stdout)["open_discovery"]
+        ])
+
     def test_close_failure_stays_open_and_already_exists_retry_closes_it(self):
         opened = self.begin("retry-target")
         payload = self.payload(opened)

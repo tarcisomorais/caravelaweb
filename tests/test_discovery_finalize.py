@@ -18,7 +18,6 @@ sys.path.insert(0, str(SKILL))
 
 from discovery_finalize import DiscoveryFinalizationError, finalize_discovery
 from discovery_runs import begin_discovery
-from om_native_writes import OMNativeWriteError, OMWriteAuthorityRequired, WRITE_DESTINATION
 from operational_memory.core import SQLiteOperationalMemory
 from platform_adapter import resolve_knowledge_root
 from write_authority import MIGRATED_WRITE_AUTHORITY_KIND, WriteAuthorityStateError
@@ -63,17 +62,34 @@ class DiscoveryFinalizeTests(unittest.TestCase):
             "recorded_at": RECORDED,
         }
 
-    def finalize(self, payload=None):
+    def finalize(self, payload=None, *, dry_run=False):
         payload = payload or self.payload()
         arguments = {
             "target": payload["target"], "capability": payload["capability"],
             "observations": payload["observations"], "evidence": payload["evidence"],
             "provenance": payload["provenance"], "recorded_at": payload["recorded_at"],
-            "knowledge_write_authority": True, "write_destination": WRITE_DESTINATION,
+            "dry_run": dry_run,
         }
         if "transport_trace" in payload:
             arguments["transport_trace"] = payload["transport_trace"]
         return finalize_discovery(self.memory, **arguments)
+
+    # All durable Operational Memory tables `--validate` must leave untouched.
+    _SNAPSHOT_TABLES = (
+        "targets", "hosts", "capabilities", "evidence", "validations",
+        "observations", "observation_evidence", "claims", "claim_observations",
+        "proposals", "proposal_claims", "decisions", "decision_claims",
+        "contradictions",
+    )
+
+    def _table_snapshot(self):
+        return {
+            table: sorted(
+                json.dumps(dict(row), sort_keys=True, default=str)
+                for row in self.memory._conn.execute(f"SELECT * FROM {table}").fetchall()
+            )
+            for table in self._SNAPSHOT_TABLES
+        }
 
     def open_payload(self, payload):
         if isinstance(payload, Path):
@@ -167,9 +183,11 @@ class DiscoveryFinalizeTests(unittest.TestCase):
     def test_new_knowledge_and_repeat_are_deterministic(self):
         created = self.finalize()
         self.assertEqual("SAVED", created.status)
+        self.assertTrue(created.closes_run)
         self.assertEqual(2, len(self.memory.get_current("example-news", "topic-search")["accepted_claim_ids"]))
         repeated = self.finalize()
         self.assertEqual("ALREADY_EXISTS", repeated.status)
+        self.assertTrue(repeated.closes_run)
         self.assertEqual([], self.memory.get_pending_candidates("example-news", "topic-search"))
 
     def test_accepted_knowledge_is_not_recaptured(self):
@@ -193,6 +211,8 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         }
         result = self.finalize(payload)
         self.assertEqual("NOT_SAVED", result.status)
+        self.assertEqual("NO_REUSABLE_KNOWLEDGE", result.reason_code)
+        self.assertTrue(result.closes_run)
         self.assertEqual(0, self.memory._conn.execute("SELECT count(*) FROM proposals").fetchone()[0])
 
     def test_new_example_portal_target_is_saved_and_immediately_usable(self):
@@ -208,21 +228,32 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         self.assertEqual(1, len(self.memory.get_current("example-portal", "rss-feed")["accepted_claim_ids"]))
         self.assertEqual([], self.memory.get_pending_candidates("example-portal", "rss-feed"))
 
-    def test_new_scope_is_not_created_without_knowledge_write_authority(self):
+    def test_new_scope_is_not_created_without_a_real_write_authority_marker(self):
+        # Authority is derived solely from the real marker at
+        # memory.knowledge_root -- there is no caller-supplied flag left to
+        # assert or bypass it, so the fail-closed proof removes the marker
+        # entirely rather than passing a fake "no authority" argument.
         payload = {
             "target": "example-portal", "capability": "world_section_access", "recorded_at": RECORDED,
             "provenance": {"run_id": "run:example-portal:world:001", "observed_at": RECORDED},
             "evidence": [{"kind": "direct-read-validation", "locator": "https://www.example-portal.com/mundo/"}],
             "observations": [{"family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"}}],
         }
-        with self.assertRaises(OMWriteAuthorityRequired):
-            finalize_discovery(
-                self.memory, target=payload["target"], capability=payload["capability"],
-                observations=payload["observations"], evidence=payload["evidence"], provenance=payload["provenance"],
-                recorded_at=payload["recorded_at"], knowledge_write_authority=False,
-                write_destination=WRITE_DESTINATION,
-            )
+        write_authority_path = self.root / ".caravelaweb/write-authority.json"
+        original = write_authority_path.read_bytes()
+        write_authority_path.unlink()
+        try:
+            with self.assertRaises(WriteAuthorityStateError):
+                finalize_discovery(
+                    self.memory, target=payload["target"], capability=payload["capability"],
+                    observations=payload["observations"], evidence=payload["evidence"],
+                    provenance=payload["provenance"], recorded_at=payload["recorded_at"],
+                )
+        finally:
+            write_authority_path.write_bytes(original)
         self.assertIsNone(self.memory._conn.execute("SELECT 1 FROM targets WHERE id='tgt:example-portal'").fetchone())
+        # The restored ACTIVE marker grants write authority again.
+        self.assertEqual("SAVED", self.finalize(payload).status)
 
     def test_cli_finalizes_a_new_example_portal_scope_and_lookup_stays_not_found(self):
         (self.root / ".caravelaweb/read-authority-operational-memory").write_text("active", encoding="utf-8")
@@ -416,16 +447,15 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual("NOT_SAVED", json.loads(result.stdout)["status"])
 
-    def test_missing_evidence_wrong_authority_and_task_data_fail_closed(self):
+    def test_missing_evidence_and_task_data_fail_closed(self):
+        # Caller-asserted "wrong authority" is no longer a reachable case --
+        # see test_new_scope_is_not_created_without_a_real_write_authority_marker
+        # for the real-marker fail-closed proof.
         payload = self.payload()
         with self.assertRaises(DiscoveryFinalizationError):
             self.finalize({**payload, "evidence": []})
         with self.assertRaises(DiscoveryFinalizationError):
             self.finalize({**payload, "observations": [{"family": "extraction", "value": {"titles": ["not reusable"]}}]})
-        with self.assertRaises(OMNativeWriteError):
-            finalize_discovery(self.memory, target=payload["target"], capability=payload["capability"], observations=payload["observations"], evidence=payload["evidence"], provenance=payload["provenance"], recorded_at=RECORDED, knowledge_write_authority=True, write_destination=WRITE_DESTINATION, authority_at_operation="LEGACY")
-        with self.assertRaises(OMWriteAuthorityRequired):
-            finalize_discovery(self.memory, target=payload["target"], capability=payload["capability"], observations=payload["observations"], evidence=payload["evidence"], provenance=payload["provenance"], recorded_at=RECORDED, knowledge_write_authority=False, write_destination=WRITE_DESTINATION)
 
     def test_extraction_schema_field_path_is_reusable_not_task_data(self):
         result = self.finalize(self.payload([
@@ -672,6 +702,8 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         result = self.finalize(payload)
         self.assertEqual("NOT_SAVED", result.status)
         self.assertEqual("TRANSPORT_POLICY_UNPROVEN", result.reason_code)
+        self.assertFalse(result.closes_run)
+        self.assertEqual("OPEN", result.as_dict()["run_state"])
 
     def exhausted_direct_read_payload(self, classified=True):
         """One attempt, no browser on this machine, so the ladder is exhausted."""
@@ -703,6 +735,8 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         result = self.finalize(self.exhausted_direct_read_payload(classified=False))
         self.assertEqual("NOT_SAVED", result.status)
         self.assertEqual("FAILURE_UNCLASSIFIED", result.reason_code)
+        self.assertFalse(result.closes_run)
+        self.assertEqual("OPEN", result.as_dict()["run_state"])
 
     def test_runtime_failure_classes_never_become_target_knowledge(self):
         for failure_class in (
@@ -1512,6 +1546,336 @@ class DiscoveryFinalizeTests(unittest.TestCase):
             payload["target"], payload["capability"]
         )
         self.assertNotIn("lifecycle", context["current"])
+
+
+    def test_cli_reports_run_state_closed_for_saved_and_open_for_unproven(self):
+        payload = self.root / "unproven-discovery.json"
+        locator = "https://www.example-news.com/search"
+        body = self.payload([self.transport_observation("DIRECT_READ", "FAILED", locator)])
+        body["evidence"] = [{"kind": "transport-validation", "locator": locator}]
+        body["transport_trace"] = self.transport_trace(("DIRECT_READ", "FAILED", locator))
+        payload.write_text(json.dumps(body), encoding="utf-8")
+        self.open_payload(payload)
+        result = subprocess.run(
+            [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root), "--input", str(payload)],
+            text=True, capture_output=True, encoding="utf-8",
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        stdout = json.loads(result.stdout)
+        self.assertEqual("NOT_SAVED", stdout["status"])
+        self.assertEqual("TRANSPORT_POLICY_UNPROVEN", stdout["reason_code"])
+        self.assertEqual("OPEN", stdout["run_state"])
+        from discovery_runs import list_open_discoveries
+        self.assertEqual(1, len(list_open_discoveries(self.root)))
+        # A corrected payload under the same run_id can retry immediately.
+        fixed = self.payload()
+        fixed["provenance"]["run_id"] = body["provenance"]["run_id"]
+        payload.write_text(json.dumps(fixed), encoding="utf-8")
+        retried = subprocess.run(
+            [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root), "--input", str(payload)],
+            text=True, capture_output=True, encoding="utf-8",
+        )
+        self.assertEqual(0, retried.returncode, retried.stderr)
+        retried_body = json.loads(retried.stdout)
+        self.assertEqual("SAVED", retried_body["status"])
+        self.assertEqual("CLOSED", retried_body["run_state"])
+        self.assertEqual([], list_open_discoveries(self.root))
+
+    def test_cli_saved_result_reports_run_state_closed(self):
+        payload = self.root / "saved-discovery.json"
+        body = self.payload()
+        payload.write_text(json.dumps(body), encoding="utf-8")
+        self.open_payload(payload)
+        result = subprocess.run(
+            [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root), "--input", str(payload)],
+            text=True, capture_output=True, encoding="utf-8",
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("CLOSED", json.loads(result.stdout)["run_state"])
+
+    def test_schema_error_reports_run_state_open(self):
+        payload = self.root / "schema-invalid.json"
+        payload.write_text(json.dumps({"target": "example-news", "capability": "topic-search"}), encoding="utf-8")
+        result = subprocess.run(
+            [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root), "--input", str(payload)],
+            text=True, capture_output=True, encoding="utf-8",
+        )
+        self.assertEqual(2, result.returncode)
+        self.assertEqual("OPEN", json.loads(result.stderr)["run_state"])
+
+    def test_validate_predicts_saved_without_persisting(self):
+        payload = self.root / "validate-discovery.json"
+        body = self.payload()
+        payload.write_text(json.dumps(body), encoding="utf-8")
+        self.open_payload(payload)
+        before_rows = {
+            table: self.memory._conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+            for table in ("claims", "proposals", "decisions", "evidence", "hosts")
+        }
+        from discovery_runs import list_open_discoveries
+        markers_before = list_open_discoveries(self.root)
+        result = subprocess.run(
+            [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root),
+             "--validate", "--input", str(payload)],
+            text=True, capture_output=True, encoding="utf-8",
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        stdout = json.loads(result.stdout)
+        self.assertEqual(
+            {"status": "VALID", "would_finalize_as": "SAVED", "would_reason_code": None, "run_state": "OPEN"},
+            stdout,
+        )
+        after_rows = {
+            table: self.memory._conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+            for table in ("claims", "proposals", "decisions", "evidence", "hosts")
+        }
+        self.assertEqual(before_rows, after_rows)
+        self.assertEqual(markers_before, list_open_discoveries(self.root))
+        # Real finalization after validation still succeeds.
+        real = subprocess.run(
+            [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root), "--input", str(payload)],
+            text=True, capture_output=True, encoding="utf-8",
+        )
+        self.assertEqual(0, real.returncode, real.stderr)
+        self.assertEqual("SAVED", json.loads(real.stdout)["status"])
+
+    def test_validate_predicts_early_no_write_result_without_closing_marker(self):
+        payload = self.root / "validate-empty.json"
+        body = {
+            "target": "new-target", "capability": "new-capability",
+            "observations": [], "evidence": [],
+            "provenance": {"run_id": "run:validate-empty:001", "observed_at": RECORDED},
+            "recorded_at": RECORDED,
+        }
+        payload.write_text(json.dumps(body), encoding="utf-8")
+        self.open_payload(payload)
+        result = subprocess.run(
+            [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root),
+             "--validate", "--input", str(payload)],
+            text=True, capture_output=True, encoding="utf-8",
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual({
+            "status": "VALID", "would_finalize_as": "NOT_SAVED",
+            "would_reason_code": "NO_REUSABLE_KNOWLEDGE", "run_state": "OPEN",
+        }, json.loads(result.stdout))
+        from discovery_runs import list_open_discoveries
+        self.assertEqual(1, len(list_open_discoveries(self.root)))
+
+    def test_dollar_root_field_path_is_accepted(self):
+        payload = self.payload([
+            {"family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"}},
+            {"family": "extraction", "value": {
+                "field_paths": {"headline": "$.headline", "body": "$.article.full_text"},
+            }},
+        ])
+        self.assertEqual("SAVED", self.finalize(payload).status)
+
+    def test_bare_field_name_is_rejected_with_explicit_root_hint(self):
+        payload = self.payload([
+            {"family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"}},
+            {"family": "extraction", "value": {"field_paths": {"headline": "headline"}}},
+        ])
+        with self.assertRaises(DiscoveryFinalizationError) as ctx:
+            self.finalize(payload)
+        self.assertIn("$.headline", str(ctx.exception))
+
+    def test_symbolic_value_error_explains_the_grammar(self):
+        payload = self.payload([
+            {"family": "transport", "value": {"transport": "not a symbol!", "outcome": "FUNCTIONAL"}},
+        ])
+        with self.assertRaises(DiscoveryFinalizationError) as ctx:
+            self.finalize(payload)
+        self.assertIn("SITE_BLOCKING", str(ctx.exception))
+        self.assertIn("letters, digits", str(ctx.exception))
+
+    def test_validation_context_error_lists_accepted_keys(self):
+        payload = self.payload([
+            {
+                "family": "blocking",
+                "value": {"failure_class": "SITE_BLOCKING"},
+                "validation": {"bogus_key": "value"},
+            },
+        ])
+        with self.assertRaises(DiscoveryFinalizationError) as ctx:
+            self.finalize(payload)
+        message = str(ctx.exception)
+        self.assertIn("bogus_key", message)
+        self.assertIn("transport", message)
+        self.assertIn("evidence", message)
+
+    def test_host_mismatch_error_reports_claimed_and_evidence_hosts(self):
+        payload = self.payload([
+            {"family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"},
+             "host": "other.example-news.com"},
+        ])
+        with self.assertRaises(DiscoveryFinalizationError) as ctx:
+            self.finalize(payload)
+        message = str(ctx.exception)
+        self.assertIn("other.example-news.com", message)
+        self.assertIn("TARGET_SURFACE", message)
+        self.assertIn("www.example-news.com", message)
+
+    def test_validate_rolls_back_new_target_capability_and_host_association(self):
+        # Covers the create_missing_scope=True capture_candidate path: a brand
+        # new target, capability, and host all get created inside the same
+        # rolled-back transaction. Compares every durable table plus the
+        # discovery marker and write-authority bytes on disk, not just row
+        # counts, so a dry-run leak in any one of them would be caught.
+        payload_path = self.root / "validate-host-discovery.json"
+        body = {
+            "target": "example-validate-host", "capability": "article-read",
+            "observations": [{
+                "family": "transport",
+                "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"},
+                "host": "www.example-validate-host.example",
+            }],
+            "evidence": [{
+                "kind": "direct-read-validation",
+                "locator": "https://www.example-validate-host.example/articles/1",
+                "scope": "TARGET_SURFACE",
+            }],
+            "provenance": {"run_id": "run:example-validate-host:001", "observed_at": RECORDED},
+            "recorded_at": RECORDED,
+        }
+        payload_path.write_text(json.dumps(body), encoding="utf-8")
+        self.open_payload(payload_path)
+
+        db_before = self._table_snapshot()
+        write_authority_path = self.root / ".caravelaweb/write-authority.json"
+        write_authority_before = write_authority_path.read_bytes()
+        marker_dir = self.root / ".caravelaweb/open-discovery"
+        markers_before = {p.name: p.read_bytes() for p in marker_dir.iterdir()}
+
+        validated = subprocess.run(
+            [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root),
+             "--validate", "--input", str(payload_path)],
+            text=True, capture_output=True, encoding="utf-8",
+        )
+        self.assertEqual(0, validated.returncode, validated.stderr)
+        self.assertEqual(
+            {"status": "VALID", "would_finalize_as": "SAVED",
+             "would_reason_code": None, "run_state": "OPEN"},
+            json.loads(validated.stdout),
+        )
+        self.assertEqual(db_before, self._table_snapshot())
+        self.assertEqual(write_authority_before, write_authority_path.read_bytes())
+        self.assertEqual(
+            markers_before, {p.name: p.read_bytes() for p in marker_dir.iterdir()}
+        )
+        self.assertIsNone(self.memory._conn.execute(
+            "SELECT 1 FROM targets WHERE id='tgt:example-validate-host'"
+        ).fetchone())
+
+        real = subprocess.run(
+            [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root),
+             "--input", str(payload_path)],
+            text=True, capture_output=True, encoding="utf-8",
+        )
+        self.assertEqual(0, real.returncode, real.stderr)
+        real_body = json.loads(real.stdout)
+        self.assertEqual("SAVED", real_body["status"])
+        self.assertEqual("CLOSED", real_body["run_state"])
+        self.assertIsNotNone(self.memory._conn.execute(
+            "SELECT 1 FROM hosts WHERE hostname='www.example-validate-host.example'"
+        ).fetchone())
+
+    def test_validate_rolls_back_pending_candidate_enrichment(self):
+        # Covers the enrich_candidate branch of write_transaction (pending
+        # Candidate exists and the new delta matches it exactly), distinct
+        # from the capture_candidate branch above.
+        direct_id = "clm:example-news:topic-search:pending-direct"
+        chrome_id = "clm:example-news:topic-search:pending-chrome"
+        proposal_id = "prop:example-news:topic-search:pending-escalation"
+        with self.memory.write_transaction() as writer:
+            for claim_id, transport, outcome in (
+                (direct_id, "DIRECT_READ", "FAILED"),
+                (chrome_id, "CHROME", "FUNCTIONAL"),
+            ):
+                writer.claim({
+                    "id": claim_id,
+                    "target_id": "tgt:example-news",
+                    "capability_id": "cap:example-news:topic-search",
+                    "family": "transport",
+                    "epistemic": "OBSERVED",
+                    "value": {"transport": transport, "outcome": outcome},
+                    "proposal_id": proposal_id,
+                    "recorded_at": RECORDED,
+                })
+            writer.proposal({
+                "id": proposal_id,
+                "target_id": "tgt:example-news",
+                "capability_id": "cap:example-news:topic-search",
+                "recorded_at": RECORDED,
+                "claim_ids": [direct_id, chrome_id],
+            })
+        before = self._table_snapshot()
+
+        locator = "https://www.example-news.com/search"
+        payload = self.payload([
+            self.transport_observation("DIRECT_READ", "FAILED", locator),
+            self.transport_observation("CHROME", "FUNCTIONAL", locator),
+        ])
+        payload["evidence"] = [{"kind": "transport-validation", "locator": locator}]
+        payload["transport_trace"] = self.transport_trace(
+            ("DIRECT_READ", "FAILED", locator),
+            ("CHROME", "FUNCTIONAL", locator),
+            lightpanda="PLATFORM_UNSUPPORTED",
+        )
+        predicted = self.finalize(payload, dry_run=True)
+        self.assertEqual("SAVED", predicted.status)
+        self.assertEqual(before, self._table_snapshot())
+        self.assertEqual(
+            {direct_id, chrome_id},
+            {
+                claim_id
+                for proposal in self.memory.get_pending_candidates("example-news", "topic-search")
+                for claim_id in proposal["claim_ids"]
+            },
+        )
+
+        real = self.finalize(payload)
+        self.assertEqual("SAVED", real.status)
+        self.assertEqual([], self.memory.get_pending_candidates("example-news", "topic-search"))
+        self.assertEqual(
+            {direct_id, chrome_id},
+            set(self.memory.get_current("example-news", "topic-search")["accepted_claim_ids"]),
+        )
+
+    def test_cli_failure_unclassified_stays_open_and_a_corrected_retry_saves(self):
+        # The FAILURE_UNCLASSIFIED counterpart to the TRANSPORT_POLICY_UNPROVEN
+        # CLI lifecycle test above: same run marker survives the rejection and
+        # a classified retry under the same run_id saves and closes it.
+        payload_path = self.root / "failure-unclassified-discovery.json"
+        body = self.exhausted_direct_read_payload(classified=False)
+        payload_path.write_text(json.dumps(body), encoding="utf-8")
+        self.open_payload(payload_path)
+
+        result = subprocess.run(
+            [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root), "--input", str(payload_path)],
+            text=True, capture_output=True, encoding="utf-8",
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        stdout = json.loads(result.stdout)
+        self.assertEqual("NOT_SAVED", stdout["status"])
+        self.assertEqual("FAILURE_UNCLASSIFIED", stdout["reason_code"])
+        self.assertEqual("OPEN", stdout["run_state"])
+        from discovery_runs import list_open_discoveries
+        open_runs = list_open_discoveries(self.root)
+        self.assertEqual([body["provenance"]["run_id"]], [item["run_id"] for item in open_runs])
+
+        fixed = self.exhausted_direct_read_payload(classified=True)
+        fixed["provenance"]["run_id"] = body["provenance"]["run_id"]
+        payload_path.write_text(json.dumps(fixed), encoding="utf-8")
+        retried = subprocess.run(
+            [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root), "--input", str(payload_path)],
+            text=True, capture_output=True, encoding="utf-8",
+        )
+        self.assertEqual(0, retried.returncode, retried.stderr)
+        retried_body = json.loads(retried.stdout)
+        self.assertEqual("SAVED", retried_body["status"])
+        self.assertEqual("CLOSED", retried_body["run_state"])
+        self.assertEqual([], list_open_discoveries(self.root))
 
 
 if __name__ == "__main__":

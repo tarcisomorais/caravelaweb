@@ -7,7 +7,6 @@ from pathlib import Path
 
 from discovery_finalize import DiscoveryFinalizationError, finalize_discovery
 from integration_bridge import KnowledgeLookupBoundary
-from om_native_writes import WRITE_DESTINATION
 from operational_memory import RecordValidationError, SQLiteOperationalMemory
 from operational_memory.core import normalize_capability_id
 from write_authority import MIGRATED_WRITE_AUTHORITY_KIND
@@ -46,8 +45,7 @@ class CapabilityIdentityTests(unittest.TestCase):
             }],
             evidence=[{"kind": "synthetic-validation", "locator": "https://academy.example/instructors"}],
             provenance={"run_id": f"run:capability:{run}", "observed_at": RECORDED},
-            recorded_at=RECORDED, knowledge_write_authority=True,
-            write_destination=WRITE_DESTINATION,
+            recorded_at=RECORDED,
         )
 
     def test_lower_kebab_normalization_converges_and_rejects_empty(self) -> None:
@@ -90,8 +88,7 @@ class CapabilityIdentityTests(unittest.TestCase):
                 }],
                 evidence=[{"kind": "synthetic-validation", "locator": "https://academy.example/instructors"}],
                 provenance={"run_id": "run:capability:results", "observed_at": RECORDED},
-                recorded_at=RECORDED, knowledge_write_authority=True,
-                write_destination=WRITE_DESTINATION,
+                recorded_at=RECORDED,
             )
         self.assertEqual(
             0,

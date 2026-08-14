@@ -182,8 +182,10 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
             "scripts/discovery-begin --target <target-id> --capability <capability>",
             "Use its `run_id` as `provenance.run_id`",
             "if the run cannot be registered, stop",
-            "Any returned `SAVED`, `ALREADY_EXISTS`, or `NOT_SAVED` verdict closes only the matching run",
-            "schema or infrastructure errors leave it open",
+            "Every response reports `run_state` (`OPEN` or `CLOSED`)",
+            "`SAVED`, `ALREADY_EXISTS`, and a terminal `NOT_SAVED` close the matching run",
+            "`TRANSPORT_POLICY_UNPROVEN`, `FAILURE_UNCLASSIFIED`, schema errors, and infrastructure errors leave it open",
+            "A schema-only rejection is corrected by rerunning only `discovery-finalize`, never navigation or extraction",
             "run identity is never knowledge identity",
         ):
             self.assertIn(rule, text)

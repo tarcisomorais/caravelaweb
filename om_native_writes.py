@@ -45,14 +45,6 @@ class OMNativeWriteError(RuntimeError):
     """Base error for the OM-native write boundary."""
 
 
-class OMWriteAuthorityRequired(OMNativeWriteError):
-    """Explicit reusable-knowledge write authority was not supplied."""
-
-
-class OMWriteDestinationRequired(OMNativeWriteError):
-    """The caller did not explicitly select Operational Memory."""
-
-
 class OMStaleBaseError(OMNativeWriteError):
     """The accepted projection differs from the projection that was reviewed."""
 
@@ -102,36 +94,19 @@ def _record_exists(memory: SQLiteOperationalMemory, record_id: str) -> bool:
     return True
 
 
-def assert_om_native_write_authority(
-    memory: SQLiteOperationalMemory, *, authority_at_operation: str
-) -> None:
-    if authority_at_operation != WRITE_DESTINATION:
-        raise OMNativeWriteError(
-            "OM-native operation requires authority_at_operation=OPERATIONAL_MEMORY"
-        )
+def assert_om_native_write_authority(memory: SQLiteOperationalMemory) -> None:
+    """Fail closed unless this installation's real marker grants OM write authority.
+
+    The only input is ``memory.knowledge_root`` and the write-authority marker
+    it resolves to -- no caller-supplied flag can assert or bypass this.
+    """
     if memory.knowledge_root is None:
         raise OMNativeWriteError("OM-native operation requires an installation knowledge root")
     assert_om_write_authority(memory.knowledge_root)
 
 
-def _require_boundary(
-    memory: SQLiteOperationalMemory,
-    *,
-    knowledge_write_authority: bool,
-    write_destination: str | None,
-    authority_at_operation: str,
-) -> None:
-    if knowledge_write_authority is not True:
-        raise OMWriteAuthorityRequired(
-            "OM-native write requires explicit knowledge-write authority"
-        )
-    if write_destination != WRITE_DESTINATION:
-        raise OMWriteDestinationRequired(
-            "OM-native write requires write_destination=OPERATIONAL_MEMORY"
-        )
-    assert_om_native_write_authority(
-        memory, authority_at_operation=authority_at_operation
-    )
+def _require_boundary(memory: SQLiteOperationalMemory) -> None:
+    assert_om_native_write_authority(memory)
 
 
 def _identity(
@@ -201,15 +176,15 @@ def _operation_metadata(
     decision_id: str | None = None,
     effective_at: str | None = None,
     reviewed_token: str | None = None,
-    authority_at_operation: str,
     first_om_authoritative_write: bool = False,
     operation_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if authority_at_operation not in {"LEGACY", WRITE_DESTINATION}:
-        raise OMNativeWriteError("authority_at_operation must be LEGACY or OPERATIONAL_MEMORY")
+    # `_require_boundary` already verified real OM write authority before any
+    # caller reaches this point, so this is the verified boundary's own
+    # record, never a caller-supplied claim.
     metadata = {
         "operation": operation,
-        "authority_at_operation": authority_at_operation,
+        "authority_at_operation": WRITE_DESTINATION,
         "write_destination": WRITE_DESTINATION,
         "target_id": target_id,
         "capability_id": capability_id,
@@ -236,9 +211,6 @@ def capture_candidate(
     claims: Sequence[Mapping[str, Any]],
     provenance: Mapping[str, Any],
     recorded_at: str,
-    knowledge_write_authority: bool,
-    write_destination: str | None,
-    authority_at_operation: str,
     first_om_authoritative_write: bool = False,
     operation_context: Mapping[str, Any] | None = None,
     supporting_evidence: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
@@ -256,12 +228,7 @@ def capture_candidate(
     target/capability is materialized only in the same transaction as its first
     pending Proposal, never as accepted knowledge.
     """
-    _require_boundary(
-        memory,
-        knowledge_write_authority=knowledge_write_authority,
-        write_destination=write_destination,
-        authority_at_operation=authority_at_operation,
-    )
+    _require_boundary(memory)
     if create_missing_scope:
         if not isinstance(target, str) or not target.strip():
             raise OMAmbiguousCandidateError("target identity is required")
@@ -324,7 +291,6 @@ def capture_candidate(
         capability_id=capability_id,
         proposal_id=proposal_id,
         recorded_at=recorded_at,
-        authority_at_operation=authority_at_operation,
         first_om_authoritative_write=first_om_authoritative_write,
         operation_context=operation_context,
     )
@@ -499,16 +465,10 @@ def replace_candidate(
     decision_id: str,
     recorded_at: str,
     effective_at: str,
-    knowledge_write_authority: bool,
-    write_destination: str | None,
-    authority_at_operation: str,
     _writer: Any | None = None,
 ) -> Replacement:
     """Atomically supersede one unambiguous accepted family and accept its replacement."""
-    _require_boundary(
-        memory, knowledge_write_authority=knowledge_write_authority,
-        write_destination=write_destination, authority_at_operation=authority_at_operation,
-    )
+    _require_boundary(memory)
     target_id, capability_id = _identity(memory, target, capability)
     validate_timestamp(recorded_at, field="replacement.recorded_at")
     validate_timestamp(effective_at, field="replacement.effective_at")
@@ -521,7 +481,6 @@ def replace_candidate(
         operation="REPLACEMENT", target_id=target_id, capability_id=capability_id,
         proposal_id=proposal_id, decision_id=decision_id, recorded_at=recorded_at,
         effective_at=effective_at, reviewed_token=reviewed_token,
-        authority_at_operation=authority_at_operation,
     )
     with _write_scope(memory, _writer) as writer:
         if review_token(memory, target=target, capability=capability) != reviewed_token:
@@ -626,16 +585,10 @@ def enrich_candidate(
     contradicted_claim_id: str | None,
     contradicting_evidence: Sequence[Mapping[str, Any]],
     contradiction_context: Mapping[str, Any] | None,
-    knowledge_write_authority: bool,
-    write_destination: str | None,
-    authority_at_operation: str,
     _writer: Any | None = None,
 ) -> CandidateEnrichment:
     """Add missing structured support to one Claim in a pending Candidate."""
-    _require_boundary(
-        memory, knowledge_write_authority=knowledge_write_authority,
-        write_destination=write_destination, authority_at_operation=authority_at_operation,
-    )
+    _require_boundary(memory)
     target_id, capability_id = _identity(memory, target, capability)
     try:
         proposal_record = memory.get_record(proposal_id)
@@ -792,18 +745,10 @@ def promote_candidate(
     decision_id: str,
     recorded_at: str,
     effective_at: str,
-    knowledge_write_authority: bool,
-    write_destination: str | None,
-    authority_at_operation: str,
     _writer: Any | None = None,
 ) -> Promotion:
     """Accept exactly one pending Proposal through an explicit Decision."""
-    _require_boundary(
-        memory,
-        knowledge_write_authority=knowledge_write_authority,
-        write_destination=write_destination,
-        authority_at_operation=authority_at_operation,
-    )
+    _require_boundary(memory)
     target_id, capability_id = _identity(memory, target, capability)
     validate_timestamp(recorded_at, field="promotion.recorded_at")
     validate_timestamp(effective_at, field="promotion.effective_at")
@@ -826,7 +771,6 @@ def promote_candidate(
         recorded_at=recorded_at,
         effective_at=effective_at,
         reviewed_token=reviewed_token,
-        authority_at_operation=authority_at_operation,
     )
     claim_ids: tuple[str, ...] = ()
     with _write_scope(memory, _writer) as writer:
@@ -883,8 +827,6 @@ __all__ = [
     "OMNativeWriteError",
     "OMProposalError",
     "OMStaleBaseError",
-    "OMWriteAuthorityRequired",
-    "OMWriteDestinationRequired",
     "Promotion",
     "Replacement",
     "TOKEN_VERSION",

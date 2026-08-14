@@ -155,6 +155,12 @@ paths/selectors. Thus `{"name":"items[].name"}` is legal inside `field_paths`,
 while `{"name":"Current Person"}` is not a legal extraction value. Structured
 result objects and arrays have no public persistence position.
 
+`field_paths` accepts dotted paths (`post.headline`), collection paths
+(`items[].name`, `items[0].name`), and an explicit-root path starting with
+`$` (`$.headline`, `$.article.full_text`) for a field at the root of a single
+record. A bare word such as `headline` is rejected -- it is indistinguishable
+from a one-word task result -- and its error names `$.headline` as the fix.
+
 ## Epistemic Classes
 
 Every meaningful claim is one of:

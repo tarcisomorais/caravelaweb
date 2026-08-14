@@ -1,0 +1,73 @@
+"""Every payload in references/discovery-payload-examples.md must finalize."""
+
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+FINALIZER = REPO / "scripts" / "discovery-finalize"
+BEGIN = REPO / "scripts" / "discovery-begin"
+REFERENCE = REPO / "references" / "discovery-payload-examples.md"
+
+from write_authority import MIGRATED_WRITE_AUTHORITY_KIND
+
+sys.path.insert(0, str(REPO))
+from operational_memory.core import SQLiteOperationalMemory
+
+_JSON_BLOCK = re.compile(r"```json\n(.*?)\n```", re.S)
+
+
+def _payloads() -> list[dict]:
+    text = REFERENCE.read_text(encoding="utf-8")
+    return [json.loads(match) for match in _JSON_BLOCK.findall(text)]
+
+
+class DiscoveryPayloadExamplesTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        (self.root / ".caravelaweb").mkdir()
+        (self.root / ".caravelaweb/write-authority.json").write_text(json.dumps({
+            "kind": MIGRATED_WRITE_AUTHORITY_KIND, "status": "ACTIVE",
+            "previous_write_authority": "LEGACY", "write_authority": "OPERATIONAL_MEMORY",
+            "om_authoritative_writes": 0, "first_om_write": "NOT_PERFORMED",
+        }), encoding="utf-8")
+        (self.root / "targets").mkdir()
+        with SQLiteOperationalMemory(
+            self.root / ".caravelaweb/operational_memory.db", knowledge_root=self.root
+        ):
+            pass
+
+    def test_the_reference_documents_at_least_the_seven_required_examples(self) -> None:
+        self.assertGreaterEqual(len(_payloads()), 7)
+
+    def test_every_documented_example_finalizes_successfully(self) -> None:
+        for payload in _payloads():
+            with self.subTest(target=payload["target"], capability=payload["capability"]):
+                begun = subprocess.run(
+                    [sys.executable, str(BEGIN), "--knowledge-root", str(self.root),
+                     "--target", payload["target"], "--capability", payload["capability"]],
+                    text=True, capture_output=True, encoding="utf-8",
+                )
+                self.assertEqual(0, begun.returncode, begun.stderr)
+                payload["provenance"]["run_id"] = json.loads(begun.stdout)["run_id"]
+                finalized = subprocess.run(
+                    [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root),
+                     "--input", "-"],
+                    input=json.dumps(payload), text=True, capture_output=True, encoding="utf-8",
+                )
+                self.assertEqual(0, finalized.returncode, finalized.stderr)
+                body = json.loads(finalized.stdout)
+                self.assertEqual("SAVED", body["status"])
+                self.assertEqual("CLOSED", body["run_state"])
+
+
+if __name__ == "__main__":
+    unittest.main()

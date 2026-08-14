@@ -16,8 +16,8 @@ from typing import Any, Mapping, Sequence
 from urllib.parse import urlparse
 
 from om_native_writes import (
-    WRITE_DESTINATION, capture_candidate, enrich_candidate, promote_candidate,
-    replace_candidate, review_token,
+    assert_om_native_write_authority, capture_candidate, enrich_candidate,
+    promote_candidate, replace_candidate, review_token,
 )
 from operational_memory.core import (
     EPISTEMIC_CLASSES, SQLiteOperationalMemory, TargetIdentityError,
@@ -33,6 +33,17 @@ from transport_policy import (
 
 class DiscoveryFinalizationError(ValueError):
     """Discovery output is incomplete, non-reusable, or unsafe to retain."""
+
+
+class _DryRunRollback(Exception):
+    """Internal sentinel: unwinds ``write_transaction()`` without persisting it."""
+
+
+# Correctable `NOT_SAVED` reason codes: the payload can be fixed and resubmitted
+# under the same `run_id`, so the matching run stays open. Every other result
+# closes the matching run. Kept beside `DiscoveryFinalization` so the CLI never
+# duplicates this list.
+RETRYABLE_REASON_CODES = frozenset({"TRANSPORT_POLICY_UNPROVEN", "FAILURE_UNCLASSIFIED"})
 
 
 OPERATIONAL_FAMILIES = {
@@ -55,7 +66,9 @@ _NON_DURABLE_FAILURE_CLASSES = frozenset({
 })
 _OPERATIONAL_PROOF_VERSION = 1
 _TASK_DATA_TEXT = re.compile(r"<(?:html|body|article|script)\b|\b(?:R\$|US\$)\s?\d|\b(?:articles?|stores?|shops?)\s+(?:found|returned)\b", re.I)
-_SCHEMA_FIELD_PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*|\[\d*\])+$")
+_SCHEMA_FIELD_PATH = re.compile(
+    r"^(?:\$|[A-Za-z_][A-Za-z0-9_]*)(?:\.[A-Za-z_][A-Za-z0-9_]*|\[\d*\])+$"
+)
 _FIELD_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SYMBOL = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]*$")
 _EVIDENCE_KIND = re.compile(r"^[a-z][a-z0-9-]*$")
@@ -109,6 +122,19 @@ class DiscoveryFinalization:
     reason: str | None = None
     reason_code: str | None = None
 
+    @property
+    def closes_run(self) -> bool:
+        """Whether this result closes the matching Discovery run.
+
+        `SAVED`, `ALREADY_EXISTS`, and every terminal `NOT_SAVED` reason close
+        the run. `TRANSPORT_POLICY_UNPROVEN` and `FAILURE_UNCLASSIFIED` are
+        correctable, so they leave the run open for a corrected resubmission
+        under the same `run_id`.
+        """
+        if self.status != "NOT_SAVED":
+            return True
+        return self.reason_code not in RETRYABLE_REASON_CODES
+
     def as_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
             "status": self.status, "target": self.target, "capability": self.capability,
@@ -117,6 +143,7 @@ class DiscoveryFinalization:
             result["reason"] = self.reason
         if self.status == "NOT_SAVED" and self.reason_code:
             result["reason_code"] = self.reason_code
+        result["run_state"] = "CLOSED" if self.closes_run else "OPEN"
         return result
 
 
@@ -177,7 +204,11 @@ def _text(value: Any, *, field: str) -> str:
 def _symbol(value: Any, *, field: str) -> str:
     value = _text(value, field=field)
     if not _SYMBOL.fullmatch(value):
-        raise DiscoveryFinalizationError(f"{field} must be a symbolic value")
+        raise DiscoveryFinalizationError(
+            f"{field} must be a symbolic value: it starts with a letter and may "
+            "contain letters, digits, '_', '.', ':', or '-' (for example "
+            "SITE_BLOCKING)"
+        )
     return value
 
 
@@ -198,7 +229,10 @@ def _schema_map(value: Any, *, field: str, paths: bool) -> dict[str, str]:
         locator = _text(locator, field=f"{field}.{key}")
         if paths and not _SCHEMA_FIELD_PATH.fullmatch(locator):
             raise DiscoveryFinalizationError(
-                f"{field}.{key} must be a reusable schema field path"
+                f"{field}.{key} must be a reusable schema field path, not raw "
+                "task content. Accepted forms: $.headline (explicit root), "
+                "post.headline (dotted), items[].name (collection). A bare "
+                "word such as 'headline' is invalid -- use $.headline"
             )
         result[key] = locator
     return result
@@ -355,8 +389,12 @@ def _normalize_validation(value: Any, *, field: str) -> dict[str, Any] | None:
         "transport", "engine", "javascript", "context", "outcome",
         "failure_class", "evidence",
     }
-    if set(value) - allowed:
-        raise DiscoveryFinalizationError(f"{field} contains unsupported context")
+    unsupported = set(value) - allowed
+    if unsupported:
+        raise DiscoveryFinalizationError(
+            f"{field} contains unsupported keys: {', '.join(sorted(unsupported))}. "
+            f"Accepted top-level validation keys: {', '.join(sorted(allowed))}"
+        )
     context = value.get("context", {})
     if not isinstance(context, Mapping):
         raise DiscoveryFinalizationError(f"{field}.context must be an object")
@@ -1002,8 +1040,19 @@ def _host_plan(
             for source in evidence
         )
         if not proven:
+            evidence_hostnames = sorted({
+                urlparse(str(source["locator"])).hostname.lower().rstrip(".")
+                for source in evidence
+                if urlparse(str(source.get("locator", ""))).hostname
+            })
             raise DiscoveryFinalizationError(
-                "a new observation host requires TARGET_SURFACE evidence from that hostname"
+                f"a new observation host requires TARGET_SURFACE evidence from "
+                f"that hostname. Claimed Observation Host: {hostname!r}. "
+                f"Public hostnames found in evidence locators: {evidence_hostnames!r}. "
+                "An evidence item's scope must be exactly 'TARGET_SURFACE', and "
+                "its locator hostname must exactly match the literal Observation "
+                "Host (a leading 'www.' is not normalized here, unlike target "
+                "reference resolution)"
             )
         # Target-reference resolution reads these associations, and it fails
         # closed on more than one match. Creating the second one silently would
@@ -1218,10 +1267,17 @@ def finalize_discovery(
     *, target: str, capability: str, observations: Sequence[Mapping[str, Any]],
     evidence: Sequence[Mapping[str, Any]], provenance: Mapping[str, Any],
     transport_trace: Mapping[str, Any] | None = None,
-    recorded_at: str | None = None, knowledge_write_authority: bool = True,
-    write_destination: str | None = WRITE_DESTINATION, authority_at_operation: str = WRITE_DESTINATION,
+    recorded_at: str | None = None,
+    dry_run: bool = False,
 ) -> DiscoveryFinalization:
-    """Finalize Discovery into local OM, accepting only direct observations."""
+    """Finalize Discovery into local OM, accepting only direct observations.
+
+    ``dry_run`` executes the identical write path and rolls it back before
+    commit, via `_DryRunRollback` -- it never introduces a second validator or
+    a separate prediction path. Early no-write results (schema rejection,
+    ``NO_REUSABLE_KNOWLEDGE``, ``ALREADY_EXISTS``, ...) return normally
+    without reaching ``write_transaction()`` at all.
+    """
     if not isinstance(target, str) or not target.strip():
         raise DiscoveryFinalizationError("target and capability are required")
     target = _resolve_target_argument(memory, target)
@@ -1229,17 +1285,11 @@ def finalize_discovery(
         capability = normalize_capability_id(capability)
     except RecordValidationError as exc:
         raise DiscoveryFinalizationError(str(exc)) from exc
-    # Validate authority before examining or normalizing Discovery output.  This
-    # deliberately fails closed when the installation is not OM-writable.
-    from om_native_writes import assert_om_native_write_authority
-    if knowledge_write_authority is not True or write_destination != WRITE_DESTINATION:
-        # Let the native primitive preserve its established authority errors.
-        capture_candidate(memory, target=target, capability=capability, proposal_id="prop:authority-check",
-            claims=[{"id": "clm:authority-check", "family": "unknown", "epistemic": "UNKNOWN", "value": {"state": "UNKNOWN"}}],
-            provenance={"check": "authority"}, recorded_at=recorded_at or _now(),
-            knowledge_write_authority=knowledge_write_authority, write_destination=write_destination,
-            authority_at_operation=authority_at_operation)
-    assert_om_native_write_authority(memory, authority_at_operation=authority_at_operation)
+    # Validate authority before examining or normalizing Discovery output. This
+    # deliberately fails closed when the installation is not OM-writable, and
+    # is derived solely from memory.knowledge_root's real write-authority
+    # marker -- no caller-supplied argument can assert or bypass it.
+    assert_om_native_write_authority(memory)
     recorded_at = recorded_at or _now()
     validate_timestamp(recorded_at, field="finalize_discovery.recorded_at")
     normalized = _normalize_observations(observations)
@@ -1447,89 +1497,83 @@ def finalize_discovery(
         if replacement_ready else None
     )
     enrichment_created = 0
-    with memory.write_transaction() as writer:
-        if pending_match:
-            pending_claim_ids = set(pending_match[1].values())
-            for claim in claims:
-                claim_id = claim["id"]
-                if claim_id not in pending_claim_ids:
-                    continue
-                enrichment = enrich_candidate(
+    try:
+        with memory.write_transaction() as writer:
+            if pending_match:
+                pending_claim_ids = set(pending_match[1].values())
+                for claim in claims:
+                    claim_id = claim["id"]
+                    if claim_id not in pending_claim_ids:
+                        continue
+                    enrichment = enrich_candidate(
+                        memory, target=target, capability=capability,
+                        proposal_id=proposal_id, claim_id=claim_id,
+                        supporting_evidence=supports.get(claim_id, ()),
+                        validation_context=validations.get(claim_id),
+                        contradicted_claim_id=(
+                            replacement_ids[0]
+                            if replacement_ids and claim_id in contradicting else None
+                        ),
+                        contradicting_evidence=contradiction_supports.get(claim_id, ()),
+                        contradiction_context=contradiction_contexts.get(claim_id),
+                        _writer=writer,
+                    )
+                    enrichment_created += enrichment.records_created
+                for claim in claims:
+                    if claim["id"] in pending_claim_ids:
+                        continue
+                    writer.claim({
+                        **claim,
+                        "target_id": f"tgt:{target}",
+                        "capability_id": f"cap:{target}:{capability}",
+                        "proposal_id": proposal_id,
+                        "recorded_at": recorded_at,
+                        "provenance": clean_provenance,
+                    })
+                    writer.proposal_claim(proposal_id, claim["id"])
+            else:
+                capture_candidate(
                     memory, target=target, capability=capability,
-                    proposal_id=proposal_id, claim_id=claim_id,
-                    supporting_evidence=supports.get(claim_id, ()),
-                    validation_context=validations.get(claim_id),
-                    contradicted_claim_id=(
-                        replacement_ids[0]
-                        if replacement_ids and claim_id in contradicting else None
-                    ),
-                    contradicting_evidence=contradiction_supports.get(claim_id, ()),
-                    contradiction_context=contradiction_contexts.get(claim_id),
-                    knowledge_write_authority=knowledge_write_authority,
-                    write_destination=write_destination,
-                    authority_at_operation=authority_at_operation,
+                    proposal_id=proposal_id, claims=claims,
+                    provenance=clean_provenance, recorded_at=recorded_at,
+                    operation_context={
+                        "source": "discovery-finalize",
+                        "run_id": clean_provenance["run_id"],
+                    },
+                    supporting_evidence=supports,
+                    validation_contexts=validations,
+                    contradicting_claims=contradicting,
+                    contradiction_contexts=contradiction_contexts,
+                    contradicting_evidence=contradiction_supports,
+                    hosts=hosts_to_create,
+                    create_missing_scope=True,
                     _writer=writer,
                 )
-                enrichment_created += enrichment.records_created
-            for claim in claims:
-                if claim["id"] in pending_claim_ids:
-                    continue
-                writer.claim({
-                    **claim,
-                    "target_id": f"tgt:{target}",
-                    "capability_id": f"cap:{target}:{capability}",
-                    "proposal_id": proposal_id,
-                    "recorded_at": recorded_at,
-                    "provenance": clean_provenance,
-                })
-                writer.proposal_claim(proposal_id, claim["id"])
-        else:
-            capture_candidate(
-                memory, target=target, capability=capability,
-                proposal_id=proposal_id, claims=claims,
-                provenance=clean_provenance, recorded_at=recorded_at,
-                knowledge_write_authority=knowledge_write_authority,
-                write_destination=write_destination,
-                authority_at_operation=authority_at_operation,
-                operation_context={
-                    "source": "discovery-finalize",
-                    "run_id": clean_provenance["run_id"],
-                },
-                supporting_evidence=supports,
-                validation_contexts=validations,
-                contradicting_claims=contradicting,
-                contradiction_contexts=contradiction_contexts,
-                contradicting_evidence=contradiction_supports,
-                hosts=hosts_to_create,
-                create_missing_scope=True,
-                _writer=writer,
-            )
-        if replacement_ready:
-            replace_candidate(
-                memory,
-                target=target, capability=capability, proposal_id=proposal_id,
-                replaced_claim_ids=replacement_ids, reviewed_token=str(base_token),
-                decision_id=f"dec:{target}:{capability}:replace-{_digest(delta)}",
-                recorded_at=recorded_at, effective_at=recorded_at,
-                knowledge_write_authority=knowledge_write_authority,
-                write_destination=write_destination,
-                authority_at_operation=authority_at_operation, _writer=writer,
-            )
-        elif automatic:
-            promote_candidate(
-                memory,
-                target=target,
-                capability=capability,
-                proposal_id=proposal_id,
-                reviewed_token=review_token(memory, target=target, capability=capability),
-                decision_id=f"dec:{target}:{capability}:discovery-{_digest(delta)}",
-                recorded_at=recorded_at,
-                effective_at=recorded_at,
-                knowledge_write_authority=knowledge_write_authority,
-                write_destination=write_destination,
-                authority_at_operation=authority_at_operation,
-                _writer=writer,
-            )
+            if replacement_ready:
+                replace_candidate(
+                    memory,
+                    target=target, capability=capability, proposal_id=proposal_id,
+                    replaced_claim_ids=replacement_ids, reviewed_token=str(base_token),
+                    decision_id=f"dec:{target}:{capability}:replace-{_digest(delta)}",
+                    recorded_at=recorded_at, effective_at=recorded_at,
+                    _writer=writer,
+                )
+            elif automatic:
+                promote_candidate(
+                    memory,
+                    target=target,
+                    capability=capability,
+                    proposal_id=proposal_id,
+                    reviewed_token=review_token(memory, target=target, capability=capability),
+                    decision_id=f"dec:{target}:{capability}:discovery-{_digest(delta)}",
+                    recorded_at=recorded_at,
+                    effective_at=recorded_at,
+                    _writer=writer,
+                )
+            if dry_run:
+                raise _DryRunRollback
+    except _DryRunRollback:
+        pass
     if (
         pending_match and not automatic and not replacement_ready
         and enrichment_created == 0
