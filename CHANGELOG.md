@@ -2,10 +2,9 @@
 
 All notable changes to CaravelaWeb will be documented in this file.
 
-The project has not established a numbered public release. Entries accumulate
-under **Unreleased** until a version and tag are intentionally chosen.
+## 0.1.0 - 2026-08-26
 
-## Unreleased
+The first public release.
 
 ### Added
 

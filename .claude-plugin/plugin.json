@@ -1,5 +1,6 @@
 {
   "name": "caravelaweb",
+  "version": "0.1.0",
   "description": "Conservative web access for agents: capability-scoped operating knowledge in a local Operational Memory, a DIRECT_READ -> LIGHTPANDA -> CHROME transport order, and caller authority preserved on every run.",
   "author": {
     "name": "Tarciso Morais",
