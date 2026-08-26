@@ -64,6 +64,18 @@ under **Unreleased** until a version and tag are intentionally chosen.
 
 ### Fixed
 
+- Registration state on native Windows now recognizes its own junction.
+  `os.readlink` reports a junction target with the extended-length prefix
+  (`\\?\C:\...`); the unstripped prefix made an equal path compare unequal,
+  so a second `register-host` run refused a correct registration as
+  `CONFLICT`. Link targets are now compared with the prefix stripped and
+  with case-normalized resolved paths, and the registration tests assert
+  through the same helper on every platform.
+- The CI path gate now matches the root-as-skill layout that the plugin
+  distribution introduced: `skills/caravelaweb/SKILL.md` is the one allowed
+  nested adapter, and the gate fails when anything else grows under
+  `skills/`. The old gate asserted that `skills/` must not exist and had
+  failed on every push since the adapter landed.
 - Knowledge Root resolution no longer depends on shared mutable state, so
   concurrent sessions on one machine stay independent. `init-knowledge-root`
   used to record every initialized root, including one passed with

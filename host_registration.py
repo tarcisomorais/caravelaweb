@@ -39,6 +39,21 @@ def _host_skills_directory(host: str) -> Path:
     raise RegistrationError(f"unsupported host: {host} (supported: {', '.join(SUPPORTED_HOSTS)})")
 
 
+def strip_extended_path_prefix(raw: str) -> str:
+    """``raw`` without any Windows extended-length prefix.
+
+    ``os.readlink`` reports a junction or an absolute Windows symlink as
+    ``\\\\?\\C:\\...`` (or ``\\\\?\\UNC\\server\\share\\...``). The prefix is
+    transport syntax, not path identity; keeping it makes an equal path
+    compare unequal and a correct registration classify as CONFLICT.
+    """
+    if raw.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + raw[len("\\\\?\\UNC\\"):]
+    if raw.startswith("\\\\?\\"):
+        return raw[len("\\\\?\\"):]
+    return raw
+
+
 def _reparse_target(link: Path) -> Path | None:
     """The recorded target of ``link``, a POSIX symlink or Windows junction.
 
@@ -55,9 +70,14 @@ def _reparse_target(link: Path) -> Path | None:
             f"refusing to touch existing path that is not a CaravelaWeb registration link: {link}"
         )
     try:
-        return Path(os.readlink(link))
+        return Path(strip_extended_path_prefix(os.readlink(link)))
     except OSError:
         return None
+
+
+def _same_directory(left: Path, right: Path) -> bool:
+    """Case-normalized, fully resolved path equality."""
+    return os.path.normcase(os.path.realpath(left)) == os.path.normcase(os.path.realpath(right))
 
 
 def _create_link(link: Path, target: Path) -> None:
@@ -85,7 +105,7 @@ def registration_state(host: str) -> dict[str, object]:
     points_to = _reparse_target(link)
     if points_to is None or not points_to.is_dir():
         return {"state": "DANGLING", "link": link, "target": target, "points_to": points_to}
-    if points_to.resolve() == target.resolve():
+    if _same_directory(points_to, target):
         return {"state": "REGISTERED", "link": link, "target": target, "points_to": points_to}
     return {"state": "CONFLICT", "link": link, "target": target, "points_to": points_to}
 
@@ -123,4 +143,5 @@ __all__ = [
     "RegistrationResult",
     "register",
     "registration_state",
+    "strip_extended_path_prefix",
 ]

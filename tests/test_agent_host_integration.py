@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -35,6 +36,27 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 REGISTER_HOST = REPO / "scripts" / "register-host"
+
+sys.path.insert(0, str(REPO))
+
+from host_registration import strip_extended_path_prefix  # noqa: E402
+
+
+def link_destination(link: Path) -> Path:
+    """The stored target of a registration link, on POSIX and Windows.
+
+    Windows reports a junction or absolute symlink with the extended-length
+    prefix (``\\\\?\\``); strip it so assertions compare user-visible paths.
+    """
+    return Path(strip_extended_path_prefix(os.readlink(link)))
+
+
+def is_registration_link(link: Path) -> bool:
+    """True for a POSIX symlink or a Windows junction, never a plain path."""
+    result = os.lstat(link)
+    return stat.S_ISLNK(result.st_mode) or bool(
+        getattr(result, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+    )
 PLUGIN_MANIFEST = Path(".claude-plugin/plugin.json")
 MARKETPLACE_MANIFEST = Path(".claude-plugin/marketplace.json")
 CODEX_PLUGIN_MANIFEST = Path(".codex-plugin/plugin.json")
@@ -284,6 +306,27 @@ def run_register_host(*arguments: str, env: dict[str, str]) -> subprocess.Comple
     )
 
 
+class ExtendedPathPrefixTests(unittest.TestCase):
+    """Windows link targets carry an extended-length prefix that is
+    transport syntax, not identity; comparisons must not see it."""
+
+    def test_drive_prefix_is_stripped(self) -> None:
+        self.assertEqual(
+            "C:\\repo\\caravelaweb",
+            strip_extended_path_prefix("\\\\?\\C:\\repo\\caravelaweb"),
+        )
+
+    def test_unc_prefix_is_stripped_to_unc_form(self) -> None:
+        self.assertEqual(
+            "\\\\server\\share\\repo",
+            strip_extended_path_prefix("\\\\?\\UNC\\server\\share\\repo"),
+        )
+
+    def test_posix_and_plain_windows_paths_pass_through(self) -> None:
+        self.assertEqual("/home/user/repo", strip_extended_path_prefix("/home/user/repo"))
+        self.assertEqual("C:\\repo", strip_extended_path_prefix("C:\\repo"))
+
+
 class HostRegistrationTests(unittest.TestCase):
     """scripts/register-host: verified per-user global registration.
 
@@ -313,8 +356,8 @@ class HostRegistrationTests(unittest.TestCase):
             with self.subTest(host=host):
                 result = run_register_host("--host", host, "--json", env=self.env)
                 self.assertEqual(0, result.returncode, result.stderr)
-                self.assertTrue(link.is_symlink() or link.is_dir())
-                self.assertEqual(REPO, Path(os.readlink(link)))
+                self.assertTrue(is_registration_link(link))
+                self.assertEqual(REPO, link_destination(link))
 
     def test_registration_does_not_copy_runtime_files(self) -> None:
         for host, link in self.links():
@@ -322,7 +365,7 @@ class HostRegistrationTests(unittest.TestCase):
                 run_register_host("--host", host, "--json", env=self.env)
                 siblings = list(link.parent.iterdir())
                 self.assertEqual([link], siblings)
-                self.assertTrue(link.is_symlink())
+                self.assertTrue(is_registration_link(link))
                 self.assertFalse((link / "SKILL.md").is_symlink())
 
     def test_registration_resolves_from_unrelated_consumer_directory(self) -> None:
@@ -345,7 +388,7 @@ class HostRegistrationTests(unittest.TestCase):
                 self.assertEqual(0, second.returncode, second.stderr)
                 self.assertIn('"status": "REGISTERED"', first.stdout)
                 self.assertIn('"status": "ALREADY_REGISTERED"', second.stdout)
-                self.assertEqual(REPO, Path(os.readlink(link)))
+                self.assertEqual(REPO, link_destination(link))
 
     def test_conflicting_destination_is_rejected_without_relink(self) -> None:
         for host, link in self.links():
@@ -357,11 +400,11 @@ class HostRegistrationTests(unittest.TestCase):
                 refused = run_register_host("--host", host, "--json", env=self.env)
                 self.assertEqual(2, refused.returncode)
                 self.assertIn('"status": "REFUSED"', refused.stdout)
-                self.assertEqual(elsewhere, Path(os.readlink(link)))
+                self.assertEqual(elsewhere, link_destination(link))
                 repaired = run_register_host("--host", host, "--relink", "--json", env=self.env)
                 self.assertEqual(0, repaired.returncode, repaired.stderr)
                 self.assertIn('"status": "RELINKED"', repaired.stdout)
-                self.assertEqual(REPO, Path(os.readlink(link)))
+                self.assertEqual(REPO, link_destination(link))
 
     def test_dangling_registration_is_detected_and_repaired(self) -> None:
         for host, link in self.links():
@@ -375,7 +418,7 @@ class HostRegistrationTests(unittest.TestCase):
                 self.assertEqual(2, refused.returncode)
                 repaired = run_register_host("--host", host, "--relink", "--json", env=self.env)
                 self.assertEqual(0, repaired.returncode, repaired.stderr)
-                self.assertEqual(REPO, Path(os.readlink(link)))
+                self.assertEqual(REPO, link_destination(link))
 
     def test_plain_directory_at_link_path_is_never_touched(self) -> None:
         for host, link in self.links():
