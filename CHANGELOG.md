@@ -21,11 +21,11 @@ under **Unreleased** until a version and tag are intentionally chosen.
   imports it, and thin `caravelaweb` skill-discovery adapters under
   `.claude/skills/` and `.agents/skills/`. A host opened directly in a fresh
   clone discovers CaravelaWeb with no registration step.
-- `scripts/register-host --host claude`: one-time global registration of the
-  canonical checkout with Claude Code's per-user skill directory (a symlink
-  on Linux/macOS/WSL2, a junction on native Windows), so CaravelaWeb is
-  usable from unrelated repositories. Codex and OpenCode global registration
-  is not yet implemented.
+- `scripts/register-host --host claude|codex|opencode`: one-time global
+  registration of the canonical checkout with each host's documented per-user
+  skill directory (a symlink on Linux/macOS/WSL2, a junction on native
+  Windows), so CaravelaWeb is usable from unrelated repositories. Codex's
+  native plugin distribution remains available separately.
 - Claude Code plugin distribution: `.claude-plugin/marketplace.json` publishes
   the repository root as the `caravelaweb` plugin, and
   `.claude-plugin/plugin.json` names it. The public install is

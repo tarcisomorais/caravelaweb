@@ -16,7 +16,7 @@ Four independent surfaces are covered here:
   instruction files, and one thin skill-discovery adapter per host
   convention. These tests assert the shape of that surface -- never the
   internals of a third-party host.
-- Global registration (Claude Code only, verified): a host opened in an
+- Global registration: a host opened in an
   unrelated repository must find CaravelaWeb only after
   ``scripts/register-host`` links the canonical checkout into the host's
   per-user skill directory. See ``HostRegistrationTests`` below.
@@ -285,11 +285,17 @@ def run_register_host(*arguments: str, env: dict[str, str]) -> subprocess.Comple
 
 
 class HostRegistrationTests(unittest.TestCase):
-    """scripts/register-host: the verified Claude Code global registration.
+    """scripts/register-host: verified per-user global registration.
 
     Every case runs against an isolated HOME so the suite never reads or
-    writes this machine's real ``~/.claude/skills``.
+    writes this machine's real host skill directories.
     """
+
+    HOST_DIRECTORIES = {
+        "claude": Path(".claude/skills"),
+        "codex": Path(".agents/skills"),
+        "opencode": Path(".config/opencode/skills"),
+    }
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -297,92 +303,103 @@ class HostRegistrationTests(unittest.TestCase):
         self.home = Path(self._tmp.name) / "home"
         self.home.mkdir()
         self.env = fake_home_env(self.home)
-        self.link = self.home / ".claude" / "skills" / "caravelaweb"
+
+    def links(self):
+        for host, directory in self.HOST_DIRECTORIES.items():
+            yield host, self.home / directory / "caravelaweb"
 
     def test_registration_points_at_repository_root(self) -> None:
-        result = run_register_host("--host", "claude", "--json", env=self.env)
-        self.assertEqual(0, result.returncode, result.stderr)
-        self.assertTrue(self.link.is_symlink() or self.link.is_dir())
-        self.assertEqual(REPO, Path(os.readlink(self.link)))
+        for host, link in self.links():
+            with self.subTest(host=host):
+                result = run_register_host("--host", host, "--json", env=self.env)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertTrue(link.is_symlink() or link.is_dir())
+                self.assertEqual(REPO, Path(os.readlink(link)))
 
     def test_registration_does_not_copy_runtime_files(self) -> None:
-        run_register_host("--host", "claude", "--json", env=self.env)
-        siblings = list(self.link.parent.iterdir())
-        self.assertEqual([self.link], siblings)
-        self.assertTrue(self.link.is_symlink())
-        self.assertFalse((self.link / "SKILL.md").is_symlink())
+        for host, link in self.links():
+            with self.subTest(host=host):
+                run_register_host("--host", host, "--json", env=self.env)
+                siblings = list(link.parent.iterdir())
+                self.assertEqual([link], siblings)
+                self.assertTrue(link.is_symlink())
+                self.assertFalse((link / "SKILL.md").is_symlink())
 
     def test_registration_resolves_from_unrelated_consumer_directory(self) -> None:
-        run_register_host("--host", "claude", "--json", env=self.env)
         consumer = Path(self._tmp.name) / "some-unrelated-project"
         consumer.mkdir()
-        resolved = self.link / "SKILL.md"
-        self.assertEqual(
-            (REPO / "SKILL.md").read_text(encoding="utf-8"),
-            resolved.read_text(encoding="utf-8"),
-        )
+        for host, link in self.links():
+            with self.subTest(host=host):
+                run_register_host("--host", host, "--json", env=self.env)
+                self.assertEqual(
+                    (REPO / "SKILL.md").read_text(encoding="utf-8"),
+                    (link / "SKILL.md").read_text(encoding="utf-8"),
+                )
 
     def test_registration_is_idempotent(self) -> None:
-        first = run_register_host("--host", "claude", "--json", env=self.env)
-        second = run_register_host("--host", "claude", "--json", env=self.env)
-        self.assertEqual(0, first.returncode, first.stderr)
-        self.assertEqual(0, second.returncode, second.stderr)
-        self.assertIn('"status": "REGISTERED"', first.stdout)
-        self.assertIn('"status": "ALREADY_REGISTERED"', second.stdout)
-        self.assertEqual(REPO, Path(os.readlink(self.link)))
+        for host, link in self.links():
+            with self.subTest(host=host):
+                first = run_register_host("--host", host, "--json", env=self.env)
+                second = run_register_host("--host", host, "--json", env=self.env)
+                self.assertEqual(0, first.returncode, first.stderr)
+                self.assertEqual(0, second.returncode, second.stderr)
+                self.assertIn('"status": "REGISTERED"', first.stdout)
+                self.assertIn('"status": "ALREADY_REGISTERED"', second.stdout)
+                self.assertEqual(REPO, Path(os.readlink(link)))
 
     def test_conflicting_destination_is_rejected_without_relink(self) -> None:
-        elsewhere = Path(self._tmp.name) / "elsewhere"
-        elsewhere.mkdir()
-        self.link.parent.mkdir(parents=True)
-        self.link.symlink_to(elsewhere, target_is_directory=True)
-
-        refused = run_register_host("--host", "claude", "--json", env=self.env)
-        self.assertEqual(2, refused.returncode)
-        self.assertIn('"status": "REFUSED"', refused.stdout)
-        self.assertEqual(elsewhere, Path(os.readlink(self.link)))
-
-        repaired = run_register_host("--host", "claude", "--relink", "--json", env=self.env)
-        self.assertEqual(0, repaired.returncode, repaired.stderr)
-        self.assertIn('"status": "RELINKED"', repaired.stdout)
-        self.assertEqual(REPO, Path(os.readlink(self.link)))
+        for host, link in self.links():
+            with self.subTest(host=host):
+                elsewhere = Path(self._tmp.name) / f"elsewhere-{host}"
+                elsewhere.mkdir()
+                link.parent.mkdir(parents=True, exist_ok=True)
+                link.symlink_to(elsewhere, target_is_directory=True)
+                refused = run_register_host("--host", host, "--json", env=self.env)
+                self.assertEqual(2, refused.returncode)
+                self.assertIn('"status": "REFUSED"', refused.stdout)
+                self.assertEqual(elsewhere, Path(os.readlink(link)))
+                repaired = run_register_host("--host", host, "--relink", "--json", env=self.env)
+                self.assertEqual(0, repaired.returncode, repaired.stderr)
+                self.assertIn('"status": "RELINKED"', repaired.stdout)
+                self.assertEqual(REPO, Path(os.readlink(link)))
 
     def test_dangling_registration_is_detected_and_repaired(self) -> None:
-        missing = Path(self._tmp.name) / "does-not-exist"
-        self.link.parent.mkdir(parents=True)
-        self.link.symlink_to(missing, target_is_directory=True)
-
-        checked = run_register_host("--host", "claude", "--check", "--json", env=self.env)
-        self.assertIn('"status": "DANGLING"', checked.stdout)
-
-        refused = run_register_host("--host", "claude", "--json", env=self.env)
-        self.assertEqual(2, refused.returncode)
-
-        repaired = run_register_host("--host", "claude", "--relink", "--json", env=self.env)
-        self.assertEqual(0, repaired.returncode, repaired.stderr)
-        self.assertEqual(REPO, Path(os.readlink(self.link)))
+        for host, link in self.links():
+            with self.subTest(host=host):
+                missing = Path(self._tmp.name) / f"does-not-exist-{host}"
+                link.parent.mkdir(parents=True, exist_ok=True)
+                link.symlink_to(missing, target_is_directory=True)
+                checked = run_register_host("--host", host, "--check", "--json", env=self.env)
+                self.assertIn('"status": "DANGLING"', checked.stdout)
+                refused = run_register_host("--host", host, "--json", env=self.env)
+                self.assertEqual(2, refused.returncode)
+                repaired = run_register_host("--host", host, "--relink", "--json", env=self.env)
+                self.assertEqual(0, repaired.returncode, repaired.stderr)
+                self.assertEqual(REPO, Path(os.readlink(link)))
 
     def test_plain_directory_at_link_path_is_never_touched(self) -> None:
-        self.link.mkdir(parents=True)
-        marker = self.link / "do-not-delete.txt"
-        marker.write_text("unrelated content\n", encoding="utf-8")
-
-        for arguments in (("--host", "claude"), ("--host", "claude", "--relink")):
-            with self.subTest(arguments=arguments):
-                result = run_register_host(*arguments, "--json", env=self.env)
-                self.assertEqual(2, result.returncode)
-                self.assertIn('"status": "REFUSED"', result.stdout)
-                self.assertTrue(marker.is_file())
-                self.assertEqual("unrelated content\n", marker.read_text(encoding="utf-8"))
+        for host, link in self.links():
+            link.mkdir(parents=True)
+            marker = link / "do-not-delete.txt"
+            marker.write_text("unrelated content\n", encoding="utf-8")
+            for arguments in (("--host", host), ("--host", host, "--relink")):
+                with self.subTest(host=host, arguments=arguments):
+                    result = run_register_host(*arguments, "--json", env=self.env)
+                    self.assertEqual(2, result.returncode)
+                    self.assertIn('"status": "REFUSED"', result.stdout)
+                    self.assertTrue(marker.is_file())
+                    self.assertEqual("unrelated content\n", marker.read_text(encoding="utf-8"))
 
     def test_registration_does_not_touch_knowledge_root_or_consumer_repo(self) -> None:
         consumer = Path(self._tmp.name) / "consumer-repo"
         consumer.mkdir()
 
-        run_register_host("--host", "claude", "--json", env=self.env)
+        links = dict(self.links())
+        for host in links:
+            run_register_host("--host", host, "--json", env=self.env)
 
         self.assertEqual([], list(consumer.iterdir()))
-        after = {path for path in self.home.rglob("*") if path != self.link}
+        after = {path for path in self.home.rglob("*") if path not in links.values()}
         # Only the registration link itself (and its new parent directories)
         # may appear; no Knowledge Root state is created under HOME.
         self.assertFalse(any(".caravelaweb" in path.parts for path in after))

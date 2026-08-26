@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent
-SUPPORTED_HOSTS = ("claude",)
+SUPPORTED_HOSTS = ("claude", "codex", "opencode")
 
 
 class RegistrationError(RuntimeError):
@@ -32,6 +32,10 @@ class RegistrationResult:
 def _host_skills_directory(host: str) -> Path:
     if host == "claude":
         return Path.home() / ".claude" / "skills"
+    if host == "codex":
+        return Path.home() / ".agents" / "skills"
+    if host == "opencode":
+        return Path.home() / ".config" / "opencode" / "skills"
     raise RegistrationError(f"unsupported host: {host} (supported: {', '.join(SUPPORTED_HOSTS)})")
 
 

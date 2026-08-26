@@ -108,22 +108,29 @@ To work on CaravelaWeb itself, load a checkout live instead of a cached copy:
 claude --plugin-dir /path/to/caravelaweb
 ```
 
-The repository also ships a one-time global link for the same purpose:
+The repository also ships one-time global links for live checkout development:
 
 ```bash
 python3 scripts/register-host --host claude --json
+python3 scripts/register-host --host codex --json
+python3 scripts/register-host --host opencode --json
 ```
 
-This creates `~/.claude/skills/caravelaweb` as a symlink to the repository root
-on Linux, macOS, and WSL2, or a junction on native Windows. It never copies
-runtime files. It is a development convenience, not the public install path.
+Each command creates a `caravelaweb` link in the host's documented per-user
+skill directory: `~/.claude/skills` for Claude Code, `~/.agents/skills` for
+[Codex](https://developers.openai.com/codex/skills/#where-to-save-skills), and
+`~/.config/opencode/skills` for
+[OpenCode](https://opencode.ai/docs/skills/#place-files). The link is a symlink
+on Linux, macOS, and WSL2, or a junction on native Windows. Registration never
+copies runtime files. It is a development convenience, not the public install
+path; Codex's native plugin distribution remains the public install path.
 
 Registration is idempotent and reports `ALREADY_REGISTERED` when correct. If
 the checkout moves, repair the link from its new location:
 
 ```bash
-python3 scripts/register-host --host claude --check --json
-python3 scripts/register-host --host claude --relink --json
+python3 scripts/register-host --host codex --check --json
+python3 scripts/register-host --host codex --relink --json
 ```
 
 `--relink` only replaces a link that is already a CaravelaWeb-shaped
@@ -146,9 +153,9 @@ runtime code and point back to the repository-root [SKILL.md](../SKILL.md). A
 checkout that is installed and also opened locally may show both entries; they
 resolve to the same canonical file, so this is expected.
 
-OpenCode has no verified global installation in this repository. Codex IDE
-extensions do not load plugins; checkout-local discovery remains available
-through `.agents/skills/caravelaweb/SKILL.md`.
+Codex IDE extensions do not load plugins; global registration and
+checkout-local discovery remain available through the documented
+`.agents/skills` convention.
 
 ## Runtime commands (advanced)
 
@@ -158,7 +165,7 @@ through `.agents/skills/caravelaweb/SKILL.md`.
 | `scripts/preflight` | Report readiness, platform facts, and optional transport availability. |
 | `scripts/knowledge-lookup` | Read accepted knowledge for one target and optional capability. |
 | `scripts/discovery-finalize` | Validate and save reusable knowledge from a bounded Discovery. |
-| `scripts/register-host` | Link a checkout into Claude Code's per-user skill directory (developer mode). |
+| `scripts/register-host` | Link a checkout into Claude Code, Codex, or OpenCode's per-user skill directory (developer mode). |
 
 Use one interpreter for every CaravelaWeb command; `preflight` reports the
 exact interpreter path it ran under. On native Windows, use `python` or `py -3`
@@ -247,12 +254,16 @@ Remove the marketplace entry too, if you no longer want it listed:
 ```
 
 For the personal-skill-directory install, delete
-`~/.claude/skills/caravelaweb`. For a developer-mode link, remove only the link
-itself, never delete through it:
+`~/.claude/skills/caravelaweb`. For a developer-mode link, remove only the
+host-specific link itself, never delete through it:
 
 ```bash
 rm ~/.claude/skills/caravelaweb                  # Linux, macOS, WSL2
+rm ~/.agents/skills/caravelaweb                  # Codex
+rm ~/.config/opencode/skills/caravelaweb         # OpenCode
 rmdir %USERPROFILE%\.claude\skills\caravelaweb   # native Windows (junction)
+rmdir %USERPROFILE%\.agents\skills\caravelaweb  # Codex on native Windows
+rmdir %USERPROFILE%\.config\opencode\skills\caravelaweb # OpenCode on native Windows
 ```
 
 ### Remove the local memory
