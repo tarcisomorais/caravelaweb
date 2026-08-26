@@ -64,9 +64,18 @@ class PreflightTests(unittest.TestCase):
         completed = subprocess.CompletedProcess(
             ["agent-browser", "--version"], version_returncode, stdout=version, stderr=""
         )
-        with patch.object(api["shutil"], "which", side_effect=lambda name: commands.get(name)), patch.object(
-            api["subprocess"], "run", return_value=completed
-        ) as probe:
+        # _chrome_engine also probes fixed install locations under these
+        # variables; on a real Windows machine they resolve to a real Chrome
+        # or Edge, so the prerequisite matrix must run without them.
+        install_roots = {"PROGRAMFILES", "PROGRAMW6432", "PROGRAMFILES(X86)", "LOCALAPPDATA"}
+        sanitized = {
+            name: value
+            for name, value in api["os"].environ.items()
+            if name.upper() not in install_roots
+        }
+        with patch.dict(api["os"].environ, sanitized, clear=True), patch.object(
+            api["shutil"], "which", side_effect=lambda name: commands.get(name)
+        ), patch.object(api["subprocess"], "run", return_value=completed) as probe:
             result = api["_browser_diagnostics"](platform_name="win32")
         self.assertEqual(
             [[commands["agent-browser"], "--version"]] if "agent-browser" in commands else [],
