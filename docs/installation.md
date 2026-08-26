@@ -125,6 +125,10 @@ on Linux, macOS, and WSL2, or a junction on native Windows. Registration never
 copies runtime files. It is a development convenience, not the public install
 path; Codex's native plugin distribution remains the public install path.
 
+OpenCode also loads global skills from `~/.claude/skills` and
+`~/.agents/skills`, so a `claude` or `codex` registration already covers
+OpenCode. Register the `opencode` host only when neither of those links exists.
+
 Registration is idempotent and reports `ALREADY_REGISTERED` when correct. If
 the checkout moves, repair the link from its new location:
 
