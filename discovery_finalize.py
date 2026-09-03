@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
 from urllib.parse import urlparse
@@ -147,6 +147,7 @@ class DiscoveryFinalization:
     reason_code: str | None = None
     lifecycle: str | None = None
     lifecycle_gap: str | None = None
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def closes_run(self) -> bool:
@@ -173,6 +174,8 @@ class DiscoveryFinalization:
             result["lifecycle"] = self.lifecycle
             if self.lifecycle is None:
                 result["lifecycle_gap"] = self.lifecycle_gap
+            if self.warnings:
+                result["warnings"] = self.warnings
         result["run_state"] = "CLOSED" if self.closes_run else "OPEN"
         return result
 
@@ -451,6 +454,17 @@ def _normalize_hostname(value: Any) -> str | None:
             f"observation.host must be a normalized public hostname: {exc}",
             code=HOST_SCOPE,
         ) from exc
+
+
+def _evidence_hostname(locator: str) -> str | None:
+    """Locator hostname in the same canonical (ASCII IDNA) form as observation.host."""
+    raw = urlparse(str(locator)).hostname
+    if not raw:
+        return None
+    try:
+        return validate_public_hostname(raw)
+    except TargetIdentityError:
+        return None
 
 
 def _normalize_validation(value: Any, *, field: str) -> dict[str, Any] | None:
@@ -1199,15 +1213,14 @@ def _host_plan(
             continue
         proven = any(
             source.get("scope") == "TARGET_SURFACE"
-            and urlparse(str(source.get("locator", ""))).hostname
-            and urlparse(str(source["locator"])).hostname.lower().rstrip(".") == hostname
+            and _evidence_hostname(source.get("locator", "")) == hostname
             for source in evidence
         )
         if not proven:
             evidence_hostnames = sorted({
-                urlparse(str(source["locator"])).hostname.lower().rstrip(".")
+                candidate
                 for source in evidence
-                if urlparse(str(source.get("locator", ""))).hostname
+                if (candidate := _evidence_hostname(source.get("locator", ""))) is not None
             })
             raise DiscoveryFinalizationError(
                 f"a new observation host requires TARGET_SURFACE evidence from "
@@ -1492,6 +1505,16 @@ def finalize_discovery(
         )
     clean_evidence = _validate_evidence(evidence)
     host_ids, hosts_to_create = _host_plan(memory, target, normalized, clean_evidence)
+    has_host = bool(host_ids) or bool(
+        list(memory._conn.execute(
+            "SELECT 1 FROM hosts WHERE target_id=? LIMIT 1", (f"tgt:{target}",)
+        ))
+    )
+    no_host_warnings = [] if has_host else [
+        "NO_HOST_ASSOCIATION: this target has no recorded host, so a later "
+        "lookup by URL or hostname cannot resolve it. A future Discovery can "
+        "add one with observation.host plus TARGET_SURFACE evidence."
+    ]
     clean_trace = _normalize_transport_trace(transport_trace)
     ladder_proven, validated_transport = (
         _validated_transport_trace(
@@ -1546,6 +1569,7 @@ def finalize_discovery(
                 if memory.has_verified_operational_lifecycle(target, capability)
                 else None
             ),
+            warnings=no_host_warnings,
         )
     delta_keys = {semantic(item) for item in delta}
     pending_match = (
@@ -1814,6 +1838,7 @@ def finalize_discovery(
         "SAVED", target, capability, proposal_id, len(claims),
         lifecycle=lifecycle_state,
         lifecycle_gap=None if lifecycle_state else lifecycle_gap,
+        warnings=no_host_warnings,
     )
 
 

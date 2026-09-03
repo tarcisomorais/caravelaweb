@@ -12,6 +12,9 @@ extracts every JSON block below, opens a matching synthetic Discovery run, and
 finalizes it for real: if a runtime rule changes, this file fails the suite
 instead of silently drifting from the contract.
 
+Every first-run example records the host it observed; a target without a
+host is never reachable by URL.
+
 ## 1. Functional `DIRECT_READ`
 
 ```json
@@ -19,9 +22,16 @@ instead of silently drifting from the contract.
   "target": "example-direct-read",
   "capability": "article-read",
   "observations": [
-    {"family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"}}
+    {
+      "family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"},
+      "host": "example-direct-read.example"
+    }
   ],
-  "evidence": [{"kind": "direct-read-validation", "locator": "https://example-direct-read.example/articles/1"}],
+  "evidence": [{
+    "kind": "direct-read-validation",
+    "locator": "https://example-direct-read.example/articles/1",
+    "scope": "TARGET_SURFACE"
+  }],
   "provenance": {"run_id": "<from discovery-begin>", "observed_at": "2026-08-14T12:00:00Z"},
   "recorded_at": "2026-08-14T12:00:00Z"
 }
@@ -37,13 +47,20 @@ collection.
   "target": "example-single-record",
   "capability": "article-read",
   "observations": [
-    {"family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"}},
+    {
+      "family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"},
+      "host": "example-single-record.example"
+    },
     {"family": "extraction", "value": {
       "structure": "JSON_LD",
       "field_paths": {"headline": "$.headline", "body": "$.article.full_text"}
     }}
   ],
-  "evidence": [{"kind": "direct-read-validation", "locator": "https://example-single-record.example/articles/1"}],
+  "evidence": [{
+    "kind": "direct-read-validation",
+    "locator": "https://example-single-record.example/articles/1",
+    "scope": "TARGET_SURFACE"
+  }],
   "provenance": {"run_id": "<from discovery-begin>", "observed_at": "2026-08-14T12:00:00Z"},
   "recorded_at": "2026-08-14T12:00:00Z"
 }
@@ -56,13 +73,20 @@ collection.
   "target": "example-collection",
   "capability": "topic-search",
   "observations": [
-    {"family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"}},
+    {
+      "family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"},
+      "host": "example-collection.example"
+    },
     {"family": "extraction", "value": {
       "structure": "JSON_LD",
       "field_paths": {"name": "items[].name", "url": "items[].url"}
     }}
   ],
-  "evidence": [{"kind": "direct-read-validation", "locator": "https://example-collection.example/search?q=topic"}],
+  "evidence": [{
+    "kind": "direct-read-validation",
+    "locator": "https://example-collection.example/search?q=topic",
+    "scope": "TARGET_SURFACE"
+  }],
   "provenance": {"run_id": "<from discovery-begin>", "observed_at": "2026-08-14T12:00:00Z"},
   "recorded_at": "2026-08-14T12:00:00Z"
 }
@@ -106,6 +130,7 @@ both attempts and stops at the first `FUNCTIONAL` result.
   "observations": [
     {
       "family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FAILED"},
+      "host": "example-browser-escalation.example",
       "validation": {
         "transport": "DIRECT_READ", "outcome": "FAILED", "engine": null, "javascript": false,
         "context": {"authentication": "PUBLIC", "environment": "PRODUCTION"},
@@ -122,13 +147,21 @@ both attempts and stops at the first `FUNCTIONAL` result.
     }
   ],
   "evidence": [
-    {"kind": "transport-validation", "locator": "https://example-browser-escalation.example/articles/1"},
+    {
+      "kind": "transport-validation",
+      "locator": "https://example-browser-escalation.example/articles/1",
+      "scope": "TARGET_SURFACE"
+    },
     {"kind": "bounded-browser-validation", "locator": "https://example-browser-escalation.example/articles/1-rendered"}
   ],
   "transport_trace": {
     "availability": {"LIGHTPANDA": "AVAILABLE", "CHROME": "AVAILABLE"},
     "attempts": [
-      {"transport": "DIRECT_READ", "outcome": "FAILED", "evidence": ["https://example-browser-escalation.example/articles/1"]},
+      {
+        "transport": "DIRECT_READ", "outcome": "FAILED",
+        "host": "example-browser-escalation.example",
+        "evidence": ["https://example-browser-escalation.example/articles/1"]
+      },
       {"transport": "LIGHTPANDA", "outcome": "FUNCTIONAL", "evidence": ["https://example-browser-escalation.example/articles/1-rendered"]}
     ]
   },
@@ -150,6 +183,7 @@ still finalizes with `SAVED`, recording the block for reuse.
   "observations": [
     {
       "family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FAILED"},
+      "host": "example-blocked-ladder.example",
       "validation": {
         "transport": "DIRECT_READ", "outcome": "FAILED", "engine": null, "javascript": false,
         "context": {"authentication": "PUBLIC", "environment": "PRODUCTION"},
@@ -169,7 +203,11 @@ still finalizes with `SAVED`, recording the block for reuse.
       }
     }
   ],
-  "evidence": [{"kind": "transport-validation", "locator": "https://example-blocked-ladder.example/articles/1"}],
+  "evidence": [{
+    "kind": "transport-validation",
+    "locator": "https://example-blocked-ladder.example/articles/1",
+    "scope": "TARGET_SURFACE"
+  }],
   "transport_trace": {
     "availability": {"LIGHTPANDA": "PLATFORM_UNSUPPORTED", "CHROME": "PLATFORM_UNSUPPORTED"},
     "attempts": [
@@ -193,7 +231,10 @@ satisfies this.
   "target": "example-observed-limitation",
   "capability": "article-read",
   "observations": [
-    {"family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"}},
+    {
+      "family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"},
+      "host": "example-observed-limitation.example"
+    },
     {
       "family": "limitation",
       "value": {"kind": "RATE_LIMIT", "condition": "more than 30 requests per minute return HTTP 429"},
@@ -204,7 +245,11 @@ satisfies this.
       }
     }
   ],
-  "evidence": [{"kind": "direct-read-validation", "locator": "https://example-observed-limitation.example/articles/1"}],
+  "evidence": [{
+    "kind": "direct-read-validation",
+    "locator": "https://example-observed-limitation.example/articles/1",
+    "scope": "TARGET_SURFACE"
+  }],
   "provenance": {"run_id": "<from discovery-begin>", "observed_at": "2026-08-14T12:00:00Z"},
   "recorded_at": "2026-08-14T12:00:00Z"
 }
@@ -224,6 +269,7 @@ the `OPERATIONAL` lifecycle in one run: a `FUNCTIONAL` transport, a matching
   "observations": [
     {
       "family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"},
+      "host": "example-operational.example",
       "validation": {
         "transport": "DIRECT_READ", "outcome": "FUNCTIONAL", "engine": null, "javascript": false,
         "context": {"authentication": "PUBLIC", "environment": "PRODUCTION"},
@@ -239,6 +285,7 @@ the `OPERATIONAL` lifecycle in one run: a `FUNCTIONAL` transport, a matching
         "completion_condition": "HTTP 200 whose HTML carries a headline element",
         "critical_constraints": []
       }},
+      "host": "example-operational.example",
       "validation": {
         "transport": "DIRECT_READ", "outcome": "SUCCESS", "engine": null, "javascript": false,
         "context": {"authentication": "PUBLIC", "environment": "PRODUCTION"},
@@ -246,7 +293,11 @@ the `OPERATIONAL` lifecycle in one run: a `FUNCTIONAL` transport, a matching
       }
     }
   ],
-  "evidence": [{"kind": "direct-read-validation", "locator": "https://example-operational.example/articles/1"}],
+  "evidence": [{
+    "kind": "direct-read-validation",
+    "locator": "https://example-operational.example/articles/1",
+    "scope": "TARGET_SURFACE"
+  }],
   "provenance": {"run_id": "<from discovery-begin>", "observed_at": "2026-08-14T12:00:00Z"},
   "recorded_at": "2026-08-14T12:00:00Z"
 }

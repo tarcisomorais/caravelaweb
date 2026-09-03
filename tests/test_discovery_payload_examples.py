@@ -68,6 +68,7 @@ class DiscoveryPayloadExamplesTests(unittest.TestCase):
                 body = json.loads(finalized.stdout)
                 self.assertEqual("SAVED", body["status"])
                 self.assertEqual("CLOSED", body["run_state"])
+                self.assertNotIn("warnings", body)
 
     def test_a_malformed_example_reports_a_reason_code(self):
         payload = _payloads()[0]

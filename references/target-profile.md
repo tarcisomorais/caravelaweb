@@ -141,6 +141,13 @@ The public Discovery payload is a closed contract. Its wrapper is exactly
 provenance, transport-trace, validation-context, contradiction-value, proof,
 or family-value fields are rejected before Candidate construction.
 
+`observation.host` is a literal behavior scope: `www.example.com` and
+`example.com` are distinct hosts there, and the `TARGET_SURFACE` evidence
+locator must use the same literal hostname. Target-reference resolution
+(above) drops `www.`; host scope does not. Both sides are compared in
+canonical ASCII (IDNA) form, so a Unicode locator and its punycode form
+match.
+
 Every payload refusal's `reason_code` is one of eight values:
 
 - `PAYLOAD_SHAPE` — wrong type, or a missing/unsupported field.

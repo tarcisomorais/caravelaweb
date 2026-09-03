@@ -1771,6 +1771,69 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         self.assertIn("TARGET_SURFACE", message)
         self.assertIn("www.example-news.com", message)
 
+    def test_unicode_evidence_locator_matches_punycode_observation_host(self):
+        for locator in (
+            "https://münchen.example/x",
+            "https://xn--mnchen-3ya.example/x",
+        ):
+            with self.subTest(locator=locator):
+                payload = self.payload([
+                    {"family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"},
+                     "host": "münchen.example"},
+                ])
+                payload["evidence"] = [{
+                    "kind": "direct-read-validation", "locator": locator,
+                    "scope": "TARGET_SURFACE",
+                }]
+                # dry_run keeps each subTest's host claim from colliding with the other.
+                result = self.finalize(payload, dry_run=True)
+                self.assertEqual("SAVED", result.status)
+
+    def test_www_host_still_literal(self):
+        payload = self.payload([
+            {"family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"},
+             "host": "example-news.com"},
+        ])
+        payload["evidence"] = [{
+            "kind": "direct-read-validation",
+            "locator": "https://www.example-news.com/",
+            "scope": "TARGET_SURFACE",
+        }]
+        with self.assertRaises(DiscoveryFinalizationError) as ctx:
+            self.finalize(payload)
+        self.assertIn("www.example-news.com", str(ctx.exception))
+
+    def test_saved_without_host_warns(self):
+        result = self.finalize()
+        self.assertEqual("SAVED", result.status)
+        self.assertEqual(1, len(result.warnings))
+        self.assertIn("NO_HOST_ASSOCIATION", result.warnings[0])
+
+    def test_saved_with_host_has_no_warning(self):
+        payload = self.payload([
+            {"family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"},
+             "host": "example-news-host.com"},
+        ])
+        payload["evidence"] = [{
+            "kind": "direct-read-validation",
+            "locator": "https://example-news-host.com/",
+            "scope": "TARGET_SURFACE",
+        }]
+        result = self.finalize(payload)
+        self.assertEqual("SAVED", result.status)
+        self.assertEqual([], result.warnings)
+
+    def test_already_existing_host_suppresses_warning(self):
+        with self.memory.write_transaction() as writer:
+            writer.host({
+                "id": "host:example-news:seed",
+                "target_id": "tgt:example-news",
+                "hostname": "example-news.com",
+            })
+        result = self.finalize()
+        self.assertEqual("SAVED", result.status)
+        self.assertEqual([], result.warnings)
+
     def test_validate_rolls_back_new_target_capability_and_host_association(self):
         # Covers the create_missing_scope=True capture_candidate path: a brand
         # new target, capability, and host all get created inside the same
