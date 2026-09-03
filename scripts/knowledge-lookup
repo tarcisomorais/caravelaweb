@@ -26,17 +26,30 @@ def main() -> int:
         description="Look up accepted reusable knowledge from the current installation"
     )
     parser.add_argument("--knowledge-root")
-    parser.add_argument("--target", required=True)
+    parser.add_argument("--target", required=False)
     parser.add_argument("--capability")
     parser.add_argument("--operational-memory-db", help="diagnostic DB override for an explicit Operational Memory lookup")
     parser.add_argument("--use-operational-memory", action="store_true", help="deprecated diagnostic assertion of Operational Memory")
     parser.add_argument("--use-legacy", action="store_true", help="diagnostic-only compatibility lookup from targets/; never an automatic fallback")
+    parser.add_argument("--list", action="store_true", help="index every target with its hosts and capability keys; no --target")
     args = parser.parse_args()
+    if args.list and (args.target or args.capability):
+        parser.error("--list cannot be combined with --target or --capability")
+    if not args.list and not args.target:
+        parser.error("--target is required unless --list is given")
     root = resolve_knowledge_root(args.knowledge_root)
     if root is None:
         emit("unresolved", target=args.target)
         return 2
     boundary = KnowledgeLookupBoundary(root, args.operational_memory_db)
+    if args.list:
+        try:
+            targets = boundary.list_index()
+        except (BridgeError, MemoryError, KeyError) as error:
+            emit("bridge_error", message=str(error))
+            return 2
+        emit("listed", targets=targets, count=len(targets))
+        return 0
     try:
         result = boundary.lookup(args.target, capability=args.capability, use_operational_memory=args.use_operational_memory, use_legacy=args.use_legacy)
     except (BridgeError, MemoryError, KeyError) as error:

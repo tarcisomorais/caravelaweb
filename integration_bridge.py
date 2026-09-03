@@ -111,6 +111,20 @@ class KnowledgeLookupBoundary:
             markdown_projection=markdown,
         )
 
+    def list_index(self) -> list[dict[str, Any]]:
+        """Exact index of every target with its hosts and capability keys."""
+        try:
+            cutover_active = read_cutover_active(self.legacy_root)
+        except ReadAuthorityStateError as error:
+            raise BridgeError(str(error)) from error
+        if not cutover_active:
+            raise BridgeError("the legacy path has no index; Operational Memory is not active")
+        try:
+            with SQLiteOperationalMemory(self.memory_db, create=False) as memory:
+                return memory.list_targets()
+        except (sqlite3.DatabaseError, json.JSONDecodeError, OperationalMemoryError) as error:
+            raise BridgeError(f"Operational Memory query failed: {error}") from error
+
 __all__ = [
     "BridgeError",
     "KnowledgeLookupBoundary",

@@ -168,7 +168,7 @@ checkout-local discovery remain available through the documented
 | --- | --- |
 | `scripts/init-knowledge-root` | Create an empty local Knowledge Root and Operational Memory. |
 | `scripts/preflight` | Report readiness, platform facts, and optional transport availability. |
-| `scripts/knowledge-lookup` | Read accepted knowledge for one target and optional capability. |
+| `scripts/knowledge-lookup` | Read accepted knowledge for one target and optional capability, or index every target with `--list`. |
 | `scripts/discovery-begin` | Register the start of one bounded Discovery run and return its run_id. |
 | `scripts/discovery-finalize` | Validate and save reusable knowledge from a bounded Discovery. |
 | `scripts/register-host` | Link a checkout into Claude Code, Codex, or OpenCode's per-user skill directory (developer mode). |

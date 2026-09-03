@@ -92,10 +92,13 @@ Before treating a capability as unknown, run `knowledge-lookup` with the
 concrete interpreter and skill path reported by preflight:
 
 ```text
+<python> <skill>/scripts/knowledge-lookup --list
 <python> <skill>/scripts/knowledge-lookup --target example-jobs
 <python> <skill>/scripts/knowledge-lookup --target example-jobs --capability project_listings
 <python> <skill>/scripts/knowledge-lookup --knowledge-root <explicit-root> --target example-jobs --capability project_listings
 ```
+
+`--list` returns an exact index of every target with its hosts and capability keys, with no `--target`.
 
 Use `--knowledge-root` only for a caller-supplied override. The normal boundary returns accepted context for the requested capability:
 

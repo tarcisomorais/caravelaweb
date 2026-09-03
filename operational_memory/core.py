@@ -677,6 +677,32 @@ class SQLiteOperationalMemory:
             )
         ]
 
+    def list_targets(self) -> list[dict[str, Any]]:
+        """Exact index of every target with its hosts and capability keys. Read-only."""
+        result: list[dict[str, Any]] = []
+        for row in self._conn.execute("SELECT id, name FROM targets ORDER BY id"):
+            tid = row["id"]
+            hosts = [h[0] for h in self._conn.execute(
+                "SELECT hostname FROM hosts WHERE target_id=? ORDER BY hostname", (tid,))]
+            capabilities = []
+            for cap in self._conn.execute(
+                "SELECT capability_key FROM capabilities WHERE target_id=? ORDER BY capability_key", (tid,)):
+                key = cap[0]
+                capabilities.append({
+                    "capability": key,
+                    "lifecycle": "OPERATIONAL" if self.has_verified_operational_lifecycle(tid, key) else None,
+                    "accepted": bool(self.get_current(tid, key)["accepted_claim_ids"]),
+                    "pending_proposals": len(self.get_pending_candidates(tid, key)),
+                })
+            result.append({
+                "target_id": tid,
+                "target": tid.removeprefix("tgt:"),
+                "name": row["name"],
+                "hosts": hosts,
+                "capabilities": capabilities,
+            })
+        return result
+
     @staticmethod
     def _contains(domain_time: str, start: str | None, end: str | None) -> bool:
         return (start is None or domain_time >= start) and (end is None or domain_time < end)
