@@ -74,9 +74,28 @@ def _read_marker(root: str | Path) -> dict[str, Any] | None:
         ) from exc
     if not safe_marker_stat(stat):
         raise WriteAuthorityStateError(f"unsafe write-authority marker: {marker}")
+    # Belt-and-braces: the lstat above refuses a symlink before the open;
+    # this descriptor-first read refuses a swap that lands between the
+    # lstat and the open (a TOCTOU race the path-based lstat cannot see).
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
     try:
-        payload = json.loads(marker.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
+        fd = os.open(marker, flags)
+    except OSError as exc:
+        raise WriteAuthorityStateError(f"unsafe write-authority marker: {marker}") from exc
+    try:
+        if not safe_marker_stat(os.fstat(fd)):
+            raise WriteAuthorityStateError(f"unsafe write-authority marker: {marker}")
+        with os.fdopen(fd, "r", encoding="utf-8") as stream:
+            fd = -1
+            text = stream.read()
+    finally:
+        if fd != -1:
+            os.close(fd)
+    try:
+        payload = json.loads(text)
+    except ValueError as exc:
         raise WriteAuthorityStateError(f"invalid write-authority marker: {marker}") from exc
     kind = payload.get("kind")
     common_valid = (

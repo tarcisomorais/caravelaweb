@@ -16,6 +16,7 @@ from operational_memory import (
     RecordValidationError,
     SchemaVersionError,
     SQLiteOperationalMemory,
+    validate_timestamp,
 )
 from conformance_harness import ConformanceMemory
 from memory_lab_adapter import compare_minimum, load_memory_lab
@@ -391,6 +392,43 @@ class DecisionActionHardeningTests(unittest.TestCase):
                     "effective_at": "2026-08-05T00:00:00Z", "recorded_at": "2026-08-05T00:00:00Z",
                     "validity": {"valid_from": None, "valid_to": "2026-08-05T00:00:00Z"},
                 })
+
+
+class TimestampCanonicalizationTests(unittest.TestCase):
+    def test_timestamps_must_be_canonical(self) -> None:
+        for non_canonical in [
+            "2024-01-01Z",
+            "20240101T000000Z",
+            "2024-01-01T00:00Z",
+            "2024-01-01T00:00:00.000Z",
+        ]:
+            with self.assertRaises(RecordValidationError):
+                validate_timestamp(non_canonical, field="x")
+
+    def test_canonical_form_passes(self) -> None:
+        validate_timestamp("2024-01-01T00:00:00Z", field="x")
+
+    def test_error_message_names_the_canonical_example(self) -> None:
+        with self.assertRaisesRegex(RecordValidationError, "canonical form"):
+            validate_timestamp("2024-01-01T00:00Z", field="x")
+
+    def test_date_only_input_is_rejected_without_a_z_less_exemplar(self) -> None:
+        # "2024-01-01Z" has no time component, so fromisoformat cannot attach
+        # an offset and would otherwise produce a naive-datetime exemplar
+        # missing its trailing Z. Assert it is rejected, and that no message
+        # in any non-canonical case here ever prints such an exemplar.
+        for non_canonical in [
+            "2024-01-01Z",
+            "20240101T000000Z",
+            "2024-01-01T00:00Z",
+            "2024-01-01T00:00:00.000Z",
+        ]:
+            with self.assertRaises(RecordValidationError) as failure:
+                validate_timestamp(non_canonical, field="x")
+            message = str(failure.exception)
+            if "for example " in message:
+                exemplar = message.split("for example ", 1)[1]
+                self.assertTrue(exemplar.endswith("Z"), message)
 
 
 class JsCapabilityTransportSourceTests(unittest.TestCase):

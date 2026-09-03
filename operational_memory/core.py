@@ -80,9 +80,20 @@ def validate_timestamp(value: str | None, *, field: str, required: bool = True) 
     if not isinstance(value, str) or not value.endswith("Z"):
         raise RecordValidationError(f"{field} must be RFC 3339 UTC ending in Z")
     try:
-        datetime.fromisoformat(value[:-1] + "+00:00")
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00")
     except ValueError as exc:
         raise RecordValidationError(f"{field} is not a valid RFC 3339 timestamp") from exc
+    if parsed.tzinfo is None:
+        # A date-only (or otherwise time-less) input, e.g. "2024-01-01Z":
+        # fromisoformat silently drops the "+00:00" it can't attach without
+        # a time component, leaving a naive datetime. Reject explicitly so
+        # the exemplar below never prints without its trailing Z.
+        raise RecordValidationError(f"{field} is not a valid RFC 3339 timestamp")
+    canonical = parsed.isoformat(timespec="seconds").replace("+00:00", "Z")
+    if canonical != value:
+        raise RecordValidationError(
+            f"{field} must be the canonical form YYYY-MM-DDTHH:MM:SSZ, for example {canonical}"
+        )
 
 
 class TargetIdentityError(MemoryError):
@@ -103,12 +114,25 @@ def normalize_capability_id(value: str) -> str:
     return normalized
 
 
+_NUMERIC_LABEL = re.compile(r"^(0x[0-9a-f]+|0[0-7]*|[1-9][0-9]*)$")
+
+
 def _is_ip_literal(host: str) -> bool:
+    """Whether ``host`` is an IP literal in any form, including legacy/short IPv4.
+
+    Rejects the standard forms via :mod:`ipaddress`, plus short-form and
+    hex/octal IPv4 (``127.1``, ``0x7f.0.0.1``, ``2130706433``) that resolvers
+    still treat as loopback but ``ipaddress.ip_address`` does not parse.
+    """
     try:
         ipaddress.ip_address(host)
+        return True
     except ValueError:
-        return False
-    return True
+        pass
+    labels = host.split(".")
+    if labels and all(_NUMERIC_LABEL.fullmatch(label) for label in labels):
+        return True   # every label numeric or hex: a legacy/short IPv4 form, never a hostname
+    return False
 
 
 def is_canonical_target_id(value: str) -> bool:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import io
+import os
 import runpy
 import subprocess
 import sys
@@ -18,7 +19,13 @@ LOOKUP = REPO / "scripts" / "knowledge-lookup"
 PREFLIGHT = REPO / "scripts" / "preflight"
 sys.path.insert(0, str(REPO))
 
-from discovery_runs import DiscoveryRunError, begin_discovery, list_open_discoveries
+from discovery_runs import (
+    DiscoveryRunError,
+    _marker,
+    begin_discovery,
+    list_open_discoveries,
+    require_open_discovery,
+)
 from operational_memory import SQLiteOperationalMemory
 from write_authority import MIGRATED_WRITE_AUTHORITY_KIND
 
@@ -257,6 +264,20 @@ class DiscoveryRunTests(unittest.TestCase):
         self.assertEqual(0, retried.returncode, retried.stderr)
         self.assertEqual("ALREADY_EXISTS", json.loads(retried.stdout)["status"])
         self.assertEqual([], list_open_discoveries(self.root))
+
+    def test_symlinked_run_marker_is_refused(self) -> None:
+        opened = self.begin("symlink-target")
+        marker = _marker(self.root, opened["run_id"])
+        real = self.root / "elsewhere-marker.json"
+        marker.replace(real)
+        try:
+            os.symlink(real, marker)
+        except OSError as exc:
+            self.skipTest(f"cannot create a symlink on this platform: {exc}")
+        with self.assertRaises(DiscoveryRunError):
+            require_open_discovery(self.root, opened["target"], opened["capability"], opened["run_id"])
+        records = list_open_discoveries(self.root)
+        self.assertEqual([{"status": "INVALID", "marker": marker.name}], records)
 
 
 if __name__ == "__main__":

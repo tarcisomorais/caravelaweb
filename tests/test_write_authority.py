@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -113,6 +114,18 @@ class WriteAuthorityCompatibilityTests(unittest.TestCase):
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text("{not json", encoding="utf-8")
         with self.assertRaises(WriteAuthorityStateError):
+            current_write_authority(self.root)
+
+    def test_symlinked_marker_is_unsafe(self) -> None:
+        _write(self.root, MIGRATED)
+        marker = write_authority_marker(self.root)
+        real = self.root / "elsewhere-write-authority.json"
+        marker.replace(real)
+        try:
+            os.symlink(real, marker)
+        except OSError as exc:
+            self.skipTest(f"cannot create a symlink on this platform: {exc}")
+        with self.assertRaisesRegex(WriteAuthorityStateError, "unsafe write-authority marker"):
             current_write_authority(self.root)
 
 

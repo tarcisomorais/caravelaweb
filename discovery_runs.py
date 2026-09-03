@@ -16,6 +16,7 @@ from operational_memory.core import (
     normalize_capability_id,
     validate_timestamp,
 )
+from platform_adapter import safe_marker_stat
 
 
 class DiscoveryRunError(ValueError):
@@ -81,9 +82,26 @@ def begin_discovery(
     return record
 
 
+def _open_marker(path: Path) -> str:
+    """Read a run marker only if it is a regular, singly linked file."""
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(path, flags)
+    try:
+        if not safe_marker_stat(os.fstat(fd)):
+            raise DiscoveryRunError("Discovery run marker is not a regular file")
+        with os.fdopen(fd, "r", encoding="utf-8") as stream:
+            fd = -1
+            return stream.read()
+    finally:
+        if fd != -1:
+            os.close(fd)
+
+
 def _read_marker(path: Path) -> dict[str, str]:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(_open_marker(path))
         if not isinstance(value, dict) or set(value) != {
             "target", "capability", "run_id", "opened_at",
         }:
@@ -108,8 +126,12 @@ def require_open_discovery(
     if not isinstance(run_id, str) or not run_id.strip():
         raise DiscoveryRunError("provenance.run_id must identify an open Discovery run")
     marker = _marker(root, run_id)
-    if not marker.is_file():
-        raise DiscoveryRunError("no open Discovery marker matches provenance.run_id")
+    try:
+        stat = os.lstat(marker)
+    except FileNotFoundError:
+        raise DiscoveryRunError("no open Discovery marker matches provenance.run_id") from None
+    if not safe_marker_stat(stat):
+        raise DiscoveryRunError("Discovery run marker is invalid")
     record = _read_marker(marker)
     if (record["target"], record["capability"]) != (target, capability):
         raise DiscoveryRunError("the open Discovery marker belongs to another target or capability")

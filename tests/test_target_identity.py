@@ -26,7 +26,11 @@ sys.path.insert(0, str(SKILL))
 from discovery_finalize import DiscoveryFinalizationError, finalize_discovery
 from integration_bridge import KnowledgeLookupBoundary
 from operational_memory import SQLiteOperationalMemory, TargetIdentityError
-from operational_memory.core import is_canonical_target_id, normalize_host_reference
+from operational_memory.core import (
+    is_canonical_target_id,
+    normalize_host_reference,
+    validate_public_hostname,
+)
 from write_authority import MIGRATED_WRITE_AUTHORITY_KIND
 
 RECORDED = "2026-08-09T00:00:00Z"
@@ -134,6 +138,14 @@ class NormalizeHostReferenceTests(unittest.TestCase):
             normalize_host_reference("bücher.example"),
         )
         self.assertEqual("xn--bcher-kva.example", normalize_host_reference("bücher.example"))
+
+    def test_short_form_and_hex_ipv4_are_rejected(self) -> None:
+        for reference in ("127.1", "0x7f.0.0.1", "2130706433", "0177.0.0.1"):
+            with self.assertRaises(TargetIdentityError):
+                validate_public_hostname(reference)
+
+    def test_non_numeric_labels_are_not_mistaken_for_ip_literals(self) -> None:
+        self.assertEqual("1e100.net", validate_public_hostname("1e100.net"))
 
 
 class CanonicalTargetIdShapeTests(unittest.TestCase):
