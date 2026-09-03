@@ -51,6 +51,7 @@ RUNTIME_ENTRY_POINTS = (
     "knowledge-lookup",
     "discovery-begin",
     "discovery-finalize",
+    "knowledge-resolve",
 )
 
 

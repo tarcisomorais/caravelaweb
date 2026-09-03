@@ -19,6 +19,7 @@ from om_native_writes import (
     OMStaleBaseError,
     capture_candidate,
     promote_candidate,
+    reject_candidate,
     review_token,
 )
 from operational_memory.core import SQLiteOperationalMemory
@@ -317,6 +318,96 @@ class OMNativeWritesTest(unittest.TestCase):
                 for item in self.memory.get_pending_candidates("alpha", "read")
             ],
         )
+
+    def test_reject_candidate_resolves_pending_proposal_without_accepting(self) -> None:
+        captured = self.capture()
+        stale = review_token(self.memory, target="alpha", capability="read")
+        with self.memory.write_transaction() as writer:
+            writer.claim(
+                {
+                    "id": "clm:alpha:read:constraint:reject-concurrent",
+                    "target_id": "tgt:alpha",
+                    "capability_id": "cap:alpha:read",
+                    "family": "constraint",
+                    "epistemic": "OBSERVED",
+                    "value": {"concurrent": True},
+                    "recorded_at": "2026-07-28T12:30:00Z",
+                }
+            )
+            writer.decision(
+                {
+                    "id": "dec:alpha:read:reject-concurrent",
+                    "target_id": "tgt:alpha",
+                    "capability_id": "cap:alpha:read",
+                    "action": "ACCEPT",
+                    "claim_ids": ["clm:alpha:read:constraint:reject-concurrent"],
+                    "effective_at": "2026-07-28T12:30:00Z",
+                    "recorded_at": "2026-07-28T12:30:00Z",
+                    "validity": {
+                        "valid_from": "2026-07-28T12:30:00Z",
+                        "valid_to": None,
+                    },
+                }
+            )
+        decisions_before = self.memory._conn.execute(
+            "SELECT count(*) FROM decisions"
+        ).fetchone()[0]
+        with self.assertRaises(OMStaleBaseError):
+            reject_candidate(
+                self.memory,
+                target="alpha",
+                capability="read",
+                proposal_id=captured.proposal_id,
+                reason="stale candidate",
+                reviewed_token=stale,
+                decision_id="dec:alpha:read:reject-c",
+                recorded_at="2026-07-28T13:00:00Z",
+                effective_at="2026-07-28T13:00:00Z",
+            )
+        self.assertEqual(
+            decisions_before,
+            self.memory._conn.execute("SELECT count(*) FROM decisions").fetchone()[0],
+        )
+        self.assertEqual(
+            [captured.proposal_id],
+            [
+                item["proposal_id"]
+                for item in self.memory.get_pending_candidates("alpha", "read")
+            ],
+        )
+
+        token = review_token(self.memory, target="alpha", capability="read")
+        rejected = reject_candidate(
+            self.memory,
+            target="alpha",
+            capability="read",
+            proposal_id=captured.proposal_id,
+            reason="stale candidate",
+            reviewed_token=token,
+            decision_id="dec:alpha:read:reject-c",
+            recorded_at="2026-07-28T13:00:00Z",
+            effective_at="2026-07-28T13:00:00Z",
+        )
+        self.assertEqual([], self.memory.get_pending_candidates("alpha", "read"))
+        accepted = self.memory.get_current("alpha", "read")["accepted_claim_ids"]
+        self.assertTrue(set(captured.claim_ids).isdisjoint(accepted))
+        record = self.memory.get_record(rejected.decision_id)
+        self.assertEqual("REJECT", record["action"])
+        self.assertEqual("stale candidate", record["reason"])
+        self.assertEqual(set(captured.claim_ids), set(record["claim_ids"]))
+
+        with self.assertRaises(OMProposalError):
+            reject_candidate(
+                self.memory,
+                target="alpha",
+                capability="read",
+                proposal_id=captured.proposal_id,
+                reason="again",
+                reviewed_token=review_token(self.memory, target="alpha", capability="read"),
+                decision_id="dec:alpha:read:reject-c-2",
+                recorded_at="2026-07-28T13:05:00Z",
+                effective_at="2026-07-28T13:05:00Z",
+            )
 
     def test_wrong_or_resolved_proposal_and_scope_mismatch_are_rejected(self) -> None:
         captured = self.capture()

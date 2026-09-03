@@ -7,13 +7,14 @@ layer.
 
 ## Public runtime boundary
 
-Five CLI entry points form the supported runtime surface:
+Six CLI entry points form the supported runtime surface:
 
 - `scripts/init-knowledge-root`
 - `scripts/preflight`
 - `scripts/knowledge-lookup`
 - `scripts/discovery-begin`
 - `scripts/discovery-finalize`
+- `scripts/knowledge-resolve`
 
 Their production import closure is deliberately small:
 

@@ -2,6 +2,14 @@
 
 All notable changes to CaravelaWeb will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `scripts/knowledge-resolve --reject-pending <proposal_id> --reason <text>`:
+  records a `REJECT` Decision for one pending Candidate, so a stuck pending
+  Proposal no longer blocks every later write for its capability.
+
 ## 0.1.0 - 2026-08-26
 
 The first public release.

@@ -171,6 +171,7 @@ checkout-local discovery remain available through the documented
 | `scripts/knowledge-lookup` | Read accepted knowledge for one target and optional capability, or index every target with `--list`. |
 | `scripts/discovery-begin` | Register the start of one bounded Discovery run and return its run_id. |
 | `scripts/discovery-finalize` | Validate and save reusable knowledge from a bounded Discovery. |
+| `scripts/knowledge-resolve` | Record a `REJECT` Decision for one pending Candidate. |
 | `scripts/register-host` | Link a checkout into Claude Code, Codex, or OpenCode's per-user skill directory (developer mode). |
 
 Use one interpreter for every CaravelaWeb command; `preflight` reports the

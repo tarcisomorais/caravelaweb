@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+"""Record a REJECT Decision for one pending Candidate."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+SKILL_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SKILL_ROOT))
+
+from discovery_finalize import DiscoveryFinalizationError, _resolve_target_argument
+from om_native_writes import (
+    OMNativeWriteError,
+    OMProposalError,
+    OMStaleBaseError,
+    assert_om_native_write_authority,
+    reject_candidate,
+    review_token,
+)
+from operational_memory import MemoryError as OMMemoryError, RecordValidationError, SQLiteOperationalMemory
+from operational_memory.core import normalize_capability_id
+from platform_adapter import configure_utf8_stdio, resolve_knowledge_root
+from write_authority import WriteAuthorityStateError
+
+configure_utf8_stdio()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Reject one pending Candidate with an explicit REJECT Decision")
+    parser.add_argument("--knowledge-root")
+    parser.add_argument("--target", required=True)
+    parser.add_argument("--capability", required=True)
+    parser.add_argument("--reject-pending", required=True, metavar="PROPOSAL_ID")
+    parser.add_argument("--reason", required=True)
+    args = parser.parse_args()
+    try:
+        root = resolve_knowledge_root(args.knowledge_root)
+        if root is None:
+            raise OSError("no usable CaravelaWeb knowledge root could be resolved")
+        db = root / ".caravelaweb" / "operational_memory.db"
+        with SQLiteOperationalMemory(db, create=False, knowledge_root=root) as memory:
+            target = _resolve_target_argument(memory, args.target)
+            capability = normalize_capability_id(args.capability)
+            assert_om_native_write_authority(memory)
+            token = review_token(memory, target=target, capability=capability)
+            now = memory.now()
+            digest = hashlib.sha256(f"{args.reject_pending}{now}".encode("utf-8")).hexdigest()[:20]
+            result = reject_candidate(
+                memory,
+                target=target,
+                capability=capability,
+                proposal_id=args.reject_pending,
+                reason=args.reason,
+                reviewed_token=token,
+                decision_id=f"dec:{target}:{capability}:reject-{digest}",
+                recorded_at=now,
+                effective_at=now,
+            )
+    except (
+        OMProposalError,
+        OMStaleBaseError,
+        OMNativeWriteError,
+        DiscoveryFinalizationError,
+        RecordValidationError,
+        KeyError,
+        OMMemoryError,
+        OSError,
+        WriteAuthorityStateError,
+    ) as exc:
+        print(json.dumps({"status": "NOT_REJECTED", "reason": str(exc)}, ensure_ascii=False, sort_keys=True), file=sys.stderr)
+        return 2
+    print(json.dumps({
+        "status": "REJECTED",
+        "target": target,
+        "capability": capability,
+        "proposal_id": args.reject_pending,
+        "decision_id": result.decision_id,
+        "claim_ids": list(result.claim_ids),
+    }, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

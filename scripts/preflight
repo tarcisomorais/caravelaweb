@@ -274,6 +274,7 @@ def build_report(override: str | None) -> dict[str, object]:
             "knowledge_lookup": f'"{sys.executable}" "{SKILL_ROOT / "scripts" / "knowledge-lookup"}"',
             "discovery_begin": f'"{sys.executable}" "{SKILL_ROOT / "scripts" / "discovery-begin"}"',
             "discovery_finalize": f'"{sys.executable}" "{SKILL_ROOT / "scripts" / "discovery-finalize"}"',
+            "knowledge_resolve": f'"{sys.executable}" "{SKILL_ROOT / "scripts" / "knowledge-resolve"}"',
         },
         "knowledge_root": root_report,
         "operational_memory": memory,

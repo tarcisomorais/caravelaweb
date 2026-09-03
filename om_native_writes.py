@@ -820,6 +820,109 @@ def promote_candidate(
     return Promotion(decision_id, claim_ids, metadata)
 
 
+@dataclass(frozen=True)
+class Rejection:
+    decision_id: str
+    claim_ids: tuple[str, ...]
+    metadata: dict[str, Any]
+
+
+def reject_candidate(
+    memory: SQLiteOperationalMemory,
+    *,
+    target: str,
+    capability: str,
+    proposal_id: str,
+    reason: str,
+    reviewed_token: str,
+    decision_id: str,
+    recorded_at: str,
+    effective_at: str,
+    _writer: Any | None = None,
+) -> Rejection:
+    """Resolve exactly one pending Proposal with a REJECT Decision.
+
+    A rejection asserts nothing positive: the Claims stay in history, are
+    never accepted, and stop counting as pending. Only a pending Proposal
+    of this target/capability may be rejected.
+    """
+    _require_boundary(memory)
+    target_id, capability_id = _identity(memory, target, capability)
+    validate_timestamp(recorded_at, field="rejection.recorded_at")
+    validate_timestamp(effective_at, field="rejection.effective_at")
+    if not isinstance(proposal_id, str) or not proposal_id.startswith("prop:"):
+        raise OMProposalError("a canonical prop: Proposal identity is required")
+    if not isinstance(decision_id, str) or not decision_id.startswith("dec:"):
+        raise OMProposalError("a canonical dec: Decision identity is required")
+    if not isinstance(reason, str) or not reason.strip():
+        raise OMProposalError("a non-empty rejection reason is required")
+    if len(reason) > 500:
+        raise OMProposalError("rejection reason must be at most 500 characters")
+
+    # Required pre-transaction stale-base check.  A second check under the
+    # SQLite write lock below closes the check/write race.
+    if review_token(memory, target=target, capability=capability) != reviewed_token:
+        raise OMStaleBaseError("reviewed Operational Memory projection is stale")
+
+    metadata = _operation_metadata(
+        operation="REJECTION",
+        target_id=target_id,
+        capability_id=capability_id,
+        proposal_id=proposal_id,
+        decision_id=decision_id,
+        recorded_at=recorded_at,
+        effective_at=effective_at,
+        reviewed_token=reviewed_token,
+    )
+    claim_ids: tuple[str, ...] = ()
+    with _write_scope(memory, _writer) as writer:
+        if review_token(memory, target=target, capability=capability) != reviewed_token:
+            raise OMStaleBaseError("reviewed Operational Memory projection is stale")
+        try:
+            proposal = memory.get_record(proposal_id)
+        except KeyError:
+            raise OMProposalError("Proposal does not exist") from None
+        if proposal.get("target_id") != target_id or proposal.get("capability_id") != capability_id:
+            raise OMProposalError("Proposal target/capability scope does not match rejection")
+        claim_ids = memory.proposal_claim_ids(proposal_id)
+        if not claim_ids:
+            raise OMProposalError("Proposal has no Claims")
+        for member_claim_id in claim_ids:
+            member_claim = memory.get_record(member_claim_id)
+            if (
+                member_claim.get("proposal_id") != proposal_id
+                or member_claim.get("target_id") != target_id
+                or member_claim.get("capability_id") != capability_id
+            ):
+                raise OMProposalError("Proposal contains a Claim with mismatched ownership")
+        # Resolution uses the same canonical rule as every other read of
+        # "is this Proposal still pending" (get_pending_candidates), so this
+        # can never diverge from Operational Memory's own Decision Action
+        # semantics the way a locally-reimplemented action list could.
+        pending_ids = {
+            item["proposal_id"]
+            for item in memory.get_pending_candidates(target, capability)
+        }
+        if proposal_id not in pending_ids:
+            raise OMProposalError("Proposal is already resolved")
+        writer.decision(
+            {
+                "id": decision_id,
+                "target_id": target_id,
+                "capability_id": capability_id,
+                "action": "REJECT",
+                "proposal_id": proposal_id,
+                "claim_ids": list(claim_ids),
+                "reason": reason,
+                "effective_at": effective_at,
+                "recorded_at": recorded_at,
+                "validity": {"valid_from": None, "valid_to": None},
+                "write_metadata": metadata,
+            }
+        )
+    return Rejection(decision_id, claim_ids, metadata)
+
+
 __all__ = [
     "CandidateCapture",
     "CandidateEnrichment",
@@ -828,12 +931,14 @@ __all__ = [
     "OMProposalError",
     "OMStaleBaseError",
     "Promotion",
+    "Rejection",
     "Replacement",
     "TOKEN_VERSION",
     "WRITE_DESTINATION",
     "capture_candidate",
     "enrich_candidate",
     "promote_candidate",
+    "reject_candidate",
     "replace_candidate",
     "review_token",
     "assert_om_native_write_authority",
