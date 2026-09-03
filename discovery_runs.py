@@ -84,6 +84,12 @@ def begin_discovery(
 
 def _open_marker(path: Path) -> str:
     """Read a run marker only if it is a regular, singly linked file."""
+    # The path-based lstat refuses a symlink before the open. Windows has no
+    # O_NOFOLLOW, so without it the open follows the link and fstat reports
+    # the regular target. The descriptor check below still catches a swap
+    # that lands between the lstat and the open.
+    if not safe_marker_stat(os.lstat(path)):
+        raise DiscoveryRunError("Discovery run marker is not a regular file")
     flags = os.O_RDONLY
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW

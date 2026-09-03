@@ -265,8 +265,8 @@ class DiscoveryRunTests(unittest.TestCase):
         self.assertEqual("ALREADY_EXISTS", json.loads(retried.stdout)["status"])
         self.assertEqual([], list_open_discoveries(self.root))
 
-    def test_symlinked_run_marker_is_refused(self) -> None:
-        opened = self.begin("symlink-target")
+    def symlink_marker(self, target: str) -> tuple[dict[str, str], Path]:
+        opened = self.begin(target)
         marker = _marker(self.root, opened["run_id"])
         real = self.root / "elsewhere-marker.json"
         marker.replace(real)
@@ -274,10 +274,26 @@ class DiscoveryRunTests(unittest.TestCase):
             os.symlink(real, marker)
         except OSError as exc:
             self.skipTest(f"cannot create a symlink on this platform: {exc}")
+        return opened, marker
+
+    def assert_symlinked_marker_refused(self, opened: dict[str, str], marker: Path) -> None:
         with self.assertRaises(DiscoveryRunError):
             require_open_discovery(self.root, opened["target"], opened["capability"], opened["run_id"])
         records = list_open_discoveries(self.root)
         self.assertEqual([{"status": "INVALID", "marker": marker.name}], records)
+
+    def test_symlinked_run_marker_is_refused(self) -> None:
+        opened, marker = self.symlink_marker("symlink-target")
+        self.assert_symlinked_marker_refused(opened, marker)
+
+    def test_symlinked_run_marker_is_refused_without_o_nofollow(self) -> None:
+        # Windows has no O_NOFOLLOW, so the open follows the link and the
+        # descriptor stat sees the regular target. The path stat must refuse
+        # the marker before the open on every platform.
+        opened, marker = self.symlink_marker("symlink-target")
+        with patch.dict(os.__dict__):
+            os.__dict__.pop("O_NOFOLLOW", None)
+            self.assert_symlinked_marker_refused(opened, marker)
 
 
 if __name__ == "__main__":
