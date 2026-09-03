@@ -58,7 +58,7 @@ the caller supplied.
 
    | Accepted state | Action |
    | --- | --- |
-   | `OPERATIONAL` and task authority is sufficient | **Operation** — use the recorded path. |
+   | `lifecycle` is `OPERATIONAL` in lookup and task authority is sufficient | **Operation** — use the recorded path. |
    | An accepted `blocking` fact whose recorded conditions are unchanged | Reuse and report the blocker; do not retry or rediscover it. |
    | `UNKNOWN`, `DEGRADED`, absent, or contradicted | **Discovery** — if authorized, open one run as described below, then investigate only this capability. |
    | `RETIRED` | Reuse the known stop; rediscover only after explicit reactivation. |
@@ -112,7 +112,7 @@ the caller supplied.
 
    The finalizer resolves the same installation root as lookup and saves reusable operating knowledge in local Operational Memory. Capability says what reusable ability is learned; memory says how it works; task results are never identity or reusable knowledge. Never include found articles, shop lists, current results or prices, raw logs, complete HTML, or browser-session state. This local write does not authorize Git, project files, or external state changes.
 
-   Report only `SAVED`, `ALREADY_EXISTS`, or `NOT_SAVED` to the normal user flow. `SAVED` is immediately available to lookup; `ALREADY_EXISTS` means no duplicate was created; `NOT_SAVED` means the result was not added to accepted knowledge. `SAVED` and lookup `found` mean accepted context exists, not that the capability is `OPERATIONAL`. A finalizer error means **Discovery finalization is incomplete** and must never be silently described as a completed Discovery, even if the task result can be reported.
+   Report only `SAVED`, `ALREADY_EXISTS`, or `NOT_SAVED` to the normal user flow. `SAVED` is immediately available to lookup; `ALREADY_EXISTS` means no duplicate was created; `NOT_SAVED` means the result was not added to accepted knowledge. `SAVED` and lookup `found` mean accepted context exists, not that the capability is `OPERATIONAL`. Every `SAVED` response reports `lifecycle`: `OPERATIONAL`, or `null` with a `lifecycle_gap` code naming the first missing proof condition (`NO_AUTHENTICATION_CLAIM`, `PROOF_VALIDATION_NOT_SUCCESS`, `NO_FUNCTIONAL_TRANSPORT_CLAIM`, ...). To earn `OPERATIONAL` in one run, the payload needs: one `transport` observation with outcome `FUNCTIONAL`; one `authentication` observation with `access_model` equal to the proof validation's `context.authentication`; and one `validation` observation carrying `operational_proof` whose own `validation` has `outcome: "SUCCESS"` and evidence from the payload's evidence list. See example 8 in `references/discovery-payload-examples.md`. A finalizer error means **Discovery finalization is incomplete** and must never be silently described as a completed Discovery, even if the task result can be reported.
    `discovery.json` is a closed schema defined in `references/target-profile.md`; read that reference when building the payload. Unknown fields fail closed. Host association remains a durable identity claim: record it only from evidence of the same operator and brand; the finalizer checks hostname evidence and collisions, not that operator judgment. An `OBSERVED` blocking or limitation constraint needs the explicit transport, engine, JavaScript, authentication, and environment context that saw it.
 
    ```json

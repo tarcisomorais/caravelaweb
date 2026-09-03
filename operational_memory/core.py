@@ -1262,6 +1262,11 @@ class SQLiteOperationalMemory:
             "capability_id": capability_id,
             "hosts": hosts,
             "current": dict(sorted(families.items())),
+            "lifecycle": (
+                "OPERATIONAL"
+                if self.has_verified_operational_lifecycle(target, capability)
+                else None
+            ),
             "pending_candidates": pending,
             "warnings": view["contradiction_warnings"],
             "minimal_evidence_refs": sorted(evidence_refs),

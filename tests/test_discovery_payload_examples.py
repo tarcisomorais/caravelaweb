@@ -13,6 +13,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 FINALIZER = REPO / "scripts" / "discovery-finalize"
 BEGIN = REPO / "scripts" / "discovery-begin"
+LOOKUP = REPO / "scripts" / "knowledge-lookup"
 REFERENCE = REPO / "references" / "discovery-payload-examples.md"
 
 from write_authority import MIGRATED_WRITE_AUTHORITY_KIND
@@ -46,7 +47,7 @@ class DiscoveryPayloadExamplesTests(unittest.TestCase):
             pass
 
     def test_the_reference_documents_at_least_the_seven_required_examples(self) -> None:
-        self.assertGreaterEqual(len(_payloads()), 7)
+        self.assertGreaterEqual(len(_payloads()), 8)
 
     def test_every_documented_example_finalizes_successfully(self) -> None:
         for payload in _payloads():
@@ -91,6 +92,36 @@ class DiscoveryPayloadExamplesTests(unittest.TestCase):
         self.assertEqual("NOT_SAVED", body["status"])
         self.assertEqual("PAYLOAD_VALUE", body["reason_code"])
         self.assertIn("'nope'", body["reason"])
+
+    def test_the_operational_example_earns_the_lifecycle(self) -> None:
+        payload = next(
+            item for item in _payloads() if item["target"] == "example-operational"
+        )
+        begun = subprocess.run(
+            [sys.executable, str(BEGIN), "--knowledge-root", str(self.root),
+             "--target", payload["target"], "--capability", payload["capability"]],
+            text=True, capture_output=True, encoding="utf-8",
+        )
+        self.assertEqual(0, begun.returncode, begun.stderr)
+        payload["provenance"]["run_id"] = json.loads(begun.stdout)["run_id"]
+        finalized = subprocess.run(
+            [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root),
+             "--input", "-"],
+            input=json.dumps(payload), text=True, capture_output=True, encoding="utf-8",
+        )
+        self.assertEqual(0, finalized.returncode, finalized.stderr)
+        body = json.loads(finalized.stdout)
+        self.assertEqual("SAVED", body["status"])
+        self.assertEqual("OPERATIONAL", body["lifecycle"])
+        looked_up = subprocess.run(
+            [sys.executable, str(LOOKUP), "--knowledge-root", str(self.root),
+             "--target", payload["target"], "--capability", payload["capability"],
+             "--use-operational-memory"],
+            text=True, capture_output=True, encoding="utf-8",
+        )
+        self.assertEqual(0, looked_up.returncode, looked_up.stderr)
+        looked_up_body = json.loads(looked_up.stdout)
+        self.assertEqual("OPERATIONAL", looked_up_body["lifecycle"])
 
 
 if __name__ == "__main__":

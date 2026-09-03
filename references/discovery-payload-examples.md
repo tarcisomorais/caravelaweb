@@ -210,6 +210,48 @@ satisfies this.
 }
 ```
 
+## 8. A complete operational proof that earns `OPERATIONAL`
+
+This payload carries the three observations the finalizer requires to earn
+the `OPERATIONAL` lifecycle in one run: a `FUNCTIONAL` transport, a matching
+`authentication` fact, and a `validation` observation whose own nested
+`validation` reports outcome `SUCCESS`.
+
+```json
+{
+  "target": "example-operational",
+  "capability": "article-read",
+  "observations": [
+    {
+      "family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"},
+      "validation": {
+        "transport": "DIRECT_READ", "outcome": "FUNCTIONAL", "engine": null, "javascript": false,
+        "context": {"authentication": "PUBLIC", "environment": "PRODUCTION"},
+        "evidence": ["https://example-operational.example/articles/1"]
+      }
+    },
+    {"family": "authentication", "value": {"access_model": "PUBLIC"}},
+    {
+      "family": "validation",
+      "value": {"operational_proof": {
+        "entrypoint": "https://example-operational.example/articles/{id}",
+        "required_output": {"field_paths": {"headline": "$.headline"}},
+        "completion_condition": "HTTP 200 whose HTML carries a headline element",
+        "critical_constraints": []
+      }},
+      "validation": {
+        "transport": "DIRECT_READ", "outcome": "SUCCESS", "engine": null, "javascript": false,
+        "context": {"authentication": "PUBLIC", "environment": "PRODUCTION"},
+        "evidence": ["https://example-operational.example/articles/1"]
+      }
+    }
+  ],
+  "evidence": [{"kind": "direct-read-validation", "locator": "https://example-operational.example/articles/1"}],
+  "provenance": {"run_id": "<from discovery-begin>", "observed_at": "2026-08-14T12:00:00Z"},
+  "recorded_at": "2026-08-14T12:00:00Z"
+}
+```
+
 ## Abandoned runs
 
 If a caller abandons a retryable or invalid finalization -- for example it

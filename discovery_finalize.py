@@ -145,6 +145,8 @@ class DiscoveryFinalization:
     claims_created: int = 0
     reason: str | None = None
     reason_code: str | None = None
+    lifecycle: str | None = None
+    lifecycle_gap: str | None = None
 
     @property
     def closes_run(self) -> bool:
@@ -167,6 +169,10 @@ class DiscoveryFinalization:
             result["reason"] = self.reason
         if self.status == "NOT_SAVED" and self.reason_code:
             result["reason_code"] = self.reason_code
+        if self.status in ("SAVED", "ALREADY_EXISTS"):
+            result["lifecycle"] = self.lifecycle
+            if self.lifecycle is None:
+                result["lifecycle_gap"] = self.lifecycle_gap
         result["run_state"] = "CLOSED" if self.closes_run else "OPEN"
         return result
 
@@ -609,8 +615,13 @@ def _operational_proof_dependencies(
     claims: Sequence[Mapping[str, Any]],
     evidence: Sequence[Mapping[str, Any]],
     validated_transport: tuple[str | None, str] | None,
-) -> tuple[str, ...] | None:
-    """Return the Claims that prove one reproducible path, or fail closed."""
+) -> tuple[tuple[str, ...] | None, str | None]:
+    """Return the Claims that prove one reproducible path, or fail closed.
+
+    On success: ``(claim_ids, None)``. On failure: ``(None, <gap code>)``
+    naming the first condition the last-considered proof failed, or
+    ``NO_OPERATIONAL_PROOF`` when no candidate proof existed at all.
+    """
     try:
         current = memory.get_current(target, capability)
     except KeyError:
@@ -638,20 +649,26 @@ def _operational_proof_dependencies(
             proofs.append((claim, validation))
 
     eligible: list[tuple[str, ...]] = []
+    gap: str | None = "NO_OPERATIONAL_PROOF" if not proofs else None
     evidence_locators = {item["locator"] for item in evidence}
     for proof_claim, validation in proofs:
         proof = proof_claim["value"]["operational_proof"]
         if not isinstance(proof, Mapping):
+            gap = "PROOF_SHAPE_INVALID"
             continue
         try:
             if _operational_proof(proof) != proof:
+                gap = "PROOF_SHAPE_INVALID"
                 continue
         except DiscoveryFinalizationError:
+            gap = "PROOF_SHAPE_INVALID"
             continue
         required = {"entrypoint", "completion_condition", "critical_constraints"}
         if not required <= proof.keys() or set(proof) - required - {"required_output", "required_action"}:
+            gap = "PROOF_SHAPE_INVALID"
             continue
         if ("required_output" in proof) == ("required_action" in proof):
+            gap = "PROOF_SHAPE_INVALID"
             continue
         if (
             not _meaningful(proof["entrypoint"])
@@ -659,6 +676,7 @@ def _operational_proof_dependencies(
             or not _meaningful(proof.get("required_output", proof.get("required_action")))
             or not isinstance(proof["critical_constraints"], list)
         ):
+            gap = "PROOF_SHAPE_INVALID"
             continue
         references = validation.get("evidence")
         if (
@@ -666,29 +684,35 @@ def _operational_proof_dependencies(
             or not isinstance(references, list)
             or not references
         ):
+            gap = "PROOF_VALIDATION_NOT_SUCCESS"
             continue
         proof_id = str(proof_claim["id"])
         if proof_id in contradicted:
+            gap = "PROOF_CONTRADICTED"
             continue
         if proof_claim in claims:
             if not set(references) <= evidence_locators:
+                gap = "PROOF_EVIDENCE_UNREFERENCED"
                 continue
         else:
             recorded = {
                 item.get("locator") for item in memory.get_evidence(proof_id)["evidence"]
             }
             if not set(references) <= recorded:
+                gap = "PROOF_EVIDENCE_UNREFERENCED"
                 continue
 
         transport = validation.get("transport")
         context = validation.get("context")
         access_model = context.get("authentication") if isinstance(context, Mapping) else None
         if not _meaningful(transport) or not _meaningful(access_model):
+            gap = "PROOF_CONTEXT_INCOMPLETE"
             continue
         if transport in {"LIGHTPANDA", "CHROME"} and (
             not _meaningful(validation.get("engine"))
             or not isinstance(validation.get("javascript"), bool)
         ):
+            gap = "PROOF_BROWSER_CONTEXT_INCOMPLETE"
             continue
 
         proof_host = proof_claim.get("host_id")
@@ -718,6 +742,7 @@ def _operational_proof_dependencies(
             or not _meaningful(claim["value"].get("access_model"))
             for claim in access_facts
         ):
+            gap = "SUPPORTING_CLAIM_NOT_OBSERVED"
             continue
         transport_facts = [
             claim for claim in all_transport_facts
@@ -726,6 +751,7 @@ def _operational_proof_dependencies(
         if transport in _BROWSER_TRANSPORTS and validated_transport != (
             proof_host, transport
         ):
+            gap = "TRANSPORT_LADDER_UNPROVEN"
             continue
         transports = {
             claim["value"].get("transport") for claim in transport_facts
@@ -747,7 +773,17 @@ def _operational_proof_dependencies(
             eligible.append(tuple(sorted({
                 proof_id, str(transport_claim["id"]), str(access_claim["id"]),
             })))
-    return eligible[0] if len(eligible) == 1 else None
+        else:
+            gap = (
+                "NO_FUNCTIONAL_TRANSPORT_CLAIM" if not transports
+                else "NO_AUTHENTICATION_CLAIM" if not access_models
+                else "SUPPORTING_FACTS_AMBIGUOUS"
+            )
+    if len(eligible) == 1:
+        return eligible[0], None
+    if len(eligible) > 1:
+        return None, "MULTIPLE_ELIGIBLE_PROOFS"
+    return None, gap or "NO_OPERATIONAL_PROOF"
 
 
 def _validate_provenance(provenance: Mapping[str, Any]) -> dict[str, Any]:
@@ -1503,7 +1539,14 @@ def finalize_discovery(
 
     delta = [item for item in normalized if semantic(item) not in accepted]
     if not delta:
-        return DiscoveryFinalization("ALREADY_EXISTS", target, capability)
+        return DiscoveryFinalization(
+            "ALREADY_EXISTS", target, capability,
+            lifecycle=(
+                "OPERATIONAL"
+                if memory.has_verified_operational_lifecycle(target, capability)
+                else None
+            ),
+        )
     delta_keys = {semantic(item) for item in delta}
     pending_match = (
         _matching_pending_candidate(
@@ -1596,14 +1639,18 @@ def finalize_discovery(
             or not any(item.get("contradiction") for item in delta)
         )
     )
-    proof_claim_ids = (
+    proof_claim_ids, lifecycle_gap = (
         _operational_proof_dependencies(
             memory, target, capability, claims, clean_evidence,
             validated_transport,
         )
-        if automatic else None
+        if automatic else (None, "CANDIDATE_NOT_AUTOMATIC")
     )
-    if proof_claim_ids and not memory.has_verified_operational_lifecycle(target, capability):
+    lifecycle_state: str | None = None
+    if proof_claim_ids and memory.has_verified_operational_lifecycle(target, capability):
+        lifecycle_gap = None
+        lifecycle_state = "OPERATIONAL"
+    elif proof_claim_ids:
         lifecycle_id = (
             f"clm:{target}:{capability}:lifecycle-operational-"
             f"{_digest(proof_claim_ids)}"
@@ -1618,6 +1665,7 @@ def finalize_discovery(
                 "claim_ids": list(proof_claim_ids),
             },
         })
+        lifecycle_state = "OPERATIONAL"
     contradicting: dict[str, list[str]] = {}
     contradiction_contexts: dict[str, dict[str, Any]] = {}
     if replacement_ids:
@@ -1763,7 +1811,9 @@ def finalize_discovery(
             reason_code=reason_code,
         )
     return DiscoveryFinalization(
-        "SAVED", target, capability, proposal_id, len(claims)
+        "SAVED", target, capability, proposal_id, len(claims),
+        lifecycle=lifecycle_state,
+        lifecycle_gap=None if lifecycle_state else lifecycle_gap,
     )
 
 

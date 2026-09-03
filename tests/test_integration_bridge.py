@@ -119,6 +119,8 @@ class IntegrationBridgeRuntimeLookupTests(unittest.TestCase):
         self.assertIn("transport", current)
         self.assertIn("completion", current)
         self.assertNotIn("lifecycle", current)
+        self.assertIn("lifecycle", payload)
+        self.assertIsNone(payload["lifecycle"])
 
     def test_diagnostic_compatibility_remains_explicit(self) -> None:
         profile = self.root / "targets" / "example-radio.md"

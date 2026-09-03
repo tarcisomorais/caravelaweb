@@ -217,6 +217,23 @@ An `OPERATIONAL` capability records enough evidence to reproduce the requested p
 
 Discovery cannot assert lifecycle directly. The finalizer earns `OPERATIONAL` from accepted `OBSERVED` transport and authentication facts plus one canonical `validation` value: `{"operational_proof":{"entrypoint":"...","required_output":{"field_paths":{"field":"items[].field"}},"completion_condition":"...","critical_constraints":[]}}`; a string `required_action` may replace the output schema, but exactly one is required. Entrypoint and completion condition are strings; constraints are strings, with an empty array meaning none material were observed. Its validation outcome must be exactly `SUCCESS`, evidence references must be explicit, and browser transports require explicit engine and JavaScript context. The generated lifecycle Claim records its supporting Claim IDs. Lookup suppresses an unverified lifecycle assertion, or one whose supporting Claims are no longer current or are contradicted.
 
+A `SAVED` response that does not earn `OPERATIONAL` reports `lifecycle_gap`, one of:
+
+- `CANDIDATE_NOT_AUTOMATIC` — the Candidate did not qualify for automatic promotion, so no proof was evaluated.
+- `PROOF_SHAPE_INVALID` — the `operational_proof` value is not canonical, is missing a required key, or has both or neither of `required_output`/`required_action`.
+- `PROOF_VALIDATION_NOT_SUCCESS` — the proof's `validation.outcome` is not exactly `SUCCESS`, or it carries no evidence.
+- `PROOF_CONTRADICTED` — the proof Claim is itself a contradicted Claim.
+- `PROOF_EVIDENCE_UNREFERENCED` — the proof's evidence references are not in the payload, or not previously recorded.
+- `PROOF_CONTEXT_INCOMPLETE` — the proof's validation names no transport or no `context.authentication`.
+- `PROOF_BROWSER_CONTEXT_INCOMPLETE` — a browser-transport proof is missing its engine or JavaScript context.
+- `SUPPORTING_CLAIM_NOT_OBSERVED` — a transport or authentication Claim in scope is not `OBSERVED` and canonical.
+- `TRANSPORT_LADDER_UNPROVEN` — a browser transport was not proven by this run's `transport_trace`.
+- `NO_FUNCTIONAL_TRANSPORT_CLAIM` — no accepted transport fact reports the proof's transport as `FUNCTIONAL`.
+- `NO_AUTHENTICATION_CLAIM` — no accepted authentication fact matches the proof's `access_model`.
+- `SUPPORTING_FACTS_AMBIGUOUS` — more than one distinct transport or access model is in scope for this proof.
+- `NO_OPERATIONAL_PROOF` — the run had no eligible `operational_proof` at all.
+- `MULTIPLE_ELIGIBLE_PROOFS` — more than one proof was independently eligible, so none was chosen automatically.
+
 Transport outcomes have asymmetric roles: `FAILED` and `INSUFFICIENT` prove
 why escalation was needed, while only `FUNCTIONAL` identifies a possible
 operational transport. Distinct transports may therefore coexist without

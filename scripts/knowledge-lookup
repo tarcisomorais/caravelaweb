@@ -70,7 +70,10 @@ def main() -> int:
     if result.operational_context is None:
         emit("not_found", source="operational-memory", target=args.target, **visibility)
         return 0
-    emit("found", source="operational-memory", target=args.target, capability=result.capability, operational_context=result.operational_context, markdown_projection=result.markdown_projection, **visibility)
+    if result.capability:
+        emit("found", source="operational-memory", target=args.target, capability=result.capability, operational_context=result.operational_context, markdown_projection=result.markdown_projection, lifecycle=result.operational_context["lifecycle"], **visibility)
+    else:
+        emit("found", source="operational-memory", target=args.target, capability=result.capability, operational_context=result.operational_context, markdown_projection=result.markdown_projection, **visibility)
     return 0
 
 if __name__ == "__main__":

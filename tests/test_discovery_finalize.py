@@ -2159,5 +2159,125 @@ class RefusalMessageTests(unittest.TestCase):
         self.assertIn("501", message)
 
 
+class LifecycleGapTests(unittest.TestCase):
+    """Every `SAVED` response names why `OPERATIONAL` was, or was not, earned.
+
+    Duplicates a minimal slice of `DiscoveryFinalizeTests`' fixture rather
+    than subclassing it, so it runs only its own tests, not the whole suite
+    a second time (see `RefusalMessageTests` above for the same pattern).
+    """
+
+    LOCATOR = "https://www.example-news.com/topics/1"
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        authority(self.root)
+        (self.root / "targets").mkdir()
+        self.db = self.root / ".caravelaweb/operational_memory.db"
+        self.memory = SQLiteOperationalMemory(self.db, knowledge_root=self.root)
+        self.addCleanup(self.memory.close)
+        with self.memory.write_transaction() as writer:
+            writer.target({"id": "tgt:example-news"})
+            writer.capability({"id": "cap:example-news:topic-search", "target_id": "tgt:example-news", "key": "topic-search"})
+
+    def payload(self, observations):
+        return {
+            "target": "example-news", "capability": "topic-search",
+            "observations": observations,
+            "evidence": [{"kind": "direct-read-validation", "locator": self.LOCATOR}],
+            "provenance": {"run_id": "run:example-news:001", "observed_at": RECORDED},
+            "recorded_at": RECORDED,
+        }
+
+    def finalize(self, payload):
+        return finalize_discovery(
+            self.memory, target=payload["target"], capability=payload["capability"],
+            observations=payload["observations"], evidence=payload["evidence"],
+            provenance=payload["provenance"], recorded_at=payload["recorded_at"],
+        )
+
+    def transport_observation(self, outcome="FUNCTIONAL"):
+        return {
+            "family": "transport", "value": {"transport": "DIRECT_READ", "outcome": outcome},
+            "validation": {
+                "transport": "DIRECT_READ", "outcome": outcome, "engine": None, "javascript": False,
+                "context": {"authentication": "PUBLIC", "environment": "PRODUCTION"},
+                "evidence": [self.LOCATOR],
+            },
+        }
+
+    def authentication_observation(self):
+        return {"family": "authentication", "value": {"access_model": "PUBLIC"}}
+
+    def validation_observation(self, outcome="SUCCESS"):
+        return {
+            "family": "validation",
+            "value": {"operational_proof": {
+                "entrypoint": "https://www.example-news.com/topics/{id}",
+                "required_output": {"field_paths": {"headline": "$.headline"}},
+                "completion_condition": "HTTP 200 whose HTML carries a headline element",
+                "critical_constraints": [],
+            }},
+            "validation": {
+                "transport": "DIRECT_READ", "outcome": outcome, "engine": None, "javascript": False,
+                "context": {"authentication": "PUBLIC", "environment": "PRODUCTION"},
+                "evidence": [self.LOCATOR],
+            },
+        }
+
+    def full_observations(self):
+        return [
+            self.transport_observation(),
+            self.authentication_observation(),
+            self.validation_observation(),
+        ]
+
+    def test_a_complete_proof_earns_operational(self) -> None:
+        result = self.finalize(self.payload(self.full_observations()))
+        self.assertEqual("SAVED", result.status)
+        self.assertEqual("OPERATIONAL", result.lifecycle)
+        self.assertIsNone(result.lifecycle_gap)
+
+    def test_missing_authentication_reports_no_authentication_claim(self) -> None:
+        result = self.finalize(self.payload([
+            self.transport_observation(),
+            self.validation_observation(),
+        ]))
+        self.assertEqual("SAVED", result.status)
+        self.assertIsNone(result.lifecycle)
+        self.assertEqual("NO_AUTHENTICATION_CLAIM", result.lifecycle_gap)
+
+    def test_functional_proof_validation_reports_not_success(self) -> None:
+        result = self.finalize(self.payload([
+            self.transport_observation(),
+            self.authentication_observation(),
+            self.validation_observation(outcome="FUNCTIONAL"),
+        ]))
+        self.assertEqual("SAVED", result.status)
+        self.assertIsNone(result.lifecycle)
+        self.assertEqual("PROOF_VALIDATION_NOT_SUCCESS", result.lifecycle_gap)
+
+    def test_no_validation_observation_reports_no_operational_proof(self) -> None:
+        result = self.finalize(self.payload([
+            self.transport_observation(),
+            self.authentication_observation(),
+        ]))
+        self.assertEqual("SAVED", result.status)
+        self.assertIsNone(result.lifecycle)
+        self.assertEqual("NO_OPERATIONAL_PROOF", result.lifecycle_gap)
+
+    def test_failed_transport_only_reports_no_functional_transport_claim(self) -> None:
+        result = self.finalize(self.payload([
+            self.transport_observation(outcome="FAILED"),
+            self.authentication_observation(),
+            self.validation_observation(),
+        ]))
+        self.assertEqual("SAVED", result.status)
+        self.assertIsNone(result.lifecycle)
+        self.assertEqual("NO_FUNCTIONAL_TRANSPORT_CLAIM", result.lifecycle_gap)
+
+
 if __name__ == "__main__":
     unittest.main()
