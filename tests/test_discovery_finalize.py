@@ -1014,6 +1014,50 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         self.assertEqual("NOT_SAVED", result.status)
         self.assertEqual("CONFLICT_OR_AMBIGUITY", result.reason_code)
 
+    def test_conflict_refusal_names_pending_claims(self):
+        pending_claim_id = "clm:example-news:topic-search:blocking:pending"
+        proposal_id = "prop:example-news:topic-search:blocking-pending"
+        with self.memory.write_transaction() as writer:
+            writer.claim({
+                "id": pending_claim_id,
+                "target_id": "tgt:example-news",
+                "capability_id": "cap:example-news:topic-search",
+                "family": "blocking",
+                "epistemic": "OBSERVED",
+                "value": {
+                    "failure_class": "SITE_BLOCKING",
+                    "condition": "a human-verification challenge replaces the page",
+                },
+                "proposal_id": proposal_id,
+                "recorded_at": RECORDED,
+            })
+            writer.proposal({
+                "id": proposal_id,
+                "target_id": "tgt:example-news",
+                "capability_id": "cap:example-news:topic-search",
+                "recorded_at": RECORDED,
+                "claim_ids": [pending_claim_id],
+            })
+        locator = "https://www.example-news.com/search"
+        payload = self.payload([
+            {"family": "blocking", "value": {
+                "failure_class": "TARGET_BLOCK", "condition": "a challenge page is shown",
+            }, "validation": self.observing_validation(locator)},
+        ])
+        payload["evidence"] = [{"kind": "bounded-browser-validation", "locator": locator}]
+        result = self.finalize(payload)
+        self.assertEqual("NOT_SAVED", result.status)
+        self.assertEqual("CONFLICT_OR_AMBIGUITY", result.reason_code)
+        self.assertIn(pending_claim_id, result.reason)
+        self.assertIn("pending", result.reason)
+
+    def test_no_conflict_returns_empty_list(self):
+        from discovery_finalize import _has_conflict
+        self.assertEqual(
+            [],
+            _has_conflict(self.memory, "example-news", "topic-search", [], {}),
+        )
+
     def test_exact_multi_claim_pending_escalation_can_be_retried(self):
         direct_id = "clm:example-news:topic-search:pending-direct"
         chrome_id = "clm:example-news:topic-search:pending-chrome"

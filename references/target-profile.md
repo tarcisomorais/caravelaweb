@@ -124,7 +124,10 @@ its matching run. Payload and infrastructure errors leave it open. Lookup and
 preflight expose unfinished runs, but a marker is never accepted knowledge.
 The `run_id` identifies only the execution: Candidate and Claim identity stay
 semantic, so a later run with a new ID may enrich an earlier pending Candidate.
-Operation creates no marker.
+Operation creates no marker. `knowledge-lookup` lists pending Candidates under
+`pending_candidates`, beside accepted `current` knowledge, never merged into
+it; a `CONFLICT_OR_AMBIGUITY` refusal names the accepted or pending Claims
+that block the write.
 
 Local Operational Memory is writable by the installation's normal policy and is separate from web-action authority. Saving local knowledge never authorizes source-control publication, project-file changes, or external state changes. A successful, directly observed Discovery is available to the next lookup immediately; ambiguous or invalid knowledge is not used operationally. Diagnostic compatibility and repair procedures are not executor input.
 

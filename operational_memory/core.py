@@ -1246,11 +1246,23 @@ class SQLiteOperationalMemory:
                 {"id": claim["id"], "host_id": claim.get("host_id"), "epistemic": claim["epistemic"], "value": claim["value"]}
             )
             evidence_refs.update(self.get_evidence(claim["id"])["evidence_ids"])
+        pending = []
+        for candidate in self.get_pending_candidates(target, capability):
+            claims = self._claim_rows(candidate["claim_ids"])
+            pending.append({
+                "proposal_id": candidate["proposal_id"],
+                "claims": [
+                    {"id": c["id"], "family": c["family"], "epistemic": c["epistemic"],
+                     "host_id": c.get("host_id"), "value": c["value"]}
+                    for c in claims
+                ],
+            })
         return {
             "target_id": self.resolve_target(target),
             "capability_id": capability_id,
             "hosts": hosts,
             "current": dict(sorted(families.items())),
+            "pending_candidates": pending,
             "warnings": view["contradiction_warnings"],
             "minimal_evidence_refs": sorted(evidence_refs),
             "caller_context": dict(caller_context or {}),

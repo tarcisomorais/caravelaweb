@@ -1314,12 +1314,13 @@ def _has_conflict(
     capability: str,
     delta: Sequence[Mapping[str, Any]],
     host_ids: Mapping[str, str],
-) -> bool:
+) -> list[dict[str, Any]]:
     """Keep conflicting observations out of automatic acceptance.
 
     This is deliberately a small structural gate, not a risk classifier: an
     automatic Decision is allowed only when a family has no other value in the
-    current accepted or pending view.
+    current accepted or pending view. Returns the conflicting Claims (empty
+    list means no conflict) so a refusal can name what blocked it.
     """
     # Operational proofs are append-only evidence summaries: an incomplete
     # earlier summary may be completed by a later Discovery, while two complete
@@ -1334,7 +1335,7 @@ def _has_conflict(
     ]
     families = {str(item["family"]) for item in conflict_delta}
     if not families:
-        return False
+        return []
     delta_values: dict[tuple[str, str | None, str | None], set[str]] = {}
     for item in conflict_delta:
         host_id = host_ids.get(str(item.get("host"))) if item.get("host") else None
@@ -1345,12 +1346,22 @@ def _has_conflict(
         delta_values.setdefault((item["family"], host_id, transport), set()).add(
             json.dumps(item["value"], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         )
-    if any(len(values) > 1 for values in delta_values.values()):
-        return True
+    intra_delta_conflicts = [
+        {
+            "source": "payload",
+            "family": key[0],
+            "host_id": key[1],
+            "values": sorted(values),
+        }
+        for key, values in delta_values.items()
+        if len(values) > 1
+    ]
+    if intra_delta_conflicts:
+        return intra_delta_conflicts
     try:
         capability_id = memory.resolve_capability(target, capability)
     except KeyError:
-        return False
+        return []
     current_claim_ids = set(memory.get_current(target, capability)["accepted_claim_ids"])
     pending_claim_ids = {
         claim_id
@@ -1359,15 +1370,15 @@ def _has_conflict(
     }
     claim_ids = sorted(current_claim_ids | pending_claim_ids)
     if not claim_ids:
-        return False
+        return []
     rows = memory._conn.execute(
-        """SELECT family,value_json,host_id FROM claims
+        """SELECT id,family,value_json,host_id FROM claims
            WHERE id IN ({}) AND family IN ({})""".format(
             ",".join("?" for _ in claim_ids), ",".join("?" for _ in families)
         ),
         (*claim_ids, *sorted(families)),
     )
-    current_values: dict[tuple[str, str | None, str | None], set[str]] = {}
+    current_values: dict[tuple[str, str | None, str | None], set[tuple[str, str]]] = {}
     for row in rows:
         value = json.loads(row["value_json"])
         key = (
@@ -1375,21 +1386,32 @@ def _has_conflict(
             value.get("transport") if row["family"] == "transport" else None,
         )
         current_values.setdefault(key, set()).add(
-            json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            (
+                row["id"],
+                json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+            )
         )
-    return any(
-        current_values.get((
+    conflicts: list[dict[str, Any]] = []
+    for item in conflict_delta:
+        key = (
             item["family"],
             host_ids.get(str(item.get("host"))) if item.get("host") else None,
             item["value"].get("transport") if item["family"] == "transport" else None,
-        ), set()) - {
-            json.dumps(
-                item["value"], ensure_ascii=False, sort_keys=True,
-                separators=(",", ":"),
-            )
-        }
-        for item in conflict_delta
-    )
+        )
+        item_value_json = json.dumps(
+            item["value"], ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        )
+        for claim_id, value_json in current_values.get(key, set()):
+            if value_json == item_value_json:
+                continue
+            conflicts.append({
+                "source": "accepted" if claim_id in current_claim_ids else "pending",
+                "claim_id": claim_id,
+                "family": key[0],
+                "host_id": key[1],
+                "value": json.loads(value_json),
+            })
+    return conflicts
 
 
 def finalize_discovery(
@@ -1726,9 +1748,18 @@ def finalize_discovery(
             reason_code = "CONFLICT_OR_AMBIGUITY"
         else:
             reason_code = "CONFIRMATION_PENDING"
+        if reason_code == "CONFLICT_OR_AMBIGUITY":
+            reason = (
+                "Conflicting values for the same family and host block automatic acceptance. "
+                "Conflicts: " + json.dumps(has_conflict[:10], ensure_ascii=False, sort_keys=True)
+                + " A pending Claim is not accepted knowledge; a later run may enrich it, "
+                "or it can be discarded (see knowledge-resolve)."
+            )
+        else:
+            reason = "Conflicting or unconfirmed information blocked validation of a reusable path."
         return DiscoveryFinalization(
             "NOT_SAVED", target, capability, proposal_id, len(claims),
-            reason="Conflicting or unconfirmed information blocked validation of a reusable path.",
+            reason=reason,
             reason_code=reason_code,
         )
     return DiscoveryFinalization(

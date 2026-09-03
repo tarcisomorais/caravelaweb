@@ -25,6 +25,7 @@ class LookupResult:
     profile_path: str | None = None
     operational_context: Mapping[str, Any] | None = None
     markdown_projection: str | None = None
+    pending_candidates: Any = None
 
 
 DEFAULT_OPERATIONAL_MEMORY_RELATIVE_PATH = Path(".caravelaweb") / "operational_memory.db"
@@ -86,20 +87,34 @@ class KnowledgeLookupBoundary:
                         return LookupResult(source="operational-memory", target=target, capability=capability)
                     context = memory.render_operational_context(target, capability, caller_context)
                     if not any(context["current"].values()):
-                        return LookupResult(source="operational-memory", target=target, capability=capability)
+                        return LookupResult(
+                            source="operational-memory", target=target, capability=capability,
+                            pending_candidates=context["pending_candidates"] or None,
+                        )
+                    pending_candidates = context["pending_candidates"] or None
                 else:
                     keys = memory.list_capability_keys(target)
                     contexts = {}
+                    pending = {}
                     for key in keys:
                         rendered = memory.render_operational_context(target, key, caller_context)
                         if any(rendered["current"].values()):
                             contexts[key] = rendered
+                        if rendered["pending_candidates"]:
+                            pending[key] = rendered["pending_candidates"]
+                    if not contexts:
+                        return LookupResult(
+                            source="operational-memory", target=target, capability=capability,
+                            pending_candidates=pending or None,
+                        )
                     context = {
                         "target_id": target_id,
                         "capabilities": contexts,
+                        "pending_candidates": pending,
                         "caller_context": dict(caller_context or {}),
                         "history_included": False,
                     }
+                    pending_candidates = pending or None
                 markdown = memory.render_markdown(target)
         except (sqlite3.DatabaseError, json.JSONDecodeError, OperationalMemoryError) as error:
             raise BridgeError(f"Operational Memory query failed: {error}") from error
@@ -109,6 +124,7 @@ class KnowledgeLookupBoundary:
             capability=capability,
             operational_context=context,
             markdown_projection=markdown,
+            pending_candidates=pending_candidates,
         )
 
     def list_index(self) -> list[dict[str, Any]]:

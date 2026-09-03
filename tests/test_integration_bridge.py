@@ -138,6 +138,79 @@ class IntegrationBridgeRuntimeLookupTests(unittest.TestCase):
             )
 
 
+class PendingCandidateVisibilityTests(unittest.TestCase):
+    """Pending Candidates surface as a sibling of accepted knowledge."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        (self.root / "targets").mkdir()
+        state = self.root / ".caravelaweb"
+        state.mkdir()
+        (state / "read-authority-operational-memory").write_text("active\n", encoding="utf-8")
+        self.db = self.root / "memory.sqlite3"
+        self.memory = SQLiteOperationalMemory(self.db, clock=lambda: NOW)
+        self.addCleanup(self.memory.close)
+        with self.memory.write_transaction() as writer:
+            writer.target({"id": "tgt:example-news", "name": "Example News"})
+            writer.capability({"id": "cap:example-news:topic-search", "target_id": "tgt:example-news", "key": "topic-search"})
+            writer.claim({
+                "id": "clm:example-news:topic-search:transport:direct",
+                "target_id": "tgt:example-news",
+                "capability_id": "cap:example-news:topic-search",
+                "family": "transport",
+                "epistemic": "OBSERVED",
+                "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"},
+                "recorded_at": RECORDED_AT,
+            })
+            writer.proposal({
+                "id": "prop:example-news:topic-search:pending",
+                "target_id": "tgt:example-news",
+                "capability_id": "cap:example-news:topic-search",
+                "recorded_at": RECORDED_AT,
+                "claim_ids": ["clm:example-news:topic-search:transport:direct"],
+            })
+
+    def test_capability_lookup_returns_pending_candidates(self) -> None:
+        result = KnowledgeLookupBoundary(self.root, self.db).lookup(
+            "example-news", capability="topic-search", use_operational_memory=True,
+        )
+        self.assertIsNone(result.operational_context)
+        self.assertEqual(1, len(result.pending_candidates))
+        candidate = result.pending_candidates[0]
+        self.assertEqual("prop:example-news:topic-search:pending", candidate["proposal_id"])
+        self.assertEqual(
+            "clm:example-news:topic-search:transport:direct", candidate["claims"][0]["id"],
+        )
+
+    def test_target_only_lookup_groups_pending_candidates_by_capability(self) -> None:
+        result = KnowledgeLookupBoundary(self.root, self.db).lookup(
+            "example-news", use_operational_memory=True,
+        )
+        self.assertEqual(["topic-search"], list(result.pending_candidates))
+        self.assertEqual(1, len(result.pending_candidates["topic-search"]))
+        self.assertEqual(
+            "prop:example-news:topic-search:pending",
+            result.pending_candidates["topic-search"][0]["proposal_id"],
+        )
+
+    def test_runtime_bridge_script_reports_pending_candidates(self) -> None:
+        script = SKILL / "scripts" / "knowledge-lookup"
+        command = [
+            sys.executable, str(script),
+            "--knowledge-root", str(self.root),
+            "--target", "example-news",
+            "--capability", "topic-search",
+            "--operational-memory-db", str(self.db),
+            "--use-operational-memory",
+        ]
+        result = subprocess.run(command, check=True, text=True, capture_output=True)
+        payload = json.loads(result.stdout)
+        self.assertEqual("not_found", payload["status"])
+        self.assertIn("pending_candidates", payload)
+
+
 class ListIndexTests(unittest.TestCase):
     """`--list` returns an exact index of every target, host, and capability."""
 

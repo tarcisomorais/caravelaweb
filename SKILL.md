@@ -48,7 +48,7 @@ the caller supplied.
    | Result | Next action |
    | --- | --- |
    | `found` | Read the returned accepted capability context. |
-   | `not_found` | Enter bounded Discovery if the caller authorizes it. |
+   | `not_found` | Enter bounded Discovery if the caller authorizes it. If `pending_candidates` is present, do not mint a sibling capability ID: read the pending Claims, resubmit missing material under a new `run_id` to enrich that Candidate, or discard it with `knowledge-resolve` (plan 002). |
    | `unresolved` | Run **First run** once, then retry the lookup. If it stays `unresolved`, stop: accepted knowledge could not be consulted. |
    | `bridge_error` | Stop: accepted knowledge could not be consulted. |
 

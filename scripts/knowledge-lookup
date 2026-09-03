@@ -59,6 +59,8 @@ def main() -> int:
         root, target=result.target, capability=result.capability,
     )
     visibility = {"open_discovery": open_discovery} if open_discovery else {}
+    if result.pending_candidates:
+        visibility["pending_candidates"] = result.pending_candidates
     if result.source == "legacy":
         if result.profile_path is None:
             emit("not_found", source="legacy", target=args.target, **visibility)
