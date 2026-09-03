@@ -7,16 +7,18 @@ layer.
 
 ## Public runtime boundary
 
-Four CLI entry points form the supported runtime surface:
+Five CLI entry points form the supported runtime surface:
 
 - `scripts/init-knowledge-root`
 - `scripts/preflight`
 - `scripts/knowledge-lookup`
+- `scripts/discovery-begin`
 - `scripts/discovery-finalize`
 
 Their production import closure is deliberately small:
 
 - `discovery_finalize.py`
+- `discovery_runs.py`
 - `installation_init.py`
 - `integration_bridge.py`
 - `knowledge_write_freeze.py`

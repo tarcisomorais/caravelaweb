@@ -96,6 +96,20 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(2, report["operational_memory"]["schema_version"])
         self.assertEqual(before, after)
 
+    def test_invocation_covers_every_skill_script(self) -> None:
+        result = self.run_preflight("--knowledge-root", str(self.root), "--json")
+        self.assertEqual(0, result.returncode, result.stderr)
+        invocation = json.loads(result.stdout)["invocation"]
+        for script in (SKILL / "scripts").iterdir():
+            if not script.is_file() or script.name == "register-host":
+                continue
+            key = script.name.replace("-", "_")
+            self.assertIn(key, invocation)
+            self.assertTrue(
+                invocation[key].endswith(f'"{script.resolve()}"'),
+                f"{key} invocation does not end with {script.resolve()}: {invocation[key]}",
+            )
+
     def test_human_report_and_missing_database_fail_specifically(self) -> None:
         (self.root / ".caravelaweb" / "operational_memory.db").unlink()
         result = self.run_preflight("--knowledge-root", str(self.root))

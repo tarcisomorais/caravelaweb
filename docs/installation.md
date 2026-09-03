@@ -8,7 +8,8 @@ optional browser transports, and removal.
 
 - Python 3.11 or newer, including the standard-library `sqlite3` module
 - Codex CLI 0.147.0 or newer, or Claude Code 2.1.142 or newer
-- Windows, Linux, WSL2, or macOS
+- Windows, Linux, WSL2, or macOS (macOS is not validated by CI; see
+  docs/platform-support.md)
 
 CaravelaWeb has no package-installation step and no Python dependencies.
 
@@ -60,10 +61,10 @@ into its own versioned cache and discovers
 `skills/caravelaweb/SKILL.md`. That thin adapter reads the canonical root
 `SKILL.md`; it does not duplicate the contract.
 
-The plugin declares no `version`, so Claude Code versions it by the source
-commit. `/plugin update caravelaweb@caravelaweb` therefore moves you to the
-latest commit of the default branch. A numbered release policy is not yet
-established; see [CHANGELOG](../CHANGELOG.md).
+Both plugin manifests declare the same semantic version (`0.1.0` at this
+release), and public releases bump it together with `CHANGELOG.md`.
+`/plugin update caravelaweb@caravelaweb` moves you to the newest published
+version of the marketplace entry.
 
 ## First run
 
@@ -168,6 +169,7 @@ checkout-local discovery remain available through the documented
 | `scripts/init-knowledge-root` | Create an empty local Knowledge Root and Operational Memory. |
 | `scripts/preflight` | Report readiness, platform facts, and optional transport availability. |
 | `scripts/knowledge-lookup` | Read accepted knowledge for one target and optional capability. |
+| `scripts/discovery-begin` | Register the start of one bounded Discovery run and return its run_id. |
 | `scripts/discovery-finalize` | Validate and save reusable knowledge from a bounded Discovery. |
 | `scripts/register-host` | Link a checkout into Claude Code, Codex, or OpenCode's per-user skill directory (developer mode). |
 

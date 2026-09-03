@@ -15,6 +15,7 @@ runtime level: a file that nothing imports cannot ship unnoticed.
 from __future__ import annotations
 
 import ast
+import re
 import unittest
 from pathlib import Path
 
@@ -41,6 +42,16 @@ EXPECTED_RUNTIME_CLOSURE = {
 # Host registration shares only the platform-facts module with the runtime
 # closure above; it never imports Knowledge Root or Operational Memory code.
 EXPECTED_REGISTRATION_CLOSURE = {"host_registration", "platform_adapter"}
+
+# The public runtime CLI entry points under scripts/, in the order docs list
+# them (init before preflight, lookup before begin before finalize).
+RUNTIME_ENTRY_POINTS = (
+    "init-knowledge-root",
+    "preflight",
+    "knowledge-lookup",
+    "discovery-begin",
+    "discovery-finalize",
+)
 
 
 def module_name(path: Path) -> str:
@@ -78,13 +89,7 @@ class PublicRuntimeBoundaryTests(unittest.TestCase):
         }
         runtime_reached = walk_closure(
             modules,
-            [
-                SCRIPTS / name
-                for name in (
-                    "knowledge-lookup", "discovery-begin", "discovery-finalize",
-                    "preflight", "init-knowledge-root",
-                )
-            ],
+            [SCRIPTS / name for name in RUNTIME_ENTRY_POINTS],
         )
         entered = runtime_reached - EXPECTED_RUNTIME_CLOSURE
         left = EXPECTED_RUNTIME_CLOSURE - runtime_reached
@@ -106,6 +111,29 @@ class PublicRuntimeBoundaryTests(unittest.TestCase):
             set(),
             unreachable,
             f"runtime modules present but reachable from no public CLI: {sorted(unreachable)}",
+        )
+
+    def test_architecture_doc_lists_the_runtime_closure(self) -> None:
+        text = (REPO / "docs" / "architecture.md").read_text(encoding="utf-8")
+        start = text.index("## Public runtime boundary")
+        end = text.index("## Distribution", start)
+        section = text[start:end]
+        tokens = re.findall(r"`([^`]+)`", section)
+
+        modules = {token for token in tokens if token.endswith((".py", ".sql"))}
+        scripts = {token for token in tokens if token.startswith("scripts/")}
+
+        expected_modules = {
+            "operational_memory/__init__.py"
+            if name == "operational_memory"
+            else name.replace(".", "/") + ".py"
+            for name in EXPECTED_RUNTIME_CLOSURE
+        }
+        expected_modules.add("operational_memory/schema.sql")
+
+        self.assertEqual(expected_modules, modules)
+        self.assertEqual(
+            {f"scripts/{name}" for name in RUNTIME_ENTRY_POINTS}, scripts
         )
 
 

@@ -8,7 +8,7 @@ The first public release.
 
 ### Added
 
-- Repository-root skill with four command-line entry points.
+- Repository-root skill with five command-line entry points.
 - Local SQLite Operational Memory with fail-closed read/write authority.
 - Fresh Knowledge Root initialization and deterministic root resolution.
 - Capability-scoped `DIRECT_READ -> LIGHTPANDA -> CHROME` transport policy.

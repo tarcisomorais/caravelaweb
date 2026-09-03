@@ -38,8 +38,9 @@ Open Claude Code in any project and run these two commands:
 /plugin install caravelaweb@caravelaweb
 ```
 
-The same two commands work on Windows, Linux, WSL2, and macOS. Prefer your
-terminal? These do the same without any prompt:
+The same two commands work on Windows, Linux, WSL2, and macOS. macOS is not
+validated by CI; see docs/platform-support.md. Prefer your terminal? These do
+the same without any prompt:
 
 ```bash
 claude plugin marketplace add tarcisomorais/caravelaweb

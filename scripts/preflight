@@ -270,6 +270,7 @@ def build_report(override: str | None) -> dict[str, object]:
         "platform": identity,
         "invocation": {
             "preflight": f'"{sys.executable}" "{Path(__file__).resolve()}"',
+            "init_knowledge_root": f'"{sys.executable}" "{SKILL_ROOT / "scripts" / "init-knowledge-root"}"',
             "knowledge_lookup": f'"{sys.executable}" "{SKILL_ROOT / "scripts" / "knowledge-lookup"}"',
             "discovery_begin": f'"{sys.executable}" "{SKILL_ROOT / "scripts" / "discovery-begin"}"',
             "discovery_finalize": f'"{sys.executable}" "{SKILL_ROOT / "scripts" / "discovery-finalize"}"',
@@ -307,6 +308,9 @@ def main() -> int:
         print(f"platform: {report['platform']['sys_platform']} ({report['platform']['os_name']})")
         print(f"python: {report['platform']['python']} ({report['platform']['python_executable']})")
         print(f"invocation: {report['invocation']['preflight']}")
+        for name, value in report["invocation"].items():
+            if name != "preflight":
+                print(f"invocation_{name}: {value}")
         print(f"knowledge_root: {report['knowledge_root']['path']}")
         print(f"filesystem: {report['knowledge_root']['filesystem_class']}")
         print(f"operational_memory: {'READY' if report['operational_memory'].get('ready') else 'NOT_READY'}")
