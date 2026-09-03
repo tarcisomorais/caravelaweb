@@ -62,9 +62,11 @@ explained.
   a naive or non-canonical value is refused instead of stored.
 - A hostname whose labels are all numeric or hexadecimal is treated as an IP
   literal and refused as a public hostname.
-- Discovery run markers and the write-authority marker are read through a
-  checked descriptor, so a symlink at the marker path cannot redirect the
-  read outside the Knowledge Root.
+- Discovery run markers and the write-authority marker are refused by a
+  path check before the open and read through a checked descriptor after
+  it, so a symlink at the marker path cannot redirect the read outside the
+  Knowledge Root on any platform, including Windows, which has no
+  `O_NOFOLLOW`.
 
 ## 0.1.0 - 2026-08-26
 
