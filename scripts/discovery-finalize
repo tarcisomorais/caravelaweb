@@ -103,6 +103,10 @@ def main() -> int:
             "status": "NOT_SAVED",
             "run_state": "OPEN",
             "reason": str(exc),
+            "reason_code": getattr(
+                exc, "code",
+                "RUN_MARKER" if isinstance(exc, DiscoveryRunError) else "PAYLOAD_INVALID",
+            ),
         }, ensure_ascii=False, sort_keys=True), file=sys.stderr)
         return 2
     except Exception:

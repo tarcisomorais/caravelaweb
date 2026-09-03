@@ -34,6 +34,10 @@ from transport_policy import (
 class DiscoveryFinalizationError(ValueError):
     """Discovery output is incomplete, non-reusable, or unsafe to retain."""
 
+    def __init__(self, message: str, *, code: str = "PAYLOAD_INVALID") -> None:
+        super().__init__(message)
+        self.code = code
+
 
 class _DryRunRollback(Exception):
     """Internal sentinel: unwinds ``write_transaction()`` without persisting it."""
@@ -44,6 +48,22 @@ class _DryRunRollback(Exception):
 # closes the matching run. Kept beside `DiscoveryFinalization` so the CLI never
 # duplicates this list.
 RETRYABLE_REASON_CODES = frozenset({"TRANSPORT_POLICY_UNPROVEN", "FAILURE_UNCLASSIFIED"})
+
+
+# `DiscoveryFinalizationError.code` vocabulary. Every `raise
+# DiscoveryFinalizationError(...)` site in this module must pass one of these
+# explicitly; `tests.test_discovery_finalize` walks the module's AST to
+# enforce it. A site that fits none of these keeps the class default
+# `PAYLOAD_INVALID`, but the AST test's allowlist for that default is empty,
+# so every current site must be classified.
+PAYLOAD_SHAPE = "PAYLOAD_SHAPE"
+PAYLOAD_VALUE = "PAYLOAD_VALUE"
+TASK_DATA_REJECTED = "TASK_DATA_REJECTED"
+HOST_SCOPE = "HOST_SCOPE"
+EVIDENCE_LINKAGE = "EVIDENCE_LINKAGE"
+PROVENANCE = "PROVENANCE"
+TRANSPORT_TRACE = "TRANSPORT_TRACE"
+TARGET_REFERENCE = "TARGET_REFERENCE"
 
 
 OPERATIONAL_FAMILIES = {
@@ -97,17 +117,21 @@ def _resolve_target_argument(memory: SQLiteOperationalMemory, target: str) -> st
         # trimming a malformed reference.
         host_reference = normalize_host_reference(target)
     except TargetIdentityError as exc:
-        raise DiscoveryFinalizationError(f"target reference is ambiguous: {exc}") from exc
+        raise DiscoveryFinalizationError(
+            f"target reference is ambiguous: {exc}", code=TARGET_REFERENCE
+        ) from exc
     matches = memory.target_ids_for_host(host_reference)
     if not matches:
         raise DiscoveryFinalizationError(
             "no existing target is associated with this hostname; first-time "
-            "Discovery must supply the stable canonical target ID directly"
+            "Discovery must supply the stable canonical target ID directly",
+            code=TARGET_REFERENCE,
         )
     if len(matches) > 1:
         raise DiscoveryFinalizationError(
             "this hostname is associated with more than one target; the "
-            "stable canonical target ID must be supplied directly"
+            "stable canonical target ID must be supplied directly",
+            code=TARGET_REFERENCE,
         )
     return matches[0].removeprefix("tgt:")
 
@@ -163,7 +187,9 @@ def _reject_unsafe_content(value: Any, *, field: str = "observation") -> None:
     if isinstance(value, Mapping):
         for key, child in value.items():
             if not isinstance(key, str):
-                raise DiscoveryFinalizationError(f"{field} keys must be strings")
+                raise DiscoveryFinalizationError(
+                    f"{field} keys must be strings", code=PAYLOAD_SHAPE
+                )
             _reject_unsafe_content(child, field=field)
     elif isinstance(value, list):
         for child in value:
@@ -171,10 +197,23 @@ def _reject_unsafe_content(value: Any, *, field: str = "observation") -> None:
     elif isinstance(value, str):
         if value.strip().upper().replace(" ", "_") == PLATFORM_UNSUPPORTED:
             raise DiscoveryFinalizationError(
-                f"{field} contains platform runtime state"
+                f"{field} contains platform runtime state, which is runtime "
+                "or environment state, not target knowledge",
+                code=TASK_DATA_REJECTED,
             )
-        if len(value) > 500 or _TASK_DATA_TEXT.search(value):
-            raise DiscoveryFinalizationError(f"{field} contains task-specific or raw content")
+        if len(value) > 500:
+            raise DiscoveryFinalizationError(
+                f"{field} contains task-specific or raw content: over 500 "
+                f"characters ({len(value)})",
+                code=TASK_DATA_REJECTED,
+            )
+        match = _TASK_DATA_TEXT.search(value)
+        if match:
+            raise DiscoveryFinalizationError(
+                f"{field} contains task-specific or raw content: matches "
+                f"raw-content pattern {match.group(0)!r}",
+                code=TASK_DATA_REJECTED,
+            )
 
 
 def _exact_keys(
@@ -186,17 +225,24 @@ def _exact_keys(
     unknown = set(value) - required - optional
     if missing:
         raise DiscoveryFinalizationError(
-            f"{field} is missing required fields: {', '.join(sorted(missing))}"
+            f"{field} is missing required fields: {', '.join(sorted(missing))}. "
+            f"Required: {', '.join(sorted(required)) or 'none'}; "
+            f"optional: {', '.join(sorted(optional)) or 'none'}",
+            code=PAYLOAD_SHAPE,
         )
     if unknown:
         raise DiscoveryFinalizationError(
-            f"{field} contains unsupported fields: {', '.join(sorted(unknown))}"
+            f"{field} contains unsupported fields: {', '.join(sorted(unknown))}. "
+            f"Accepted fields: {', '.join(sorted(required | optional)) or 'none'}",
+            code=PAYLOAD_SHAPE,
         )
 
 
 def _text(value: Any, *, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
-        raise DiscoveryFinalizationError(f"{field} must be a non-empty string")
+        raise DiscoveryFinalizationError(
+            f"{field} must be a non-empty string", code=PAYLOAD_SHAPE
+        )
     _reject_unsafe_content(value, field=field)
     return value
 
@@ -205,9 +251,10 @@ def _symbol(value: Any, *, field: str) -> str:
     value = _text(value, field=field)
     if not _SYMBOL.fullmatch(value):
         raise DiscoveryFinalizationError(
-            f"{field} must be a symbolic value: it starts with a letter and may "
-            "contain letters, digits, '_', '.', ':', or '-' (for example "
-            "SITE_BLOCKING)"
+            f"{field} {value!r} must be a symbolic value: it starts with a "
+            "letter and may contain letters, digits, '_', '.', ':', or '-' "
+            "(for example SITE_BLOCKING)",
+            code=PAYLOAD_VALUE,
         )
     return value
 
@@ -215,24 +262,34 @@ def _symbol(value: Any, *, field: str) -> str:
 def _transport(value: Any, *, field: str) -> str:
     value = _symbol(value, field=field)
     if value not in _TRANSPORTS:
-        raise DiscoveryFinalizationError(f"{field} is not a supported transport")
+        raise DiscoveryFinalizationError(
+            f"{field} {value!r} is not a supported transport. Accepted "
+            f"transports: {', '.join((DIRECT_READ, LIGHTPANDA, CHROME))}",
+            code=PAYLOAD_VALUE,
+        )
     return value
 
 
 def _schema_map(value: Any, *, field: str, paths: bool) -> dict[str, str]:
     if not isinstance(value, Mapping) or not value:
-        raise DiscoveryFinalizationError(f"{field} must be a non-empty object")
+        raise DiscoveryFinalizationError(
+            f"{field} must be a non-empty object", code=PAYLOAD_SHAPE
+        )
     result: dict[str, str] = {}
     for key, locator in value.items():
         if not isinstance(key, str) or not _FIELD_NAME.fullmatch(key):
-            raise DiscoveryFinalizationError(f"{field} contains an invalid output field")
+            raise DiscoveryFinalizationError(
+                f"{field} contains an invalid output field: {key!r}",
+                code=PAYLOAD_VALUE,
+            )
         locator = _text(locator, field=f"{field}.{key}")
         if paths and not _SCHEMA_FIELD_PATH.fullmatch(locator):
             raise DiscoveryFinalizationError(
                 f"{field}.{key} must be a reusable schema field path, not raw "
                 "task content. Accepted forms: $.headline (explicit root), "
                 "post.headline (dotted), items[].name (collection). A bare "
-                "word such as 'headline' is invalid -- use $.headline"
+                "word such as 'headline' is invalid -- use $.headline",
+                code=PAYLOAD_VALUE,
             )
         result[key] = locator
     return result
@@ -240,7 +297,9 @@ def _schema_map(value: Any, *, field: str, paths: bool) -> dict[str, str]:
 
 def _output_schema(value: Any, *, field: str) -> dict[str, Any]:
     if not isinstance(value, Mapping) or not value:
-        raise DiscoveryFinalizationError(f"{field} must be a non-empty object")
+        raise DiscoveryFinalizationError(
+            f"{field} must be a non-empty object", code=PAYLOAD_SHAPE
+        )
     _exact_keys(
         value, field=field,
         optional={"structure", "field_paths", "selectors"},
@@ -258,7 +317,7 @@ def _output_schema(value: Any, *, field: str) -> dict[str, Any]:
         )
     if not ({"field_paths", "selectors"} & set(result)):
         raise DiscoveryFinalizationError(
-            f"{field} requires field_paths or selectors"
+            f"{field} requires field_paths or selectors", code=PAYLOAD_SHAPE
         )
     return result
 
@@ -266,7 +325,9 @@ def _output_schema(value: Any, *, field: str) -> dict[str, Any]:
 def _operational_proof(value: Any) -> dict[str, Any]:
     field = "observation.value.operational_proof"
     if not isinstance(value, Mapping) or not value:
-        raise DiscoveryFinalizationError(f"{field} must be a non-empty object")
+        raise DiscoveryFinalizationError(
+            f"{field} must be a non-empty object", code=PAYLOAD_SHAPE
+        )
     _exact_keys(
         value, field=field,
         optional={
@@ -293,7 +354,8 @@ def _operational_proof(value: Any) -> dict[str, Any]:
         constraints = value["critical_constraints"]
         if not isinstance(constraints, list):
             raise DiscoveryFinalizationError(
-                f"{field}.critical_constraints must be an array"
+                f"{field}.critical_constraints must be an array",
+                code=PAYLOAD_SHAPE,
             )
         normalized_constraints: list[str] = []
         for index, constraint in enumerate(constraints):
@@ -328,7 +390,9 @@ def _normalize_family_value(family: str, value: Mapping[str, Any]) -> dict[str, 
         _exact_keys(value, field=field, optional={"rule", "operational_proof"})
         if len(value) != 1:
             raise DiscoveryFinalizationError(
-                "validation value requires exactly one reusable validation form"
+                "validation value requires exactly one reusable validation "
+                "form: rule or operational_proof",
+                code=PAYLOAD_SHAPE,
             )
         if "rule" in value:
             return {"rule": _symbol(value["rule"], field=f"{field}.rule")}
@@ -371,12 +435,15 @@ def _normalize_hostname(value: Any) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str) or not value.strip():
-        raise DiscoveryFinalizationError("observation.host must be a hostname")
+        raise DiscoveryFinalizationError(
+            "observation.host must be a hostname", code=HOST_SCOPE
+        )
     try:
         return validate_public_hostname(value)
     except TargetIdentityError as exc:
         raise DiscoveryFinalizationError(
-            f"observation.host must be a normalized public hostname: {exc}"
+            f"observation.host must be a normalized public hostname: {exc}",
+            code=HOST_SCOPE,
         ) from exc
 
 
@@ -384,7 +451,9 @@ def _normalize_validation(value: Any, *, field: str) -> dict[str, Any] | None:
     if value is None:
         return None
     if not isinstance(value, Mapping):
-        raise DiscoveryFinalizationError(f"{field} must be an object")
+        raise DiscoveryFinalizationError(
+            f"{field} must be an object", code=PAYLOAD_SHAPE
+        )
     allowed = {
         "transport", "engine", "javascript", "context", "outcome",
         "failure_class", "evidence",
@@ -393,11 +462,14 @@ def _normalize_validation(value: Any, *, field: str) -> dict[str, Any] | None:
     if unsupported:
         raise DiscoveryFinalizationError(
             f"{field} contains unsupported keys: {', '.join(sorted(unsupported))}. "
-            f"Accepted top-level validation keys: {', '.join(sorted(allowed))}"
+            f"Accepted top-level validation keys: {', '.join(sorted(allowed))}",
+            code=PAYLOAD_SHAPE,
         )
     context = value.get("context", {})
     if not isinstance(context, Mapping):
-        raise DiscoveryFinalizationError(f"{field}.context must be an object")
+        raise DiscoveryFinalizationError(
+            f"{field}.context must be an object", code=PAYLOAD_SHAPE
+        )
     _exact_keys(
         context, field=f"{field}.context",
         optional={"authentication", "environment"},
@@ -412,7 +484,9 @@ def _normalize_validation(value: Any, *, field: str) -> dict[str, Any] | None:
         )
     if "javascript" in value:
         if not isinstance(value["javascript"], bool):
-            raise DiscoveryFinalizationError(f"{field}.javascript must be a boolean")
+            raise DiscoveryFinalizationError(
+                f"{field}.javascript must be a boolean", code=PAYLOAD_SHAPE
+            )
         clean["javascript"] = value["javascript"]
     for key in ("outcome", "failure_class"):
         if key in value:
@@ -423,7 +497,10 @@ def _normalize_validation(value: Any, *, field: str) -> dict[str, Any] | None:
         or isinstance(references, (str, bytes))
         or any(not isinstance(item, str) or not item for item in references)
     ):
-        raise DiscoveryFinalizationError(f"{field}.evidence must be an array of locators")
+        raise DiscoveryFinalizationError(
+            f"{field}.evidence must be an array of locators",
+            code=EVIDENCE_LINKAGE,
+        )
     clean["evidence"] = sorted(set(references))
     clean["context"] = {
         key: _symbol(child, field=f"{field}.context.{key}")
@@ -435,26 +512,40 @@ def _normalize_validation(value: Any, *, field: str) -> dict[str, Any] | None:
 
 def _normalize_observations(observations: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     if not isinstance(observations, Sequence) or isinstance(observations, (str, bytes)):
-        raise DiscoveryFinalizationError("observations must be an array")
+        raise DiscoveryFinalizationError(
+            "observations must be an array", code=PAYLOAD_SHAPE
+        )
     normalized: dict[str, dict[str, Any]] = {}
     for item in observations:
         if not isinstance(item, Mapping):
-            raise DiscoveryFinalizationError("every observation must be an object")
+            raise DiscoveryFinalizationError(
+                "every observation must be an object", code=PAYLOAD_SHAPE
+            )
         family = item.get("family")
         epistemic = item.get("epistemic", "OBSERVED")
         value = item.get("value")
         host = _normalize_hostname(item.get("host"))
         if family not in OPERATIONAL_FAMILIES:
-            raise DiscoveryFinalizationError("observation family is not reusable operational knowledge")
+            raise DiscoveryFinalizationError(
+                f"observation.family {family!r} is not a reusable operational "
+                f"family. Accepted families: {', '.join(sorted(OPERATIONAL_FAMILIES))}",
+                code=PAYLOAD_VALUE,
+            )
         _exact_keys(
             item, field="observation",
             required={"family", "value"},
             optional={"epistemic", "host", "validation", "contradiction"},
         )
         if epistemic not in EPISTEMIC_CLASSES:
-            raise DiscoveryFinalizationError("observation epistemic class is invalid")
+            raise DiscoveryFinalizationError(
+                f"observation.epistemic {epistemic!r} is invalid. Accepted "
+                f"epistemic classes: {', '.join(('OBSERVED', 'INFERRED', 'UNKNOWN'))}",
+                code=PAYLOAD_VALUE,
+            )
         if not isinstance(value, Mapping) or not value:
-            raise DiscoveryFinalizationError("observation value must be a non-empty object")
+            raise DiscoveryFinalizationError(
+                "observation.value must be a non-empty object", code=PAYLOAD_SHAPE
+            )
         clean_value = _normalize_family_value(str(family), value)
         validation = _normalize_validation(item.get("validation"), field="observation.validation")
         if family in _VALIDATION_REQUIRED_FAMILIES and epistemic == "OBSERVED":
@@ -473,17 +564,22 @@ def _normalize_observations(observations: Sequence[Mapping[str, Any]]) -> list[d
                 raise DiscoveryFinalizationError(
                     f"an OBSERVED {family} observation requires a validation "
                     "naming the transport, engine, javascript, and "
-                    "authentication/environment context that observed it"
+                    "authentication/environment context that observed it",
+                    code=PAYLOAD_VALUE,
                 )
         contradiction = item.get("contradiction")
         clean_contradiction = None
         if contradiction is not None:
             if not isinstance(contradiction, Mapping) or set(contradiction) != {"prior_value", "validation"}:
                 raise DiscoveryFinalizationError(
-                    "observation.contradiction requires prior_value and validation"
+                    "observation.contradiction requires prior_value and validation",
+                    code=PAYLOAD_SHAPE,
                 )
             if not isinstance(contradiction["prior_value"], Mapping) or not contradiction["prior_value"]:
-                raise DiscoveryFinalizationError("contradiction.prior_value must be a non-empty object")
+                raise DiscoveryFinalizationError(
+                    "contradiction.prior_value must be a non-empty object",
+                    code=PAYLOAD_SHAPE,
+                )
             clean_contradiction = {
                 "prior_value": _normalize_family_value(
                     str(family), contradiction["prior_value"]
@@ -656,7 +752,9 @@ def _operational_proof_dependencies(
 
 def _validate_provenance(provenance: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(provenance, Mapping) or not provenance:
-        raise DiscoveryFinalizationError("run provenance is required")
+        raise DiscoveryFinalizationError(
+            "run provenance is required", code=PROVENANCE
+        )
     _exact_keys(
         provenance, field="provenance",
         required={"run_id", "observed_at"},
@@ -669,18 +767,27 @@ def _validate_provenance(provenance: Mapping[str, Any]) -> dict[str, Any]:
 
 def _validate_evidence(evidence: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     if not isinstance(evidence, Sequence) or isinstance(evidence, (str, bytes)) or not evidence:
-        raise DiscoveryFinalizationError("evidence is required")
+        raise DiscoveryFinalizationError(
+            "evidence is required", code=EVIDENCE_LINKAGE
+        )
     result: dict[str, dict[str, Any]] = {}
     for item in evidence:
         if not isinstance(item, Mapping):
-            raise DiscoveryFinalizationError("every evidence item must be an object")
+            raise DiscoveryFinalizationError(
+                "every evidence item must be an object", code=EVIDENCE_LINKAGE
+            )
         _exact_keys(
             item, field="evidence",
             required={"kind", "locator"}, optional={"scope"},
         )
         kind, locator = item.get("kind"), item.get("locator")
         if not isinstance(kind, str) or not _EVIDENCE_KIND.fullmatch(kind):
-            raise DiscoveryFinalizationError("evidence.kind must be a lowercase symbolic value")
+            raise DiscoveryFinalizationError(
+                f"evidence.kind {kind!r} must be a lowercase symbolic value: "
+                "it starts with a lowercase letter and may contain lowercase "
+                "letters, digits, or '-' (for example direct-read-validation)",
+                code=EVIDENCE_LINKAGE,
+            )
         locator = _text(locator, field="evidence.locator")
         clean = {"kind": kind, "locator": locator}
         if "scope" in item:
@@ -693,14 +800,19 @@ def _normalize_transport_trace(value: Any) -> dict[str, Any] | None:
     if value is None:
         return None
     if not isinstance(value, Mapping):
-        raise DiscoveryFinalizationError("transport_trace must be an object")
+        raise DiscoveryFinalizationError(
+            "transport_trace must be an object", code=TRANSPORT_TRACE
+        )
     _exact_keys(
         value, field="transport_trace",
         required={"availability", "attempts"},
     )
     availability = value["availability"]
     if not isinstance(availability, Mapping):
-        raise DiscoveryFinalizationError("transport_trace.availability must be an object")
+        raise DiscoveryFinalizationError(
+            "transport_trace.availability must be an object",
+            code=TRANSPORT_TRACE,
+        )
     _exact_keys(
         availability, field="transport_trace.availability",
         required={LIGHTPANDA, CHROME},
@@ -711,14 +823,19 @@ def _normalize_transport_trace(value: Any) -> dict[str, Any] | None:
         for status in clean_availability.values()
     ):
         raise DiscoveryFinalizationError(
-            "transport_trace availability contains an invalid status"
+            "transport_trace availability contains an invalid status: "
+            f"{clean_availability!r}",
+            code=TRANSPORT_TRACE,
         )
     if any(
         status not in {AVAILABLE, UNAVAILABLE, PLATFORM_UNSUPPORTED}
         for status in clean_availability.values()
     ):
         raise DiscoveryFinalizationError(
-            "transport_trace availability contains an unsupported status"
+            f"transport_trace availability contains an unsupported status: "
+            f"{clean_availability!r}. Accepted statuses: "
+            f"{', '.join((AVAILABLE, UNAVAILABLE, PLATFORM_UNSUPPORTED))}",
+            code=TRANSPORT_TRACE,
         )
 
     attempts = value["attempts"]
@@ -728,14 +845,16 @@ def _normalize_transport_trace(value: Any) -> dict[str, Any] | None:
         or not attempts
     ):
         raise DiscoveryFinalizationError(
-            "transport_trace.attempts must be a non-empty array"
+            "transport_trace.attempts must be a non-empty array",
+            code=TRANSPORT_TRACE,
         )
     clean_attempts: list[dict[str, Any]] = []
     seen: set[str] = set()
     for attempt in attempts:
         if not isinstance(attempt, Mapping):
             raise DiscoveryFinalizationError(
-                "every transport_trace attempt must be an object"
+                "every transport_trace attempt must be an object",
+                code=TRANSPORT_TRACE,
             )
         _exact_keys(
             attempt, field="transport_trace.attempt",
@@ -746,7 +865,9 @@ def _normalize_transport_trace(value: Any) -> dict[str, Any] | None:
         )
         if transport in seen:
             raise DiscoveryFinalizationError(
-                "transport_trace may attempt each transport only once"
+                f"transport_trace may attempt each transport only once: "
+                f"{transport!r} was already attempted",
+                code=TRANSPORT_TRACE,
             )
         seen.add(transport)
         outcome = _symbol(
@@ -754,7 +875,9 @@ def _normalize_transport_trace(value: Any) -> dict[str, Any] | None:
         )
         if outcome not in _TRANSPORT_FAILURES | {"FUNCTIONAL"}:
             raise DiscoveryFinalizationError(
-                "transport_trace attempt outcome must be FAILED, INSUFFICIENT, or FUNCTIONAL"
+                f"transport_trace attempt outcome {outcome!r} must be one of "
+                f"{', '.join(('FAILED', 'INSUFFICIENT', 'FUNCTIONAL'))}",
+                code=TRANSPORT_TRACE,
             )
         references = attempt["evidence"]
         if (
@@ -764,7 +887,8 @@ def _normalize_transport_trace(value: Any) -> dict[str, Any] | None:
             or any(not isinstance(item, str) or not item for item in references)
         ):
             raise DiscoveryFinalizationError(
-                "transport_trace attempt evidence must be a non-empty locator array"
+                "transport_trace attempt evidence must be a non-empty locator array",
+                code=TRANSPORT_TRACE,
             )
         clean_attempts.append({
             "transport": transport,
@@ -953,7 +1077,9 @@ def _referenced_evidence(
         return [] if required else [dict(item) for item in evidence]
     selected = [dict(item) for item in evidence if item["locator"] in references]
     if {item["locator"] for item in selected} != references:
-        raise DiscoveryFinalizationError("validation references unknown evidence")
+        raise DiscoveryFinalizationError(
+            "validation references unknown evidence", code=EVIDENCE_LINKAGE
+        )
     return selected
 
 
@@ -1029,7 +1155,9 @@ def _host_plan(
             "SELECT id FROM hosts WHERE target_id=? AND hostname=? ORDER BY id", (target_id, hostname)
         ))
         if len(rows) > 1:
-            raise DiscoveryFinalizationError("hostname scope is ambiguous for this target")
+            raise DiscoveryFinalizationError(
+                "hostname scope is ambiguous for this target", code=HOST_SCOPE
+            )
         if rows:
             mapped[hostname] = rows[0]["id"]
             continue
@@ -1052,7 +1180,8 @@ def _host_plan(
                 "An evidence item's scope must be exactly 'TARGET_SURFACE', and "
                 "its locator hostname must exactly match the literal Observation "
                 "Host (a leading 'www.' is not normalized here, unlike target "
-                "reference resolution)"
+                "reference resolution)",
+                code=HOST_SCOPE,
             )
         # Target-reference resolution reads these associations, and it fails
         # closed on more than one match. Creating the second one silently would
@@ -1060,7 +1189,8 @@ def _host_plan(
         # the caller can still correct the target.
         if any(other != target_id for other in memory.target_ids_for_host(hostname)):
             raise DiscoveryFinalizationError(
-                "this hostname is already associated with a different target"
+                "this hostname is already associated with a different target",
+                code=HOST_SCOPE,
             )
         host_id = f"host:{target}:{_digest(hostname)}"
         mapped[hostname] = host_id
@@ -1279,12 +1409,14 @@ def finalize_discovery(
     without reaching ``write_transaction()`` at all.
     """
     if not isinstance(target, str) or not target.strip():
-        raise DiscoveryFinalizationError("target and capability are required")
+        raise DiscoveryFinalizationError(
+            "target and capability are required", code=PAYLOAD_SHAPE
+        )
     target = _resolve_target_argument(memory, target)
     try:
         capability = normalize_capability_id(capability)
     except RecordValidationError as exc:
-        raise DiscoveryFinalizationError(str(exc)) from exc
+        raise DiscoveryFinalizationError(str(exc), code=PAYLOAD_VALUE) from exc
     # Validate authority before examining or normalizing Discovery output. This
     # deliberately fails closed when the installation is not OM-writable, and
     # is derived solely from memory.knowledge_root's real write-authority

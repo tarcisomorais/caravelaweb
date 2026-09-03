@@ -16,7 +16,13 @@ FINALIZER = SKILL / "scripts" / "discovery-finalize"
 LOOKUP = SKILL / "scripts" / "knowledge-lookup"
 sys.path.insert(0, str(SKILL))
 
-from discovery_finalize import DiscoveryFinalizationError, finalize_discovery
+import ast
+
+from discovery_finalize import (
+    EVIDENCE_LINKAGE, HOST_SCOPE, PAYLOAD_SHAPE, PAYLOAD_VALUE, PROVENANCE,
+    TARGET_REFERENCE, TASK_DATA_REJECTED, TRANSPORT_TRACE,
+    DiscoveryFinalizationError, finalize_discovery,
+)
 from discovery_runs import begin_discovery
 from operational_memory.core import SQLiteOperationalMemory
 from platform_adapter import resolve_knowledge_root
@@ -346,7 +352,9 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         self.assertEqual(2, result.returncode)
         body = json.loads(result.stderr)
         self.assertEqual("NOT_SAVED", body["status"])
-        self.assertEqual("observation family is not reusable operational knowledge", body["reason"])
+        self.assertEqual("PAYLOAD_VALUE", body["reason_code"])
+        self.assertIn("not a reusable operational family", body["reason"])
+        self.assertIn("transport", body["reason"])
         self.assertNotIn("Traceback", result.stderr)
         after = tuple(self.memory._conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in ("claims", "proposals"))
         self.assertEqual(before, after)
@@ -368,7 +376,10 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         self.assertEqual(2, result.returncode)
         body = json.loads(result.stderr)
         self.assertEqual("NOT_SAVED", body["status"])
-        self.assertEqual("observation family is not reusable operational knowledge", body["reason"])
+        self.assertEqual("PAYLOAD_VALUE", body["reason_code"])
+        self.assertIn("'prices'", body["reason"])
+        self.assertIn("not a reusable operational family", body["reason"])
+        self.assertIn("transport", body["reason"])
         self.assertNotIn("Traceback", result.stderr)
         after = tuple(self.memory._conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in ("claims", "proposals"))
         self.assertEqual(before, after)
@@ -1481,7 +1492,7 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         ])
         with self.assertRaisesRegex(
             DiscoveryFinalizationError,
-            "observation family is not reusable operational knowledge",
+            "is not a reusable operational family",
         ):
             self.finalize(payload)
 
@@ -1876,6 +1887,232 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         self.assertEqual("SAVED", retried_body["status"])
         self.assertEqual("CLOSED", retried_body["run_state"])
         self.assertEqual([], list_open_discoveries(self.root))
+
+
+class RefusalMessageTests(unittest.TestCase):
+    """Every closed-set refusal names the rejected value and accepted set.
+
+    Plan 004: the payload contract is the product's public API and an LLM
+    agent is its only client, so an opaque refusal costs retries. Each test
+    below covers one row of the plan's "Opaque sites to fix" table. This
+    duplicates a minimal slice of `DiscoveryFinalizeTests`' fixture rather
+    than subclassing it, so it runs only its own tests, not the whole suite
+    a second time.
+    """
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        authority(self.root)
+        (self.root / "targets").mkdir()
+        self.db = self.root / ".caravelaweb/operational_memory.db"
+        self.memory = SQLiteOperationalMemory(self.db, knowledge_root=self.root)
+        self.addCleanup(self.memory.close)
+        with self.memory.write_transaction() as writer:
+            writer.target({"id": "tgt:example-news"})
+            writer.capability({"id": "cap:example-news:topic-search", "target_id": "tgt:example-news", "key": "topic-search"})
+
+    def payload(self, observations=None):
+        return {
+            "target": "example-news", "capability": "topic-search",
+            "observations": observations or [
+                {"family": "transport", "value": {
+                    "transport": "DIRECT_READ", "outcome": "FUNCTIONAL",
+                }},
+                {"family": "extraction", "value": {"structure": "JSON_LD"}},
+            ],
+            "evidence": [{"kind": "bounded-browser-validation", "locator": "https://www.example-news.com/busca/"}],
+            "provenance": {"run_id": "run:example-news:001", "observed_at": RECORDED},
+            "recorded_at": RECORDED,
+        }
+
+    def finalize(self, payload=None, *, dry_run=False):
+        payload = payload or self.payload()
+        arguments = {
+            "target": payload["target"], "capability": payload["capability"],
+            "observations": payload["observations"], "evidence": payload["evidence"],
+            "provenance": payload["provenance"], "recorded_at": payload["recorded_at"],
+            "dry_run": dry_run,
+        }
+        if "transport_trace" in payload:
+            arguments["transport_trace"] = payload["transport_trace"]
+        return finalize_discovery(self.memory, **arguments)
+
+    @staticmethod
+    def transport_trace(*attempts, lightpanda="AVAILABLE", chrome="AVAILABLE"):
+        return {
+            "availability": {"LIGHTPANDA": lightpanda, "CHROME": chrome},
+            "attempts": [
+                {"transport": transport, "outcome": outcome, "evidence": [locator]}
+                for transport, outcome, locator in attempts
+            ],
+        }
+
+    @staticmethod
+    def transport_observation(transport, outcome, locator):
+        return {
+            "family": "transport",
+            "value": {"transport": transport, "outcome": outcome},
+            "validation": {
+                "transport": transport,
+                "outcome": outcome,
+                "engine": None if transport == "DIRECT_READ" else transport.lower(),
+                "javascript": transport != "DIRECT_READ",
+                "context": {
+                    "authentication": "PUBLIC", "environment": "PRODUCTION",
+                },
+                "evidence": [locator],
+            },
+        }
+
+    def test_every_raise_passes_an_explicit_code(self):
+        # Every `raise DiscoveryFinalizationError(...)` call must pass
+        # `code=` explicitly. A site that cannot be classified may keep the
+        # class default `PAYLOAD_INVALID` only through this explicit
+        # allowlist, which must stay empty.
+        ALLOWED_DEFAULT_CODE_LINES: frozenset[int] = frozenset()
+        source = (SKILL / "discovery_finalize.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        missing: list[int] = []
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "DiscoveryFinalizationError"
+            ):
+                has_code = any(keyword.arg == "code" for keyword in node.keywords)
+                if not has_code and node.lineno not in ALLOWED_DEFAULT_CODE_LINES:
+                    missing.append(node.lineno)
+        self.assertEqual([], missing, f"raise sites missing code=: {missing}")
+
+    def test_unsupported_transport_names_value_and_accepted_set(self):
+        payload = self.payload([
+            {"family": "transport", "value": {
+                "transport": "CARRIER_PIGEON", "outcome": "FUNCTIONAL",
+            }},
+        ])
+        with self.assertRaises(DiscoveryFinalizationError) as ctx:
+            self.finalize(payload)
+        self.assertEqual(PAYLOAD_VALUE, ctx.exception.code)
+        message = str(ctx.exception)
+        self.assertIn("CARRIER_PIGEON", message)
+        self.assertIn("DIRECT_READ", message)
+        self.assertIn("CHROME", message)
+
+    def test_unsupported_family_names_value_and_accepted_set(self):
+        payload = self.payload([
+            {"family": "weather", "value": {"transport": "DIRECT_READ"}},
+        ])
+        with self.assertRaises(DiscoveryFinalizationError) as ctx:
+            self.finalize(payload)
+        self.assertEqual(PAYLOAD_VALUE, ctx.exception.code)
+        message = str(ctx.exception)
+        self.assertIn("'weather'", message)
+        self.assertIn("transport", message)
+        self.assertIn("extraction", message)
+
+    def test_invalid_epistemic_class_names_value_and_accepted_set(self):
+        payload = self.payload([
+            {
+                "family": "transport",
+                "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"},
+                "epistemic": "GUESSED",
+            },
+        ])
+        with self.assertRaises(DiscoveryFinalizationError) as ctx:
+            self.finalize(payload)
+        self.assertEqual(PAYLOAD_VALUE, ctx.exception.code)
+        message = str(ctx.exception)
+        self.assertIn("'GUESSED'", message)
+        self.assertIn("OBSERVED", message)
+        self.assertIn("INFERRED", message)
+
+    def test_evidence_kind_pattern_violation_names_value_and_example(self):
+        payload = self.payload()
+        payload["evidence"] = [
+            {"kind": "Direct_Read", "locator": "https://www.example-news.com/busca/"},
+        ]
+        with self.assertRaises(DiscoveryFinalizationError) as ctx:
+            self.finalize(payload)
+        self.assertEqual(EVIDENCE_LINKAGE, ctx.exception.code)
+        message = str(ctx.exception)
+        self.assertIn("'Direct_Read'", message)
+        self.assertIn("lowercase letter", message)
+        self.assertIn("direct-read-validation", message)
+
+    def test_transport_trace_availability_status_names_value_and_accepted_set(self):
+        locator = "https://www.example-news.com/busca/"
+        payload = self.payload([
+            self.transport_observation("DIRECT_READ", "FUNCTIONAL", locator),
+        ])
+        payload["transport_trace"] = self.transport_trace(
+            ("DIRECT_READ", "FUNCTIONAL", locator),
+            lightpanda="MAYBE_AVAILABLE", chrome="AVAILABLE",
+        )
+        with self.assertRaises(DiscoveryFinalizationError) as ctx:
+            self.finalize(payload)
+        self.assertEqual(TRANSPORT_TRACE, ctx.exception.code)
+        message = str(ctx.exception)
+        self.assertIn("MAYBE_AVAILABLE", message)
+        self.assertIn("AVAILABLE", message)
+        self.assertIn("PLATFORM_UNSUPPORTED", message)
+
+    def test_transport_trace_attempt_outcome_names_value_and_accepted_set(self):
+        locator = "https://www.example-news.com/busca/"
+        payload = self.payload([
+            self.transport_observation("DIRECT_READ", "FUNCTIONAL", locator),
+        ])
+        trace = self.transport_trace(("DIRECT_READ", "FUNCTIONAL", locator))
+        trace["attempts"][0]["outcome"] = "TIMEOUT"
+        payload["transport_trace"] = trace
+        with self.assertRaises(DiscoveryFinalizationError) as ctx:
+            self.finalize(payload)
+        self.assertEqual(TRANSPORT_TRACE, ctx.exception.code)
+        message = str(ctx.exception)
+        self.assertIn("'TIMEOUT'", message)
+        self.assertIn("FAILED", message)
+        self.assertIn("FUNCTIONAL", message)
+
+    def test_unsupported_fields_names_rejected_and_accepted_fields(self):
+        payload = self.payload([
+            {
+                "family": "transport",
+                "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"},
+                "surprising_field": "x",
+            },
+        ])
+        with self.assertRaises(DiscoveryFinalizationError) as ctx:
+            self.finalize(payload)
+        self.assertEqual(PAYLOAD_SHAPE, ctx.exception.code)
+        message = str(ctx.exception)
+        self.assertIn("surprising_field", message)
+        self.assertIn("Accepted fields:", message)
+        self.assertIn("family", message)
+        self.assertIn("value", message)
+
+    def test_missing_required_fields_names_missing_and_required_optional(self):
+        payload = self.payload([
+            {"family": "transport"},
+        ])
+        with self.assertRaises(DiscoveryFinalizationError) as ctx:
+            self.finalize(payload)
+        self.assertEqual(PAYLOAD_SHAPE, ctx.exception.code)
+        message = str(ctx.exception)
+        self.assertIn("value", message)
+        self.assertIn("Required:", message)
+        self.assertIn("optional:", message)
+
+    def test_raw_content_length_violation_names_the_rule_that_fired(self):
+        payload = self.payload([
+            {"family": "search_surface", "value": {"path": "x" * 501}},
+        ])
+        with self.assertRaises(DiscoveryFinalizationError) as ctx:
+            self.finalize(payload)
+        self.assertEqual(TASK_DATA_REJECTED, ctx.exception.code)
+        message = str(ctx.exception)
+        self.assertIn("over 500 characters", message)
+        self.assertIn("501", message)
 
 
 if __name__ == "__main__":

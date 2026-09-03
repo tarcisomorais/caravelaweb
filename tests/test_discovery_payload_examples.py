@@ -68,6 +68,30 @@ class DiscoveryPayloadExamplesTests(unittest.TestCase):
                 self.assertEqual("SAVED", body["status"])
                 self.assertEqual("CLOSED", body["run_state"])
 
+    def test_a_malformed_example_reports_a_reason_code(self):
+        payload = _payloads()[0]
+        payload["observations"] = [
+            {**payload["observations"][0], "family": "nope"},
+            *payload["observations"][1:],
+        ]
+        begun = subprocess.run(
+            [sys.executable, str(BEGIN), "--knowledge-root", str(self.root),
+             "--target", payload["target"], "--capability", payload["capability"]],
+            text=True, capture_output=True, encoding="utf-8",
+        )
+        self.assertEqual(0, begun.returncode, begun.stderr)
+        payload["provenance"]["run_id"] = json.loads(begun.stdout)["run_id"]
+        finalized = subprocess.run(
+            [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root),
+             "--input", "-"],
+            input=json.dumps(payload), text=True, capture_output=True, encoding="utf-8",
+        )
+        self.assertEqual(2, finalized.returncode, finalized.stdout)
+        body = json.loads(finalized.stderr)
+        self.assertEqual("NOT_SAVED", body["status"])
+        self.assertEqual("PAYLOAD_VALUE", body["reason_code"])
+        self.assertIn("'nope'", body["reason"])
+
 
 if __name__ == "__main__":
     unittest.main()

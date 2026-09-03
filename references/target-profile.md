@@ -133,8 +133,20 @@ The public Discovery payload is a closed contract. Its wrapper is exactly
 `{family, value, epistemic?, host?, validation?, contradiction?}`; evidence is
 `{kind, locator, scope?}` and provenance is `{run_id, observed_at}`. Unknown wrapper, evidence,
 provenance, transport-trace, validation-context, contradiction-value, proof,
-or family-value fields are rejected before Candidate construction. A
-browser-backed result also carries the run-scoped `transport_trace` defined in
+or family-value fields are rejected before Candidate construction.
+
+Every payload refusal's `reason_code` is one of eight values:
+
+- `PAYLOAD_SHAPE` — wrong type, or a missing/unsupported field.
+- `PAYLOAD_VALUE` — a closed-set or pattern violation on an otherwise well-shaped field.
+- `TASK_DATA_REJECTED` — raw or task-specific content, not reusable knowledge.
+- `HOST_SCOPE` — an observation host is missing evidence or already claimed by another target.
+- `EVIDENCE_LINKAGE` — an evidence item, or a reference to one, is malformed or unresolved.
+- `PROVENANCE` — the run provenance wrapper is missing or malformed.
+- `TRANSPORT_TRACE` — the transport ladder trace is malformed or inconsistent.
+- `TARGET_REFERENCE` — the `target` argument cannot be resolved to one canonical target.
+
+A browser-backed result also carries the run-scoped `transport_trace` defined in
 `SKILL.md`; the finalizer validates its preflight availability and evidenced
 attempt order before writing, then discards it rather than storing runtime
 availability as target knowledge. Family values use only:
