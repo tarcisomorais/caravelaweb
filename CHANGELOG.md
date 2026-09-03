@@ -2,13 +2,69 @@
 
 All notable changes to CaravelaWeb will be documented in this file.
 
-## Unreleased
+## 0.2.0 - 2026-09-03
+
+Visibility and repair for the two silent failures found in real use: a
+pending Candidate that blocks every later write for its capability, and an
+`OPERATIONAL` lifecycle that no capability had earned and no output
+explained.
 
 ### Added
 
 - `scripts/knowledge-resolve --reject-pending <proposal_id> --reason <text>`:
   records a `REJECT` Decision for one pending Candidate, so a stuck pending
-  Proposal no longer blocks every later write for its capability.
+  Proposal no longer blocks every later write for its capability. Nothing is
+  deleted; the Proposal and its Claims stay as history.
+- `scripts/knowledge-lookup --list`: an exact index of every target with its
+  hosts and capability keys, and per capability whether accepted knowledge
+  exists, how many Proposals are pending, and whether it is `OPERATIONAL`.
+  Identity only: no Claim values, no fuzzy or prefix matching. The contract
+  now asks for one `--list` call per task before minting a target or
+  capability ID.
+- `pending_candidates` on `knowledge-lookup` output, for a capability and
+  for a target whose only knowledge is pending, mapping each Proposal ID to
+  its families and values.
+- `lifecycle` on every `SAVED` and `ALREADY_EXISTS` finalization and on a
+  capability-scoped lookup: `OPERATIONAL`, or `null` with a `lifecycle_gap`
+  code naming the first unmet proof condition, such as
+  `NO_AUTHENTICATION_CLAIM`, `PROOF_VALIDATION_NOT_SUCCESS`, or
+  `NO_FUNCTIONAL_TRANSPORT_CLAIM`. `SKILL.md` states the three conditions in
+  one place, and example 8 in `references/discovery-payload-examples.md`
+  earns `OPERATIONAL` in a single run.
+- `reason_code` on every `discovery-finalize` payload refusal, from a closed
+  list of eight: `PAYLOAD_SHAPE`, `PAYLOAD_VALUE`, `TASK_DATA_REJECTED`,
+  `HOST_SCOPE`, `EVIDENCE_LINKAGE`, `PROVENANCE`, `TRANSPORT_TRACE`, and
+  `TARGET_REFERENCE`. A refusal for a closed set lists the accepted values.
+- `warnings` on a `SAVED` or `ALREADY_EXISTS` finalization, present only
+  when non-empty. `NO_HOST_ASSOCIATION` reports a target saved without any
+  host, which a later lookup by URL cannot find.
+- `preflight` reports an invocation for every skill script, including
+  `init-knowledge-root` and `knowledge-resolve`, in JSON and text output.
+
+### Changed
+
+- A `CONFLICT_OR_AMBIGUITY` refusal names the conflicting Claims: source
+  (`payload`, `accepted`, or `pending`), Claim ID, family, host, and value,
+  up to ten conflicts.
+- Evidence locator hostnames are compared with `observation.host` in
+  canonical ASCII (IDNA) form, so a Unicode locator matches its punycode
+  host. The `www.` rule is unchanged and now documented: target-reference
+  resolution drops `www.`, host scope does not.
+- Every payload example records its host with `TARGET_SURFACE` evidence.
+- `docs/architecture.md` lists six entry points and the full runtime import
+  closure; a test keeps the page and the runtime boundary in step. The
+  installation page describes the shared manifest version, and README and
+  installation note that macOS is not validated by CI.
+
+### Fixed
+
+- Timestamps must round-trip to the canonical `YYYY-MM-DDTHH:MM:SSZ` form;
+  a naive or non-canonical value is refused instead of stored.
+- A hostname whose labels are all numeric or hexadecimal is treated as an IP
+  literal and refused as a public hostname.
+- Discovery run markers and the write-authority marker are read through a
+  checked descriptor, so a symlink at the marker path cannot redirect the
+  read outside the Knowledge Root.
 
 ## 0.1.0 - 2026-08-26
 
