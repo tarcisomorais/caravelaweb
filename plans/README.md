@@ -21,7 +21,7 @@ in the backlog and rejection sections so it is not re-audited.
 | 006 | Canonical timestamps, short-form IP literals, run-marker symlink guard | P2 | S | — | DONE (reviewed 2026-09-02; one commit on `advisor/plans-2026-09-02`) |
 | 007 | `knowledge-lookup --list` memory index | P2 | S | — | DONE (reviewed 2026-09-02; one commit on `advisor/plans-2026-09-02`) |
 | 008 | Correct stale public documentation claims | P2 | S | — | DONE (reviewed 2026-09-02; one commit on `advisor/plans-2026-09-02`) |
-| 009 | Reduce the Discovery ceremony cost (checklist, reason codes, aggregated diagnostics, derived claims, one lookup, multi-capability design) | P1–P3 | S–L | Step 0 re-measurement gate for changes 3–6 | IN PROGRESS (changes 1–2 DONE on `main` `2319185` `a8e97e2`, hotfix `02be2ab`, released 0.2.1 `c0d7f77`; gate PASS 2026-09-04 on 17 runs / 5 sessions / 2 projects: change 3 REJECTED (re-measured, not needed: mean 1.35, max 3, 12/17 = 71% zero refusals), change 4 REJECTED (re-measured, not needed: 0/16 proof-carrying runs lacked `authentication`; duplicated blocks 2/3 = 67% but under the 10-item floor), change 5 PROCEED (3.35 lookups per run, 9 before the first run per four-source task, 0 duplicate-by-naming), change 6 waits on 5 plus a second re-measurement) |
+| 009 | Reduce the Discovery ceremony cost (checklist, reason codes, aggregated diagnostics, derived claims, one lookup, multi-capability design) | P1–P3 | S–L | Step 0 re-measurement gate for changes 3–6 | IN PROGRESS (changes 1–2 DONE `2319185` `a8e97e2`, hotfix `02be2ab`, released 0.2.1 `c0d7f77`; gate PASS 2026-09-04 on 17 runs / 5 sessions / 2 projects: change 3 REJECTED (not needed: mean 1.35, max 3, 12/17 = 71% zero refusals), change 4 REJECTED (not needed: 0/16 proof-carrying runs lacked `authentication`; duplicated blocks 2/3 under the 10-item floor), change 5 DONE `6856e87` (reviewed 2026-09-04), DX-05 DONE `9374df3`; change 6 waits on a second re-measurement after change 5 ships) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale)
 
@@ -109,7 +109,7 @@ Checked read-only on a copy of `~/.local/share/caravelaweb/knowledge-root`:
   database that it is corrupt. The finalize hotfix walks the cause chain
   to the SQLite error instead; fix the root in core so the wrappers stop
   lying. Effort S.
-- **DX-05** The 2026-09-04 sample's only 0.2.1 refusals were four
+- **DX-05** (DONE `9374df3`) The 2026-09-04 sample's only 0.2.1 refusals were four
   `PAYLOAD_VALUE` for a `recorded_at` a few seconds ahead of the finalizer
   clock, in one session that stamped the field itself. The rule is stated
   in the references but every payload example still carries an explicit

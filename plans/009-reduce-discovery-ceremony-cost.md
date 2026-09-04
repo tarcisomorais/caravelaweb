@@ -65,6 +65,12 @@
   `plans/measure-step0` counts runs and finalize results from tool
   results, since the agents ran the CLI in shell loops; lookups are
   counted over the whole session including post-save verification.
+- **Change 5 landed 2026-09-04** as `6856e87` (reviewed): one lookup call
+  per capability with `readiness`, `index`, `index_scope`; readiness rules
+  extracted to `readiness.py` shared with `preflight`; SKILL.md step 2
+  shrank 26 to 19 lines, file 151 to 144, budget untouched. DX-05 landed
+  as `9374df3`. Next: release, then a second re-measurement on the new
+  contract before change 6 is considered.
 
 ## Why this matters
 
