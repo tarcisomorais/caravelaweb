@@ -9,6 +9,11 @@ CaravelaWeb applies to a task, so a copy that drifts from the root silently
 changes skill selection without changing the contract. This is a targeted
 parity gate over the frontmatter block only, not a full-file diff -- the
 adapter bodies are intentionally different from the root contract.
+
+The second gate below pins one piece of root `SKILL.md` body text: the
+pre-finalize checklist. It exists because the checklist is the cheapest
+defence against the four payload traps that produced most Discovery
+refusals, and a silent deletion would restore them without failing anything.
 """
 
 from __future__ import annotations
@@ -50,6 +55,13 @@ class SkillAdapterParityTests(unittest.TestCase):
         description = frontmatter_description(REPO / "SKILL.md")
         self.assertIn("reads, navigates, or acts on a live web target", description)
         self.assertIn("QA, verification, or one-off checks", description)
+
+
+class SkillPreFinalizeChecklistTests(unittest.TestCase):
+    def test_skill_md_carries_the_pre_finalize_checklist_and_keeps_validate_optional(self) -> None:
+        skill = (REPO / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("**Before you finalize**", skill)
+        self.assertNotIn("before every real finalize", skill)
 
 
 if __name__ == "__main__":

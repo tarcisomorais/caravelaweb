@@ -15,6 +15,14 @@ instead of silently drifting from the contract.
 Every first-run example records the host it observed; a target without a
 host is never reachable by URL.
 
+**Before you finalize**
+
+- `observation.host` is the literal hostname in the evidence locator. No `www.` is added or dropped; `www.example.com` and `example.com` differ.
+- Every evidence item for a first-time host has `"scope": "TARGET_SURFACE"` and a lowercase `kind` such as `direct-read-validation`.
+- A browser-backed result needs a complete `transport_trace` starting at `DIRECT_READ` and stopping at the first `FUNCTIONAL` transport. A `DIRECT_READ`-only result needs none.
+- An `OBSERVED` `blocking` or `limitation` observation carries its own `validation` block with transport, engine, javascript, and both `context` keys.
+- `field_paths` use `$.field`, `a.b`, or `items[].field`. `structure`, `state`, `signal`, and similar fields are single symbolic tokens.
+
 ## 1. Functional `DIRECT_READ`
 
 ```json

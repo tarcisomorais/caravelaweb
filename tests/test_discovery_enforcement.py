@@ -16,8 +16,10 @@ SAFETY = REPO / "references" / "safety.md"
 # contract: it must be read before the first command, so a reference file
 # cannot carry it. Raised again from 140 for the blocked-ladder stop rule: an
 # agent decides whether to leave CaravelaWeb at the moment a transport is
-# blocked, which is before it would open a reference file.
-SKILL_LINE_BUDGET = 143
+# blocked, which is before it would open a reference file. Raised again from
+# 143 for the pre-finalize checklist: it is read while the payload is being
+# written, which is before the agent would open the payload reference.
+SKILL_LINE_BUDGET = 151
 
 
 class DiscoveryEnforcementContractTests(unittest.TestCase):
