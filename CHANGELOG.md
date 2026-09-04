@@ -7,13 +7,25 @@ All notable changes to CaravelaWeb will be documented in this file.
 ### Changed
 
 - `discovery-finalize` reports a `reason_code` on every refusal it decides
-  from the payload, the run marker, or the Knowledge Root, from a closed
-  list of ten: the eight payload codes of 0.2.0 plus `RUN_MARKER` and
-  `KNOWLEDGE_ROOT_UNRESOLVED`. An unresolved Knowledge Root used to fall
+  from the payload, the run marker, the Knowledge Root, or the state of the
+  Operational Memory database, from a closed list of eleven: the eight
+  payload codes of 0.2.0 plus `RUN_MARKER`, `KNOWLEDGE_ROOT_UNRESOLVED` and
+  `OPERATIONAL_MEMORY_UNAVAILABLE`. An unresolved Knowledge Root used to fall
   through to the generic handler and print a refusal with no code at all;
   it now names the condition and how to repair it. `PAYLOAD_INVALID` is
   gone: `DiscoveryFinalizationError` no longer has a default code, so no
   refusal it raises can carry an unclassified one.
+- Two more `discovery-finalize` refusals carry a code instead of the
+  generic "Discovery could not be finalized in local Operational Memory."
+  A `recorded_at` later than the current time is refused with
+  `PAYLOAD_VALUE` before any write, so `--validate` reports it too; it used
+  to be stored and then fail promotion, because a Proposal recorded in the
+  future is invisible at knowledge time to its own write. An Operational
+  Memory database that is locked by another process, unreadable, or not
+  writable is refused with the new `OPERATIONAL_MEMORY_UNAVAILABLE`, which
+  names the SQLite condition and not the database path. A malformed
+  `recorded_at` now reports `PAYLOAD_VALUE` with the validator's own
+  message.
 - `init-knowledge-root` resolves where to initialize the same way every
   other command resolves where to read: `--knowledge-root`, then
   `CARAVELAWEB_KNOWLEDGE_ROOT`, then the fixed per-user default. With the

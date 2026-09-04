@@ -45,6 +45,11 @@ host is never reachable by URL.
 }
 ```
 
+`recorded_at` is the time the run is finalized, in canonical UTC
+(`YYYY-MM-DDTHH:MM:SSZ`). It is never later than the current time -- a
+payload that rounds a batch timestamp up to the next minute is refused with
+`PAYLOAD_VALUE`. Omit the field to record the current time.
+
 ## 2. Single-record extraction using `$.field`
 
 An explicit-root path names a field at the root of one record, not inside a

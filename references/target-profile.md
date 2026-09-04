@@ -141,6 +141,12 @@ The public Discovery payload is a closed contract. Its wrapper is exactly
 provenance, transport-trace, validation-context, contradiction-value, proof,
 or family-value fields are rejected before Candidate construction.
 
+`recorded_at` and `provenance.observed_at` are canonical RFC 3339 UTC, in
+the form `YYYY-MM-DDTHH:MM:SSZ`. `recorded_at` is never later than the
+current time: a Proposal recorded in the future is invisible to its own
+write, so the finalizer refuses it with `PAYLOAD_VALUE` before writing
+anything. Omit `recorded_at` to record the current time.
+
 `observation.host` is a literal behavior scope: `www.example.com` and
 `example.com` are distinct hosts there, and the `TARGET_SURFACE` evidence
 locator must use the same literal hostname. Target-reference resolution
@@ -148,9 +154,9 @@ locator must use the same literal hostname. Target-reference resolution
 canonical ASCII (IDNA) form, so a Unicode locator and its punycode form
 match.
 
-Every refusal decided before Operational Memory is consulted -- payload
-shape and value, the run marker, and the Knowledge Root -- carries a
-`reason_code` from one closed list of ten values:
+Every refusal decided from the payload, the run marker, the Knowledge Root,
+or the state of the Operational Memory database carries a `reason_code` from
+this closed list of eleven:
 
 - `PAYLOAD_SHAPE` — wrong type, or a missing/unsupported field.
 - `PAYLOAD_VALUE` — a closed-set or pattern violation on an otherwise well-shaped field.
@@ -162,9 +168,10 @@ shape and value, the run marker, and the Knowledge Root -- carries a
 - `TARGET_REFERENCE` — the `target` argument cannot be resolved to one canonical target.
 - `RUN_MARKER` — no open Discovery run marker matches this target, capability, and `run_id`.
 - `KNOWLEDGE_ROOT_UNRESOLVED` — no Knowledge Root resolved, so nothing was read or written.
+- `OPERATIONAL_MEMORY_UNAVAILABLE` — the Operational Memory database is locked by another process, unreadable, or not writable.
 
-A `NOT_SAVED` decided against accepted knowledge carries its own code
-instead, one of eleven: `NO_REUSABLE_KNOWLEDGE`,
+A `NOT_SAVED` decided against accepted knowledge carries a code from a
+different closed list, also of eleven values: `NO_REUSABLE_KNOWLEDGE`,
 `TRANSPORT_POLICY_UNPROVEN`, `FAILURE_UNCLASSIFIED`, `ALREADY_PENDING`,
 `INFERENCE_ONLY`, `CONFIRMATION_PENDING`, `CONFLICT_OR_AMBIGUITY`,
 `REPLACEMENT_UNPROVEN`, `INSUFFICIENT_BILATERAL_EVIDENCE`,

@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
+import re
 import runpy
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -17,8 +22,9 @@ LOOKUP = SKILL / "scripts" / "knowledge-lookup"
 sys.path.insert(0, str(SKILL))
 
 from discovery_finalize import (
-    EVIDENCE_LINKAGE, HOST_SCOPE, PAYLOAD_SHAPE, PAYLOAD_VALUE, PROVENANCE,
-    TARGET_REFERENCE, TASK_DATA_REJECTED, TRANSPORT_TRACE,
+    EVIDENCE_LINKAGE, HOST_SCOPE, KNOWLEDGE_ROOT_UNRESOLVED,
+    OPERATIONAL_MEMORY_UNAVAILABLE, PAYLOAD_SHAPE, PAYLOAD_VALUE, PROVENANCE,
+    RUN_MARKER, TARGET_REFERENCE, TASK_DATA_REJECTED, TRANSPORT_TRACE,
     DiscoveryFinalizationError, finalize_discovery,
 )
 from discovery_runs import begin_discovery
@@ -101,6 +107,19 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         return begin_discovery(
             self.root, payload["target"], payload["capability"],
             run_id=payload["provenance"]["run_id"], opened_at=RECORDED,
+        )
+
+    @staticmethod
+    def utc(offset_seconds: int = 0) -> str:
+        moment = datetime.now(timezone.utc) + timedelta(seconds=offset_seconds)
+        return moment.isoformat(timespec="seconds").replace("+00:00", "Z")
+
+    def run_cli(self, payload, *arguments):
+        return subprocess.run(
+            [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root),
+             *arguments, "--input", "-"],
+            input=json.dumps(payload), text=True, capture_output=True,
+            encoding="utf-8",
         )
 
     @staticmethod
@@ -321,6 +340,165 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         self.assertNotIn("lifecycle", current)
         self.assertIn("SITE_BLOCKING", json.dumps(current))
         self.assertIn("CHROME", json.dumps(current))
+
+    def test_cli_refuses_a_recorded_at_in_the_future(self):
+        # An agent that rounds a batch timestamp up to the next minute used
+        # to store the Proposal and then fail promotion, because a Proposal
+        # recorded later than knowledge time is invisible to its own write.
+        payload = {**self.payload(), "recorded_at": self.utc(3600)}
+        self.open_payload(payload)
+        result = self.run_cli(payload)
+        self.assertEqual(2, result.returncode, result.stdout)
+        body = json.loads(result.stderr)
+        self.assertEqual("NOT_SAVED", body["status"])
+        self.assertEqual("OPEN", body["run_state"])
+        self.assertEqual(PAYLOAD_VALUE, body["reason_code"])
+        self.assertIn("recorded_at", body["reason"])
+        self.assertIn(payload["recorded_at"], body["reason"])
+        self.assertIn("later than the current time", body["reason"])
+        self.assertNotIn("Traceback", result.stderr)
+        stored = tuple(
+            self.memory._conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+            for table in ("claims", "proposals")
+        )
+        self.assertEqual((0, 0), stored)
+
+    def test_validate_refuses_a_recorded_at_in_the_future(self):
+        # The check runs before any write, so --validate reports it too.
+        payload = {**self.payload(), "recorded_at": self.utc(3600)}
+        self.open_payload(payload)
+        result = self.run_cli(payload, "--validate")
+        self.assertEqual(2, result.returncode, result.stdout)
+        body = json.loads(result.stderr)
+        self.assertEqual(PAYLOAD_VALUE, body["reason_code"])
+        self.assertEqual("OPEN", body["run_state"])
+        self.assertIn("later than the current time", body["reason"])
+
+    def test_cli_refuses_a_malformed_recorded_at(self):
+        payload = {**self.payload(), "recorded_at": "not-a-time"}
+        self.open_payload(payload)
+        result = self.run_cli(payload)
+        self.assertEqual(2, result.returncode, result.stdout)
+        body = json.loads(result.stderr)
+        self.assertEqual("NOT_SAVED", body["status"])
+        self.assertEqual("OPEN", body["run_state"])
+        self.assertEqual(PAYLOAD_VALUE, body["reason_code"])
+        self.assertIn("recorded_at", body["reason"])
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_cli_saves_a_recorded_at_at_the_current_time(self):
+        # Only a strictly future value is refused; "now" is the value the
+        # finalizer itself supplies when the field is omitted.
+        payload = {**self.payload(), "recorded_at": self.utc()}
+        self.open_payload(payload)
+        result = self.run_cli(payload)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("SAVED", json.loads(result.stdout)["status"])
+
+    def test_cli_reports_a_locked_operational_memory(self):
+        # A concurrent CaravelaWeb process holding the database used to give
+        # the same uncoded generic refusal as a broken payload, so a caller
+        # could not tell "wait and retry" from "fix the payload".
+        payload = self.payload()
+        self.open_payload(payload)
+        holder = sqlite3.connect(str(self.db), isolation_level=None)
+        self.addCleanup(holder.close)
+        holder.execute("BEGIN EXCLUSIVE")
+        locked = self.run_cli(payload)
+        self.assertEqual(2, locked.returncode, locked.stdout)
+        body = json.loads(locked.stderr)
+        self.assertEqual("NOT_SAVED", body["status"])
+        self.assertEqual("OPEN", body["run_state"])
+        self.assertEqual(OPERATIONAL_MEMORY_UNAVAILABLE, body["reason_code"])
+        self.assertIn("locked", body["reason"])
+        # Installation state stays out of the payload contract.
+        self.assertNotIn(str(self.db), body["reason"])
+        self.assertNotIn("Traceback", locked.stderr)
+
+        holder.execute("ROLLBACK")
+        released = self.run_cli(payload)
+        self.assertEqual(0, released.returncode, released.stderr)
+        self.assertEqual("SAVED", json.loads(released.stdout)["status"])
+
+    def test_a_sql_defect_is_not_reported_as_unavailable_memory(self):
+        # OPERATIONAL_MEMORY_UNAVAILABLE tells the caller to wait and retry.
+        # A malformed query is a defect in this program, so it must keep
+        # reaching the generic branch instead of being dressed up as
+        # transient infrastructure trouble.
+        payload_path = self.root / "sql-defect.json"
+        payload = self.payload()
+        payload_path.write_text(json.dumps(payload), encoding="utf-8")
+        self.open_payload(payload)
+
+        def broken(*arguments, **keywords):
+            raise sqlite3.OperationalError("no such table: bogus")
+
+        # Patch the source module before the script imports from it:
+        # `runpy.run_path` returns a copy of the namespace, so replacing the
+        # name in that copy would not reach `main`.
+        import discovery_finalize as module
+
+        self.addCleanup(setattr, module, "finalize_discovery", module.finalize_discovery)
+        module.finalize_discovery = broken
+        finalizer = runpy.run_path(str(FINALIZER))
+        previous_argv = sys.argv
+        self.addCleanup(setattr, sys, "argv", previous_argv)
+        sys.argv = [
+            str(FINALIZER), "--knowledge-root", str(self.root),
+            "--input", str(payload_path),
+        ]
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            status = finalizer["main"]()
+        self.assertEqual(2, status)
+        body = json.loads(stderr.getvalue())
+        self.assertEqual("NOT_SAVED", body["status"])
+        self.assertNotIn("reason_code", body)
+        self.assertEqual(
+            "Discovery could not be finalized in local Operational Memory.",
+            body["reason"],
+        )
+
+    def test_a_file_that_is_not_a_database_is_not_unavailable_memory(self):
+        # DatabaseOpenError also covers a file that is not an Operational
+        # Memory database at all. Nothing about that improves by waiting, so
+        # it must not carry the retry code either.
+        junk = self.root / "not-a-database.db"
+        junk.write_text("this is not a SQLite file\n", encoding="utf-8")
+        payload = self.payload()
+        self.open_payload(payload)
+        result = subprocess.run(
+            [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root),
+             "--operational-memory-db", str(junk), "--input", "-"],
+            input=json.dumps(payload), text=True, capture_output=True,
+            encoding="utf-8",
+        )
+        self.assertEqual(2, result.returncode, result.stdout)
+        body = json.loads(result.stderr)
+        self.assertEqual("NOT_SAVED", body["status"])
+        self.assertNotIn("reason_code", body)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_the_documented_reason_codes_match_the_constants(self):
+        # The reference is the agent-facing contract for these codes, so a
+        # new constant that never reaches it is a silent contract drift.
+        document = (SKILL / "references" / "target-profile.md").read_text(encoding="utf-8")
+        documented: list[str] = []
+        for line in document.split("closed list of eleven:", 1)[1].splitlines():
+            match = re.match("^- `([A-Z_]+)` —", line)
+            if match:
+                documented.append(match.group(1))
+            elif documented:
+                break
+        self.assertEqual(
+            sorted([
+                PAYLOAD_SHAPE, PAYLOAD_VALUE, TASK_DATA_REJECTED, HOST_SCOPE,
+                EVIDENCE_LINKAGE, PROVENANCE, TRANSPORT_TRACE, TARGET_REFERENCE,
+                RUN_MARKER, KNOWLEDGE_ROOT_UNRESOLVED,
+                OPERATIONAL_MEMORY_UNAVAILABLE,
+            ]),
+            sorted(documented),
+        )
 
     def test_cli_names_an_unresolved_knowledge_root(self):
         # An empty directory is a real directory with no `targets/`, so root

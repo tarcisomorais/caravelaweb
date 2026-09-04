@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -12,11 +13,12 @@ SKILL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SKILL_ROOT))
 
 from discovery_finalize import (
-    KNOWLEDGE_ROOT_UNRESOLVED, PAYLOAD_SHAPE, RUN_MARKER,
-    DiscoveryFinalizationError, _resolve_target_argument, finalize_discovery,
+    KNOWLEDGE_ROOT_UNRESOLVED, OPERATIONAL_MEMORY_UNAVAILABLE, PAYLOAD_SHAPE,
+    RUN_MARKER, DiscoveryFinalizationError, _resolve_target_argument,
+    finalize_discovery,
 )
 from discovery_runs import DiscoveryRunError, close_discovery, require_open_discovery
-from operational_memory import SQLiteOperationalMemory
+from operational_memory import DatabaseOpenError, SQLiteOperationalMemory
 from platform_adapter import configure_utf8_stdio, resolve_knowledge_root
 
 configure_utf8_stdio()
@@ -46,6 +48,64 @@ def resolve_root(override: str | None) -> Path | None:
     return resolve_knowledge_root(override)
 
 
+# SQLite conditions that mean "the database is not available right now", as
+# opposed to a defect in a query this program built. A SQL error outside this
+# set keeps falling to the generic branch: reporting it as unavailable memory
+# would dress a programming regression up as transient infrastructure trouble
+# and invite the caller to retry forever.
+UNAVAILABLE_SQLITE_CONDITIONS = (
+    "database is locked",
+    "database table is locked",
+    "unable to open database file",
+    "disk i/o error",
+    "readonly database",
+)
+
+
+def unavailable_sqlite_cause(error: BaseException) -> sqlite3.OperationalError | None:
+    """The lock or availability failure behind ``error``, if that is what it is.
+
+    Classify on the SQLite error itself, never on a wrapper's message: a lock
+    held during the open reaches this point as a `DatabaseOpenError` about an
+    invalid schema, because the blocked schema probe cannot tell a locked file
+    from a wrong one. So follow `__cause__` to the first SQLite error and
+    decide there. Wrapper messages also name the database file, which the
+    payload contract does not expose, while the SQLite text does not.
+
+    The first SQLite error settles it. A wrong schema ("no such table:
+    schema_metadata"), a file that is not a database, an inactive
+    `foreign_keys` pragma, and any malformed query this program built are all
+    outside the set and keep falling to the generic branch, so a defect here
+    is never reported to the caller as transient infrastructure trouble.
+    """
+    current: BaseException | None = error
+    for _ in range(8):
+        if current is None:
+            return None
+        if isinstance(current, sqlite3.OperationalError):
+            text = str(current).lower()
+            if any(condition in text for condition in UNAVAILABLE_SQLITE_CONDITIONS):
+                return current
+            return None
+        current = current.__cause__
+    return None
+
+
+def memory_unavailable(detail: str) -> DiscoveryFinalizationError:
+    """A locked or unopenable database is a coded, retryable refusal.
+
+    It used to reach the generic handler, which prints no `reason_code` at
+    all, so a caller could not tell "wait and retry" from "fix the payload".
+    `detail` carries the SQLite text only -- never the database path, which
+    is installation state the payload contract does not expose.
+    """
+    return DiscoveryFinalizationError(
+        f"Operational Memory is locked or cannot be opened ({detail}); retry "
+        "after the other CaravelaWeb process finishes, or run preflight",
+        code=OPERATIONAL_MEMORY_UNAVAILABLE,
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Save reusable Discovery knowledge in local Operational Memory")
     parser.add_argument("--input", default="-", help="JSON file, or - for stdin")
@@ -68,19 +128,25 @@ def main() -> int:
         provenance = payload.get("provenance")
         run_id = provenance.get("run_id") if isinstance(provenance, dict) else None
         db = Path(args.operational_memory_db) if args.operational_memory_db else root / ".caravelaweb" / "operational_memory.db"
-        with SQLiteOperationalMemory(db, create=False, knowledge_root=root) as memory:
-            target = _resolve_target_argument(memory, payload.get("target"))
-            require_open_discovery(
-                root, target, payload.get("capability"), run_id
-            )
-            result = finalize_discovery(
-                memory,
-                target=target, capability=payload.get("capability"),
-                observations=payload.get("observations"), evidence=payload.get("evidence"),
-                provenance=payload.get("provenance"), recorded_at=payload.get("recorded_at"),
-                transport_trace=payload.get("transport_trace"),
-                dry_run=args.validate,
-            )
+        try:
+            with SQLiteOperationalMemory(db, create=False, knowledge_root=root) as memory:
+                target = _resolve_target_argument(memory, payload.get("target"))
+                require_open_discovery(
+                    root, target, payload.get("capability"), run_id
+                )
+                result = finalize_discovery(
+                    memory,
+                    target=target, capability=payload.get("capability"),
+                    observations=payload.get("observations"), evidence=payload.get("evidence"),
+                    provenance=payload.get("provenance"), recorded_at=payload.get("recorded_at"),
+                    transport_trace=payload.get("transport_trace"),
+                    dry_run=args.validate,
+                )
+        except (DatabaseOpenError, sqlite3.OperationalError) as exc:
+            cause = unavailable_sqlite_cause(exc)
+            if cause is None:
+                raise
+            raise memory_unavailable(str(cause)) from exc
         if args.validate:
             print(json.dumps({
                 "status": "VALID",

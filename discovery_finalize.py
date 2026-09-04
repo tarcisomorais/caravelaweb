@@ -11,7 +11,6 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
 from urllib.parse import urlparse
 
@@ -53,10 +52,11 @@ RETRYABLE_REASON_CODES = frozenset({"TRANSPORT_POLICY_UNPROVEN", "FAILURE_UNCLAS
 # `discovery-finalize` refusal `reason_code` vocabulary. Every `raise
 # DiscoveryFinalizationError(...)` site passes one of these as `code=`. The
 # constructor has no default, so an unclassified refusal is a `TypeError` at
-# the raise site instead of a refusal the caller cannot act on. The last two
-# are raised by `scripts/discovery-finalize` rather than by this module:
-# `RUN_MARKER` for a `DiscoveryRunError`, and `KNOWLEDGE_ROOT_UNRESOLVED`
-# before any Operational Memory is opened.
+# the raise site instead of a refusal the caller cannot act on. The last
+# three are raised by `scripts/discovery-finalize` rather than by this
+# module: `RUN_MARKER` for a `DiscoveryRunError`, `KNOWLEDGE_ROOT_UNRESOLVED`
+# before any Operational Memory is opened, and `OPERATIONAL_MEMORY_UNAVAILABLE`
+# when the database is locked by another process or cannot be opened.
 PAYLOAD_SHAPE = "PAYLOAD_SHAPE"
 PAYLOAD_VALUE = "PAYLOAD_VALUE"
 TASK_DATA_REJECTED = "TASK_DATA_REJECTED"
@@ -67,6 +67,7 @@ TRANSPORT_TRACE = "TRANSPORT_TRACE"
 TARGET_REFERENCE = "TARGET_REFERENCE"
 RUN_MARKER = "RUN_MARKER"
 KNOWLEDGE_ROOT_UNRESOLVED = "KNOWLEDGE_ROOT_UNRESOLVED"
+OPERATIONAL_MEMORY_UNAVAILABLE = "OPERATIONAL_MEMORY_UNAVAILABLE"
 
 
 OPERATIONAL_FAMILIES = {
@@ -189,10 +190,6 @@ def _canonical(value: Any) -> str:
 
 def _digest(value: Any) -> str:
     return hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()[:20]
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _reject_unsafe_content(value: Any, *, field: str = "observation") -> None:
@@ -1496,8 +1493,26 @@ def finalize_discovery(
     # is derived solely from memory.knowledge_root's real write-authority
     # marker -- no caller-supplied argument can assert or bypass it.
     assert_om_native_write_authority(memory)
-    recorded_at = recorded_at or _now()
-    validate_timestamp(recorded_at, field="finalize_discovery.recorded_at")
+    # The clock comes from the memory, so a test that injects one pins the
+    # refusal boundary too.
+    now = memory._clock()
+    recorded_at = recorded_at or now
+    try:
+        validate_timestamp(recorded_at, field="finalize_discovery.recorded_at")
+    except RecordValidationError as exc:
+        raise DiscoveryFinalizationError(str(exc), code=PAYLOAD_VALUE) from exc
+    # A `recorded_at` the clock has not reached is invisible at knowledge time
+    # to the very write that creates it: `_pending_proposal_ids` skips a
+    # Proposal recorded later than now, so promotion fails afterwards with an
+    # "already resolved" error the caller cannot act on. Refuse it here,
+    # before any write, so `--validate` reports it too. Both values are
+    # canonical UTC, so comparing the strings compares the instants.
+    if recorded_at > now:
+        raise DiscoveryFinalizationError(
+            f"recorded_at {recorded_at} is later than the current time {now}; "
+            "use the current time or omit the field",
+            code=PAYLOAD_VALUE,
+        )
     normalized = _normalize_observations(observations)
     clean_provenance = _validate_provenance(provenance)
     if not normalized:
