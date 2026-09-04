@@ -2,6 +2,20 @@
 
 All notable changes to CaravelaWeb will be documented in this file.
 
+## Unreleased
+
+### Changed
+
+- The payload examples in `references/discovery-payload-examples.md` no
+  longer carry `recorded_at`, so an agent that copies an example lets the
+  finalizer stamp the write instant instead of stamping one itself. The
+  field stays supported and its rule now reads the same in the payload
+  reference and in `references/target-profile.md`: supply it only to
+  record a different write instant on purpose, with a value at or before
+  the current time. Runtime validation is unchanged -- a future
+  `recorded_at` and a malformed one are still refused with
+  `PAYLOAD_VALUE`.
+
 ## 0.2.1 - 2026-09-04
 
 Cheaper Discovery finalization: a checklist in the contract for the four

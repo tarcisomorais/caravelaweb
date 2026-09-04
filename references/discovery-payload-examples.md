@@ -40,15 +40,15 @@ host is never reachable by URL.
     "locator": "https://example-direct-read.example/articles/1",
     "scope": "TARGET_SURFACE"
   }],
-  "provenance": {"run_id": "<from discovery-begin>", "observed_at": "2026-08-14T12:00:00Z"},
-  "recorded_at": "2026-08-14T12:00:00Z"
+  "provenance": {"run_id": "<from discovery-begin>", "observed_at": "2026-08-14T12:00:00Z"}
 }
 ```
 
-`recorded_at` is the time the run is finalized, in canonical UTC
-(`YYYY-MM-DDTHH:MM:SSZ`). It is never later than the current time -- a
-payload that rounds a batch timestamp up to the next minute is refused with
-`PAYLOAD_VALUE`. Omit the field to record the current time.
+The examples omit the optional `recorded_at`, so the finalizer stamps the
+current time; supply it only to record a different write instant on purpose,
+and then only with a canonical UTC (`YYYY-MM-DDTHH:MM:SSZ`) value at or
+before the current time, because a later one -- a batch timestamp rounded up
+to the next minute, say -- is refused with `PAYLOAD_VALUE`.
 
 ## 2. Single-record extraction using `$.field`
 
@@ -74,8 +74,7 @@ collection.
     "locator": "https://example-single-record.example/articles/1",
     "scope": "TARGET_SURFACE"
   }],
-  "provenance": {"run_id": "<from discovery-begin>", "observed_at": "2026-08-14T12:00:00Z"},
-  "recorded_at": "2026-08-14T12:00:00Z"
+  "provenance": {"run_id": "<from discovery-begin>", "observed_at": "2026-08-14T12:00:00Z"}
 }
 ```
 
@@ -100,8 +99,7 @@ collection.
     "locator": "https://example-collection.example/search?q=topic",
     "scope": "TARGET_SURFACE"
   }],
-  "provenance": {"run_id": "<from discovery-begin>", "observed_at": "2026-08-14T12:00:00Z"},
-  "recorded_at": "2026-08-14T12:00:00Z"
+  "provenance": {"run_id": "<from discovery-begin>", "observed_at": "2026-08-14T12:00:00Z"}
 }
 ```
 
@@ -126,8 +124,7 @@ hostname exactly matches the literal Observation Host, with `scope` exactly
     "locator": "https://www.example-host-assoc.example/articles/1",
     "scope": "TARGET_SURFACE"
   }],
-  "provenance": {"run_id": "<from discovery-begin>", "observed_at": "2026-08-14T12:00:00Z"},
-  "recorded_at": "2026-08-14T12:00:00Z"
+  "provenance": {"run_id": "<from discovery-begin>", "observed_at": "2026-08-14T12:00:00Z"}
 }
 ```
 
@@ -178,8 +175,7 @@ both attempts and stops at the first `FUNCTIONAL` result.
       {"transport": "LIGHTPANDA", "outcome": "FUNCTIONAL", "evidence": ["https://example-browser-escalation.example/articles/1-rendered"]}
     ]
   },
-  "provenance": {"run_id": "<from discovery-begin>", "observed_at": "2026-08-14T12:00:00Z"},
-  "recorded_at": "2026-08-14T12:00:00Z"
+  "provenance": {"run_id": "<from discovery-begin>", "observed_at": "2026-08-14T12:00:00Z"}
 }
 ```
 
@@ -227,8 +223,7 @@ still finalizes with `SAVED`, recording the block for reuse.
       {"transport": "DIRECT_READ", "outcome": "FAILED", "evidence": ["https://example-blocked-ladder.example/articles/1"]}
     ]
   },
-  "provenance": {"run_id": "<from discovery-begin>", "observed_at": "2026-08-14T12:00:00Z"},
-  "recorded_at": "2026-08-14T12:00:00Z"
+  "provenance": {"run_id": "<from discovery-begin>", "observed_at": "2026-08-14T12:00:00Z"}
 }
 ```
 
@@ -263,8 +258,7 @@ satisfies this.
     "locator": "https://example-observed-limitation.example/articles/1",
     "scope": "TARGET_SURFACE"
   }],
-  "provenance": {"run_id": "<from discovery-begin>", "observed_at": "2026-08-14T12:00:00Z"},
-  "recorded_at": "2026-08-14T12:00:00Z"
+  "provenance": {"run_id": "<from discovery-begin>", "observed_at": "2026-08-14T12:00:00Z"}
 }
 ```
 
@@ -311,8 +305,7 @@ the `OPERATIONAL` lifecycle in one run: a `FUNCTIONAL` transport, a matching
     "locator": "https://example-operational.example/articles/1",
     "scope": "TARGET_SURFACE"
   }],
-  "provenance": {"run_id": "<from discovery-begin>", "observed_at": "2026-08-14T12:00:00Z"},
-  "recorded_at": "2026-08-14T12:00:00Z"
+  "provenance": {"run_id": "<from discovery-begin>", "observed_at": "2026-08-14T12:00:00Z"}
 }
 ```
 

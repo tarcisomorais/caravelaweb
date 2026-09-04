@@ -142,10 +142,12 @@ provenance, transport-trace, validation-context, contradiction-value, proof,
 or family-value fields are rejected before Candidate construction.
 
 `recorded_at` and `provenance.observed_at` are canonical RFC 3339 UTC, in
-the form `YYYY-MM-DDTHH:MM:SSZ`. `recorded_at` is never later than the
-current time: a Proposal recorded in the future is invisible to its own
-write, so the finalizer refuses it with `PAYLOAD_VALUE` before writing
-anything. Omit `recorded_at` to record the current time.
+the form `YYYY-MM-DDTHH:MM:SSZ`. Omit `recorded_at` and the finalizer stamps
+the current time; a caller supplies it only to record a different write
+instant on purpose, and then only with a value at or before the current
+time. `recorded_at` is never later than the current time: a Proposal
+recorded in the future is invisible to its own write, so the finalizer
+refuses it with `PAYLOAD_VALUE` before writing anything.
 
 `observation.host` is a literal behavior scope: `www.example.com` and
 `example.com` are distinct hosts there, and the `TARGET_SURFACE` evidence
