@@ -21,7 +21,7 @@ in the backlog and rejection sections so it is not re-audited.
 | 006 | Canonical timestamps, short-form IP literals, run-marker symlink guard | P2 | S | — | DONE (reviewed 2026-09-02; one commit on `advisor/plans-2026-09-02`) |
 | 007 | `knowledge-lookup --list` memory index | P2 | S | — | DONE (reviewed 2026-09-02; one commit on `advisor/plans-2026-09-02`) |
 | 008 | Correct stale public documentation claims | P2 | S | — | DONE (reviewed 2026-09-02; one commit on `advisor/plans-2026-09-02`) |
-| 009 | Reduce the Discovery ceremony cost (checklist, reason codes, aggregated diagnostics, derived claims, one lookup, multi-capability design) | P1–P3 | S–L | Step 0 re-measurement gate for changes 3–6 | IN PROGRESS (changes 1–2 DONE and reviewed 2026-09-03 on `plan-009/change-1` `762865f` and `plan-009/change-2` `2c96483`, cherry-picked onto `main` as `2319185` and `a8e97e2`; Step 0 gate re-measured 2026-09-03: FAIL, 1/10 runs on 0.2.0+, so 3–5 BLOCKED on insufficient data and 6 waits on 3–5) |
+| 009 | Reduce the Discovery ceremony cost (checklist, reason codes, aggregated diagnostics, derived claims, one lookup, multi-capability design) | P1–P3 | S–L | Step 0 re-measurement gate for changes 3–6 | IN PROGRESS (changes 1–2 DONE and reviewed 2026-09-03 on `plan-009/change-1` `762865f` and `plan-009/change-2` `2c96483`, cherry-picked onto `main` as `2319185` and `a8e97e2`; uncoded-refusal hotfix `02be2ab` from the 2026-09-04 live run; Step 0 gate re-measured 2026-09-03: FAIL, 1/10 runs on 0.2.0+, so 3–5 BLOCKED on insufficient data and 6 waits on 3–5) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale)
 
@@ -100,11 +100,27 @@ Checked read-only on a copy of `~/.local/share/caravelaweb/knowledge-root`:
   change 6 (design outline, gated on re-measurement).
 - **DEBT-05** Two unreferenced legacy helpers exported from
   `write_authority.py`. Delete. Effort S.
+- **DEBT-06** A lock held on `operational_memory.db` during open is
+  reported by `operational_memory/core.py` `_validate_schema` as
+  `SchemaVersionError("database is not an Operational Memory schema")`,
+  then wrapped by `operational_memory/__init__.py:43` into "not a valid
+  SQLite Operational Memory database". Every opener (preflight,
+  knowledge-lookup, knowledge-resolve) therefore tells a user with a locked
+  database that it is corrupt. The finalize hotfix walks the cause chain
+  to the SQLite error instead; fix the root in core so the wrappers stop
+  lying. Effort S.
 - **DIRECTION-07** Model question raised by plan 009 change 4: should the
   operational proof's own `validation.context.authentication` count as the
   access-model fact, so `OPERATIONAL` needs two declared observations
   instead of three? Changes what earns `OPERATIONAL`; needs an explicit
   maintainer decision before any plan. Not a ceremony optimization.
+- **DIRECTION-08** Contract question raised by the 2026-09-04 live run:
+  does `provenance.observed_at` strictly mean the instant the agent made
+  the observation, or may it carry a timestamp derived from the evidence?
+  A future value saves today. If the former is normative, future values
+  should be refused with `PROVENANCE`; if not, they are legitimate. Kept
+  out of the uncoded-refusals hotfix because no downstream failure was
+  demonstrated; needs an explicit maintainer decision.
 
 ## Findings considered and rejected
 

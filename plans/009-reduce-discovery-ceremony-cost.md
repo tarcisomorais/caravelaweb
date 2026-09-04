@@ -35,6 +35,15 @@
   generic no-`reason_code` message that change 2 fixes. Script:
   `plans/measure-step0` (read-only, no arguments, prints the gate block
   and exits before computing metrics when the gate fails).
+- **Live run 2026-09-04** (repo session, excluded from the gate by the
+  script; recorded as method evidence only): 10 read-only runs,
+  `ai-headlines-list`, on `main` `cc371fa`, live Knowledge Root. 10/10
+  `SAVED` and `OPERATIONAL`; 7 DIRECT_READ, 2 LIGHTPANDA, 1 CHROME. Real
+  finalize calls mean 1.7, max 2; 3/10 = 30% with zero refusals; 7
+  refusals, all uncoded (6/10 runs from a future `recorded_at`, 1 from a
+  locked database), 0 from the change 1 trap cluster. 45 `--validate`
+  calls, 42 of them diagnosing those two refusals. Fixed on `main` as
+  `02be2ab`. 21 lookup calls preceded the first fetch (supports change 5).
 
 ## Why this matters
 
