@@ -21,7 +21,7 @@ in the backlog and rejection sections so it is not re-audited.
 | 006 | Canonical timestamps, short-form IP literals, run-marker symlink guard | P2 | S | — | DONE (reviewed 2026-09-02; one commit on `advisor/plans-2026-09-02`) |
 | 007 | `knowledge-lookup --list` memory index | P2 | S | — | DONE (reviewed 2026-09-02; one commit on `advisor/plans-2026-09-02`) |
 | 008 | Correct stale public documentation claims | P2 | S | — | DONE (reviewed 2026-09-02; one commit on `advisor/plans-2026-09-02`) |
-| 009 | Reduce the Discovery ceremony cost (checklist, reason codes, aggregated diagnostics, derived claims, one lookup, multi-capability design) | P1–P3 | S–L | Step 0 re-measurement gate for changes 3–6 | IN PROGRESS (changes 1–2 DONE `2319185` `a8e97e2`, hotfix `02be2ab`, released 0.2.1 `c0d7f77`; gate PASS 2026-09-04 on 17 runs / 5 sessions / 2 projects: change 3 REJECTED (not needed: mean 1.35, max 3, 12/17 = 71% zero refusals), change 4 REJECTED (not needed: 0/16 proof-carrying runs lacked `authentication`; duplicated blocks 2/3 under the 10-item floor), change 5 DONE `6856e87` (reviewed 2026-09-04), DX-05 DONE `9374df3`; released 0.2.2 `0130703`; second sample 2026-09-04 on 0.2.2: 21 runs / 3 sessions, mean 1.14 finalize per run, lookups 2.10 per run (from 3.35), change 6 residual 27% of ceremony calls on second capabilities with 15% evidence reuse; change 6 awaits the maintainer's decision on those numbers) |
+| 009 | Reduce the Discovery ceremony cost (checklist, reason codes, aggregated diagnostics, derived claims, one lookup, multi-capability design) | P1–P3 | S–L | Step 0 re-measurement gate for changes 3–6 | DONE (closed 2026-09-04: changes 1, 2, 5 shipped in 0.2.1 `c0d7f77` and 0.2.2 `0130703`; changes 3, 4, 6 REJECTED by measurement, see the plan's status section; gate script `plans/measure-step0`) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale)
 
@@ -96,8 +96,17 @@ Checked read-only on a copy of `~/.local/share/caravelaweb/knowledge-root`:
 - **DIRECTION-05** A run-independent `--lint` and `--explain-schema` for
   payloads. Superseded by plan 009 change 3 (aggregated diagnostics) and
   the mandated `--validate`.
-- **DIRECTION-06** Multi-capability ceremonies. Superseded by plan 009
-  change 6 (design outline, gated on re-measurement).
+- **DIRECTION-06** Multi-capability ceremonies. REJECTED 2026-09-04 as
+  plan 009 change 6, re-measured on 0.2.2: second capabilities account
+  for 25/92 = 27% of ceremony calls in multi-capability tasks, but only
+  4/27 = 15% reuse evidence from the first capability; with mean real
+  finalize cost at 1.14 calls per run and max 2, the marker and
+  transaction complexity is not justified, and a marker-only variant
+  would keep the lifecycle risk while discarding the design's strongest
+  benefit. Reopen only if second-capability ceremony exceeds 35-40% of
+  task ceremony and evidence reuse rises materially, or if users report
+  latency or cost that call counts do not show. Measure with
+  `plans/measure-step0`'s CHANGE 6 block.
 - **DEBT-05** Two unreferenced legacy helpers exported from
   `write_authority.py`. Delete. Effort S.
 - **DEBT-06** A lock held on `operational_memory.db` during open is

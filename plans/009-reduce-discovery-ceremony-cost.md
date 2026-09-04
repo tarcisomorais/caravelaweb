@@ -92,6 +92,16 @@
   cost is ceremony (one begin/finalize round per capability), not repeated
   proof work; the shared-evidence half of the change 6 design would save
   almost nothing. Decision on change 6 is the maintainer's.
+- **Change 6 REJECTED 2026-09-04**, re-measured on 0.2.2. Second
+  capabilities account for 25/92 = 27% of ceremony calls in
+  multi-capability tasks, but only 4/27 = 15% reuse evidence from the
+  first capability. With mean real finalize cost already at 1.14 calls per
+  run and max 2, the marker and transaction complexity is not justified.
+  A marker-only variant was considered and declined: it keeps most of the
+  lifecycle and atomicity risk and discards the design's strongest
+  benefit. Reopening condition recorded in `plans/README.md` DIRECTION-06.
+- **Plan closed 2026-09-04**: changes 1, 2, 5 shipped; 3, 4, 6 rejected by
+  measurement.
 
 ## Why this matters
 
