@@ -261,6 +261,49 @@ class FreshInstallEndToEndTests(unittest.TestCase):
         self.assertEqual(0, unseen.returncode, unseen.stderr)
         self.assertEqual("not_found", json.loads(unseen.stdout)["status"])
 
+    def test_init_honours_the_environment_variable_and_spares_the_default(self) -> None:
+        """Init resolves the root the same way every reader does. With the
+        variable set and no flag, it used to create the per-user default and
+        then refuse a second run against the root the session actually
+        reads."""
+        session_env = {**self.env, KNOWLEDGE_ROOT_ENV: str(self.root)}
+        initialize = run(INIT, "--json", env=session_env)
+        self.assertEqual(0, initialize.returncode, initialize.stderr)
+        self.assertEqual(
+            {
+                "status": "INITIALIZED",
+                "knowledge_root": str(self.root.resolve()),
+                "default_location": False,
+            },
+            json.loads(initialize.stdout),
+        )
+        # Nothing was written to the per-user default location: the fake home
+        # holds it, and no command has created it.
+        self.assertFalse(self.home.exists())
+
+        # The same session now reads what it just initialized.
+        preflight = run(PREFLIGHT, "--json", env=session_env)
+        self.assertEqual(0, preflight.returncode, preflight.stderr)
+        self.assertEqual("READY", json.loads(preflight.stdout)["status"])
+        self.assertEqual(
+            str(self.root.resolve()), json.loads(preflight.stdout)["knowledge_root"]["path"]
+        )
+
+        # A session without the variable still resolves the default, which
+        # remains uninitialized.
+        without = run(PREFLIGHT, "--json", env=self.env)
+        self.assertNotEqual("READY", json.loads(without.stdout)["status"])
+
+    def test_human_readable_output_names_the_environment_variable_source(self) -> None:
+        other = Path(self.temp.name) / "env-root"
+        session_env = {**self.env, KNOWLEDGE_ROOT_ENV: str(other)}
+        result = run(INIT, env=session_env)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("status: INITIALIZED", result.stdout)
+        self.assertIn(f"Source: the {KNOWLEDGE_ROOT_ENV} environment variable", result.stdout)
+        self.assertIn("not the default", result.stdout)
+        self.assertIn(str(other.resolve()), result.stdout)
+
     def test_env_var_still_works_as_an_advanced_override(self) -> None:
         initialize = run(INIT, "--knowledge-root", str(self.root), "--json", env=self.env)
         self.assertEqual(0, initialize.returncode, initialize.stderr)

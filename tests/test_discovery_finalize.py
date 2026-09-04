@@ -16,8 +16,6 @@ FINALIZER = SKILL / "scripts" / "discovery-finalize"
 LOOKUP = SKILL / "scripts" / "knowledge-lookup"
 sys.path.insert(0, str(SKILL))
 
-import ast
-
 from discovery_finalize import (
     EVIDENCE_LINKAGE, HOST_SCOPE, PAYLOAD_SHAPE, PAYLOAD_VALUE, PROVENANCE,
     TARGET_REFERENCE, TASK_DATA_REJECTED, TRANSPORT_TRACE,
@@ -25,7 +23,7 @@ from discovery_finalize import (
 )
 from discovery_runs import begin_discovery
 from operational_memory.core import SQLiteOperationalMemory
-from platform_adapter import resolve_knowledge_root
+from platform_adapter import KNOWLEDGE_ROOT_ENV, resolve_knowledge_root
 from write_authority import MIGRATED_WRITE_AUTHORITY_KIND, WriteAuthorityStateError
 
 RECORDED = "2026-07-28T12:00:00Z"
@@ -323,6 +321,25 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         self.assertNotIn("lifecycle", current)
         self.assertIn("SITE_BLOCKING", json.dumps(current))
         self.assertIn("CHROME", json.dumps(current))
+
+    def test_cli_names_an_unresolved_knowledge_root(self):
+        # An empty directory is a real directory with no `targets/`, so root
+        # resolution returns nothing. Before, that reached the generic
+        # handler and printed a refusal with no `reason_code` at all.
+        blank = tempfile.TemporaryDirectory()
+        self.addCleanup(blank.cleanup)
+        result = subprocess.run(
+            [sys.executable, str(FINALIZER), "--input", "-"],
+            input=json.dumps(self.payload()), text=True, capture_output=True,
+            encoding="utf-8", env={**os.environ, KNOWLEDGE_ROOT_ENV: blank.name},
+        )
+        self.assertEqual(2, result.returncode, result.stdout)
+        body = json.loads(result.stderr)
+        self.assertEqual("NOT_SAVED", body["status"])
+        self.assertEqual("OPEN", body["run_state"])
+        self.assertEqual("KNOWLEDGE_ROOT_UNRESOLVED", body["reason_code"])
+        self.assertIn("init-knowledge-root", body["reason"])
+        self.assertNotIn("Traceback", result.stderr)
 
     def test_cli_errors_are_structured_without_a_traceback(self):
         payload = self.root / "invalid-discovery.json"
@@ -2073,25 +2090,14 @@ class RefusalMessageTests(unittest.TestCase):
             },
         }
 
-    def test_every_raise_passes_an_explicit_code(self):
-        # Every `raise DiscoveryFinalizationError(...)` call must pass
-        # `code=` explicitly. A site that cannot be classified may keep the
-        # class default `PAYLOAD_INVALID` only through this explicit
-        # allowlist, which must stay empty.
-        ALLOWED_DEFAULT_CODE_LINES: frozenset[int] = frozenset()
-        source = (SKILL / "discovery_finalize.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        missing: list[int] = []
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "DiscoveryFinalizationError"
-            ):
-                has_code = any(keyword.arg == "code" for keyword in node.keywords)
-                if not has_code and node.lineno not in ALLOWED_DEFAULT_CODE_LINES:
-                    missing.append(node.lineno)
-        self.assertEqual([], missing, f"raise sites missing code=: {missing}")
+    def test_the_error_cannot_be_constructed_without_a_code(self):
+        # "Every refusal carries a reason code" is an invariant of the type,
+        # not of the raise sites: the constructor has no default code, so an
+        # unclassified refusal fails at the raise instead of reaching the
+        # caller as an uninformative one. This replaces an AST walk over
+        # `discovery_finalize.py`, which only saw that one module.
+        with self.assertRaises(TypeError):
+            DiscoveryFinalizationError("a refusal with no reason code")
 
     def test_unsupported_transport_names_value_and_accepted_set(self):
         payload = self.payload([

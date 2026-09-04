@@ -2,6 +2,26 @@
 
 All notable changes to CaravelaWeb will be documented in this file.
 
+## Unreleased
+
+### Changed
+
+- `discovery-finalize` reports a `reason_code` on every refusal it decides
+  from the payload, the run marker, or the Knowledge Root, from a closed
+  list of ten: the eight payload codes of 0.2.0 plus `RUN_MARKER` and
+  `KNOWLEDGE_ROOT_UNRESOLVED`. An unresolved Knowledge Root used to fall
+  through to the generic handler and print a refusal with no code at all;
+  it now names the condition and how to repair it. `PAYLOAD_INVALID` is
+  gone: `DiscoveryFinalizationError` no longer has a default code, so no
+  refusal it raises can carry an unclassified one.
+- `init-knowledge-root` resolves where to initialize the same way every
+  other command resolves where to read: `--knowledge-root`, then
+  `CARAVELAWEB_KNOWLEDGE_ROOT`, then the fixed per-user default. With the
+  environment variable set, it used to initialize the default location and
+  then refuse a second run against it. The output now names which of the
+  three sources was used, and `default_location` in `--json` output is true
+  only for the per-user default.
+
 ## 0.2.0 - 2026-09-03
 
 Visibility and repair for the two silent failures found in real use: a

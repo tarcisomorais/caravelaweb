@@ -11,7 +11,10 @@ from pathlib import Path
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SKILL_ROOT))
 
-from installation_init import InitializationRefusedError, initialize_knowledge_root
+from installation_init import (
+    DEFAULT_SOURCE, ENVIRONMENT_SOURCE, InitializationRefusedError,
+    initialize_knowledge_root, resolve_initialization_root,
+)
 from platform_adapter import KNOWLEDGE_ROOT_ENV, configure_utf8_stdio
 
 configure_utf8_stdio()
@@ -23,12 +26,20 @@ def main() -> int:
     )
     parser.add_argument(
         "--knowledge-root",
-        help="where to create it; defaults to the fixed per-user location if omitted",
+        help=(
+            "where to create it; without it, "
+            f"{KNOWLEDGE_ROOT_ENV} if set, else the fixed per-user location"
+        ),
     )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     try:
-        root = initialize_knowledge_root(args.knowledge_root)
+        # Resolve with the same precedence every other command applies
+        # (flag, environment variable, per-user default), so init never
+        # creates a root that a later command in the same session does not
+        # resolve. The source is reported, never recorded as a default.
+        chosen, source = resolve_initialization_root(args.knowledge_root)
+        root = initialize_knowledge_root(chosen)
     except InitializationRefusedError as error:
         if args.json:
             print(json.dumps({"status": "REFUSED", "reason": str(error)}, ensure_ascii=False, sort_keys=True))
@@ -37,17 +48,29 @@ def main() -> int:
         return 2
     if args.json:
         print(json.dumps(
-            {"status": "INITIALIZED", "knowledge_root": str(root), "default_location": args.knowledge_root is None},
+            {"status": "INITIALIZED", "knowledge_root": str(root), "default_location": source == DEFAULT_SOURCE},
             ensure_ascii=False, sort_keys=True,
         ))
         return 0
     print(f"status: INITIALIZED\nknowledge_root: {root}")
-    if args.knowledge_root is None:
-        print("This is the fixed per-user location; every later command finds it automatically.")
+    if source == DEFAULT_SOURCE:
+        print("Source: the fixed per-user location, because no --knowledge-root "
+              f"was given and {KNOWLEDGE_ROOT_ENV} is not set.")
+        print("Every later command finds it automatically.")
         print(f"To use a different root: pass --knowledge-root, or set {KNOWLEDGE_ROOT_ENV}.")
+    elif source == ENVIRONMENT_SOURCE:
+        # The variable is session state, not a recorded default: a session
+        # without it resolves the per-user location instead.
+        print(f"Source: the {KNOWLEDGE_ROOT_ENV} environment variable.")
+        print("This root is not the default; no later command resolves it on its own.")
+        print(
+            f"Keep {KNOWLEDGE_ROOT_ENV} set to that path, "
+            f"or use --knowledge-root {root}."
+        )
     else:
         # A chosen location is never recorded as anyone's default, so say how
         # to reach it again -- and that other sessions are unaffected.
+        print("Source: the --knowledge-root argument.")
         print("This root is not the default; no later command resolves it on its own.")
         print(
             f"Use it with --knowledge-root {root}, "

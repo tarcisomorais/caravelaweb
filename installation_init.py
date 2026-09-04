@@ -13,6 +13,7 @@ from pathlib import Path
 
 from operational_memory import SQLiteOperationalMemory
 from platform_adapter import (
+    KNOWLEDGE_ROOT_ENV,
     KNOWLEDGE_ROOT_MARKER,
     TARGETS_DIRECTORY,
     default_knowledge_root,
@@ -31,6 +32,14 @@ _LEGACY_INPUT_DIRECTORIES = (TARGETS_DIRECTORY, "candidates")
 
 class InitializationRefusedError(RuntimeError):
     """The target location cannot be truthfully classified as uninitialized."""
+
+
+# Which of the three sources of `resolve_initialization_root` chose the root.
+# Reported to the caller so a root created through the environment variable is
+# never described as the per-user default location.
+FLAG_SOURCE = "flag"
+ENVIRONMENT_SOURCE = "environment"
+DEFAULT_SOURCE = "default"
 
 
 def _now() -> str:
@@ -80,27 +89,41 @@ def assert_initializable(root: Path) -> None:
             )
 
 
+def resolve_initialization_root(
+    knowledge_root: str | Path | None = None,
+) -> tuple[Path, str]:
+    """Where a fresh installation goes, and which of the three sources chose it.
+
+    The precedence is the one ``platform_adapter.resolve_knowledge_root``
+    applies to every other command: explicit flag, then the session
+    environment variable, then the fixed per-user default. Initializing
+    somewhere else than the command that later reads it would create a root
+    no later command resolves, which is the failure this ordering removes.
+
+    Every branch resolves the path: on Windows, an unresolved default (built
+    from %LOCALAPPDATA%) can be a short 8.3-alias path (observed on
+    GitHub-hosted windows-latest runners, e.g. "RUNNER~1"), which would
+    otherwise mismatch the canonical form the post-init self-check compares
+    against and spuriously refuse a legitimate fresh install.
+    """
+    if knowledge_root is not None:
+        return Path(knowledge_root).expanduser().resolve(), FLAG_SOURCE
+    if env_value := os.environ.get(KNOWLEDGE_ROOT_ENV):
+        return Path(env_value).expanduser().resolve(), ENVIRONMENT_SOURCE
+    return default_knowledge_root().resolve(), DEFAULT_SOURCE
+
+
 def initialize_knowledge_root(knowledge_root: str | Path | None = None) -> Path:
     """Create a new Knowledge Root with fresh-install (NONE -> OPERATIONAL_MEMORY) provenance.
 
-    With no explicit location, uses the fixed per-user default so a normal
-    user does not need to make a technical decision, and so every project on
-    the machine resolves that same folder afterwards. An explicit location is
-    used for this call only: initialization never records a default anywhere,
-    so it cannot change what any later command -- in this session or another
-    -- resolves. Reach a non-default root with --knowledge-root or the
-    CARAVELAWEB_KNOWLEDGE_ROOT environment variable.
+    With no explicit location and no environment override, uses the fixed
+    per-user default so a normal user does not need to make a technical
+    decision, and so every project on the machine resolves that same folder
+    afterwards. A flag or an environment variable is used for this call only:
+    initialization never records a default anywhere, so it cannot change what
+    any later command -- in this session or another -- resolves.
     """
-    # Resolve uniformly for both branches: on Windows, an unresolved default
-    # (built from %LOCALAPPDATA%) can be a short 8.3-alias path (observed on
-    # GitHub-hosted windows-latest runners, e.g. "RUNNER~1"), which would
-    # otherwise mismatch the canonical form the post-init self-check below
-    # compares against and spuriously refuse a legitimate fresh install.
-    root = (
-        Path(knowledge_root).expanduser().resolve()
-        if knowledge_root is not None
-        else default_knowledge_root().resolve()
-    )
+    root, _ = resolve_initialization_root(knowledge_root)
     assert_initializable(root)
     created: list[Path] = []
     try:
@@ -156,7 +179,11 @@ def initialize_knowledge_root(knowledge_root: str | Path | None = None) -> Path:
 
 
 __all__ = [
+    "DEFAULT_SOURCE",
+    "ENVIRONMENT_SOURCE",
+    "FLAG_SOURCE",
     "InitializationRefusedError",
     "assert_initializable",
     "initialize_knowledge_root",
+    "resolve_initialization_root",
 ]

@@ -72,9 +72,10 @@ class DiscoveryPayloadExamplesTests(unittest.TestCase):
 
     def test_a_malformed_example_reports_a_reason_code(self):
         payload = _payloads()[0]
+        observations = payload["observations"]
         payload["observations"] = [
-            {**payload["observations"][0], "family": "nope"},
-            *payload["observations"][1:],
+            {**observations[0], "family": "nope"},
+            *observations[1:],
         ]
         begun = subprocess.run(
             [sys.executable, str(BEGIN), "--knowledge-root", str(self.root),
@@ -93,6 +94,22 @@ class DiscoveryPayloadExamplesTests(unittest.TestCase):
         self.assertEqual("NOT_SAVED", body["status"])
         self.assertEqual("PAYLOAD_VALUE", body["reason_code"])
         self.assertIn("'nope'", body["reason"])
+
+        # The wrapper is a closed contract too, and the run is still open:
+        # an unknown top-level field reports the same shape code an unknown
+        # nested field reports.
+        payload["observations"] = observations
+        payload["notes"] = "not part of the payload contract"
+        rejected = subprocess.run(
+            [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root),
+             "--input", "-"],
+            input=json.dumps(payload), text=True, capture_output=True, encoding="utf-8",
+        )
+        self.assertEqual(2, rejected.returncode, rejected.stdout)
+        body = json.loads(rejected.stderr)
+        self.assertEqual("NOT_SAVED", body["status"])
+        self.assertEqual("PAYLOAD_SHAPE", body["reason_code"])
+        self.assertIn("notes", body["reason"])
 
     def test_the_operational_example_earns_the_lifecycle(self) -> None:
         payload = next(

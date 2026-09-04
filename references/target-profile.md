@@ -148,7 +148,9 @@ locator must use the same literal hostname. Target-reference resolution
 canonical ASCII (IDNA) form, so a Unicode locator and its punycode form
 match.
 
-Every payload refusal's `reason_code` is one of eight values:
+Every refusal decided before Operational Memory is consulted -- payload
+shape and value, the run marker, and the Knowledge Root -- carries a
+`reason_code` from one closed list of ten values:
 
 - `PAYLOAD_SHAPE` — wrong type, or a missing/unsupported field.
 - `PAYLOAD_VALUE` — a closed-set or pattern violation on an otherwise well-shaped field.
@@ -158,6 +160,15 @@ Every payload refusal's `reason_code` is one of eight values:
 - `PROVENANCE` — the run provenance wrapper is missing or malformed.
 - `TRANSPORT_TRACE` — the transport ladder trace is malformed or inconsistent.
 - `TARGET_REFERENCE` — the `target` argument cannot be resolved to one canonical target.
+- `RUN_MARKER` — no open Discovery run marker matches this target, capability, and `run_id`.
+- `KNOWLEDGE_ROOT_UNRESOLVED` — no Knowledge Root resolved, so nothing was read or written.
+
+A `NOT_SAVED` decided against accepted knowledge carries its own code
+instead, one of eleven: `NO_REUSABLE_KNOWLEDGE`,
+`TRANSPORT_POLICY_UNPROVEN`, `FAILURE_UNCLASSIFIED`, `ALREADY_PENDING`,
+`INFERENCE_ONLY`, `CONFIRMATION_PENDING`, `CONFLICT_OR_AMBIGUITY`,
+`REPLACEMENT_UNPROVEN`, `INSUFFICIENT_BILATERAL_EVIDENCE`,
+`INSUFFICIENT_MATERIAL_BASELINE`, and `INCOMPARABLE_MATERIAL_CONTEXT`.
 
 A browser-backed result also carries the run-scoped `transport_trace` defined in
 `SKILL.md`; the finalizer validates its preflight availability and evidenced

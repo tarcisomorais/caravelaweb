@@ -34,7 +34,7 @@ from transport_policy import (
 class DiscoveryFinalizationError(ValueError):
     """Discovery output is incomplete, non-reusable, or unsafe to retain."""
 
-    def __init__(self, message: str, *, code: str = "PAYLOAD_INVALID") -> None:
+    def __init__(self, message: str, *, code: str) -> None:
         super().__init__(message)
         self.code = code
 
@@ -50,12 +50,13 @@ class _DryRunRollback(Exception):
 RETRYABLE_REASON_CODES = frozenset({"TRANSPORT_POLICY_UNPROVEN", "FAILURE_UNCLASSIFIED"})
 
 
-# `DiscoveryFinalizationError.code` vocabulary. Every `raise
-# DiscoveryFinalizationError(...)` site in this module must pass one of these
-# explicitly; `tests.test_discovery_finalize` walks the module's AST to
-# enforce it. A site that fits none of these keeps the class default
-# `PAYLOAD_INVALID`, but the AST test's allowlist for that default is empty,
-# so every current site must be classified.
+# `discovery-finalize` refusal `reason_code` vocabulary. Every `raise
+# DiscoveryFinalizationError(...)` site passes one of these as `code=`. The
+# constructor has no default, so an unclassified refusal is a `TypeError` at
+# the raise site instead of a refusal the caller cannot act on. The last two
+# are raised by `scripts/discovery-finalize` rather than by this module:
+# `RUN_MARKER` for a `DiscoveryRunError`, and `KNOWLEDGE_ROOT_UNRESOLVED`
+# before any Operational Memory is opened.
 PAYLOAD_SHAPE = "PAYLOAD_SHAPE"
 PAYLOAD_VALUE = "PAYLOAD_VALUE"
 TASK_DATA_REJECTED = "TASK_DATA_REJECTED"
@@ -64,6 +65,8 @@ EVIDENCE_LINKAGE = "EVIDENCE_LINKAGE"
 PROVENANCE = "PROVENANCE"
 TRANSPORT_TRACE = "TRANSPORT_TRACE"
 TARGET_REFERENCE = "TARGET_REFERENCE"
+RUN_MARKER = "RUN_MARKER"
+KNOWLEDGE_ROOT_UNRESOLVED = "KNOWLEDGE_ROOT_UNRESOLVED"
 
 
 OPERATIONAL_FAMILIES = {
