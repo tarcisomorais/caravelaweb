@@ -15,6 +15,7 @@ PREFLIGHT = SKILL / "scripts" / "preflight"
 sys.path.insert(0, str(SKILL))
 
 from operational_memory import SQLiteOperationalMemory
+from readiness import readiness_status, root_warning
 from write_authority import MIGRATED_WRITE_AUTHORITY_KIND
 
 
@@ -124,7 +125,6 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual("NOT_READY", json.loads(result.stdout)["status"])
 
     def test_boundary_warning_is_informational(self) -> None:
-        root_warning = runpy.run_path(str(PREFLIGHT))["_root_warning"]
         wsl_warning = root_warning(
             Path("/mnt/c/knowledge"), "boundary-crossing", platform_name="linux"
         )
@@ -137,6 +137,27 @@ class PreflightTests(unittest.TestCase):
         self.assertIn("SQLite lock failures", windows_warning)
         self.assertIn("does not refuse", wsl_warning)
         self.assertIn("does not refuse", windows_warning)
+
+    def test_lookup_readiness_is_the_status_preflight_reports(self) -> None:
+        """`knowledge-lookup` must not grow a second readiness rule set."""
+        lookup = SKILL / "scripts" / "knowledge-lookup"
+        for root in (self.root, self.root / "absent"):
+            with self.subTest(root=root):
+                expected = json.loads(
+                    subprocess.run(
+                        [sys.executable, str(PREFLIGHT), "--knowledge-root", str(root), "--json"],
+                        text=True, capture_output=True,
+                    ).stdout
+                )["status"]
+                self.assertEqual(expected, readiness_status(str(root)))
+                result = subprocess.run(
+                    [
+                        sys.executable, str(lookup), "--knowledge-root", str(root),
+                        "--target", "example-news", "--capability", "topic-search",
+                    ],
+                    text=True, capture_output=True,
+                )
+                self.assertEqual(expected, json.loads(result.stdout)["readiness"])
 
     def test_windows_chrome_location_is_detected_without_path(self) -> None:
         program_files = self.root / "Program Files"

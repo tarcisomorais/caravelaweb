@@ -26,6 +26,7 @@ Their production import closure is deliberately small:
 - `om_native_writes.py`
 - `platform_adapter.py`
 - `read_authority.py`
+- `readiness.py`
 - `transport_policy.py`
 - `write_authority.py`
 - `operational_memory/__init__.py`
@@ -86,6 +87,7 @@ knowledge-lookup
   -> resolve Knowledge Root
   -> verify read authority
   -> query accepted capability knowledge
+  -> add readiness and the exact index (one row on a hit, all rows on a miss)
   -> return found / not_found / fail-closed error
 
 bounded Discovery

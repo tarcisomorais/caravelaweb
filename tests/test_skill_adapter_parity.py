@@ -57,6 +57,19 @@ class SkillAdapterParityTests(unittest.TestCase):
         self.assertIn("QA, verification, or one-off checks", description)
 
 
+class SkillLookupStepTests(unittest.TestCase):
+    """Step 2 mandates one lookup call and reads the index it returns."""
+
+    def test_step_two_pins_the_single_combined_call(self) -> None:
+        skill = (REPO / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("index_scope", skill)
+        self.assertIn(
+            "scripts/knowledge-lookup --target <target-id> --capability <capability>",
+            skill,
+        )
+        self.assertNotIn("once per task and read the exact IDs it returns", skill)
+
+
 class SkillPreFinalizeChecklistTests(unittest.TestCase):
     def test_skill_md_carries_the_pre_finalize_checklist_and_keeps_validate_optional(self) -> None:
         skill = (REPO / "SKILL.md").read_text(encoding="utf-8")

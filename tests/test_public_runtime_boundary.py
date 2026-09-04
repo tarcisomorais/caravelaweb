@@ -35,6 +35,7 @@ EXPECTED_RUNTIME_CLOSURE = {
     "operational_memory.core",
     "platform_adapter",
     "read_authority",
+    "readiness",
     "transport_policy",
     "write_authority",
 }

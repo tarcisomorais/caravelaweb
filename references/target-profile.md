@@ -92,19 +92,39 @@ Before treating a capability as unknown, run `knowledge-lookup` with the
 concrete interpreter and skill path reported by preflight:
 
 ```text
+<python> <skill>/scripts/knowledge-lookup --target example-jobs --capability project_listings
+<python> <skill>/scripts/knowledge-lookup --target jobs.example.com --capability project_listings
+<python> <skill>/scripts/knowledge-lookup --knowledge-root <explicit-root> --target example-jobs --capability project_listings
 <python> <skill>/scripts/knowledge-lookup --list
 <python> <skill>/scripts/knowledge-lookup --target example-jobs
-<python> <skill>/scripts/knowledge-lookup --target example-jobs --capability project_listings
-<python> <skill>/scripts/knowledge-lookup --knowledge-root <explicit-root> --target example-jobs --capability project_listings
 ```
 
-`--list` returns an exact index of every target with its hosts and capability keys, with no `--target`.
-
-Use `--knowledge-root` only for a caller-supplied override. The normal boundary returns accepted context for the requested capability:
+The first form is the one call a task needs. `--target` accepts the canonical
+ID, or a hostname or URL that resolves through a recorded target<->host
+association. Use `--knowledge-root` only for a caller-supplied override. The
+normal boundary returns accepted context for the requested capability:
 
 - `found` — read the accepted capability context.
 - `not_found` — no accepted reusable knowledge exists for that capability.
 - `unresolved` or `bridge_error` — accepted knowledge could not be consulted; stop rather than treating the target as checked.
+
+A `--target` call combined with `--capability` also carries the readiness of
+the installation and the exact index, so the executor needs no separate
+`preflight` or `--list` call before it decides:
+
+- `readiness` — `READY`, or the status `preflight` reports on the same root.
+- `index_scope` — `target`, `all`, or `unavailable`. The key is absent on an
+  `unresolved` or `bridge_error` response, where no Operational Memory
+  boundary was reached at all.
+- `index` — with scope `target`, that target's single `--list` row; with
+  scope `all`, the whole `--list` payload (`count` and every `targets` row),
+  so a miss still shows every exact ID before a new one is minted. Scope
+  `unavailable` carries no `index`: no index is available on this path (the
+  diagnostic legacy path, or an index read that failed).
+
+`--list` and a bare `--target` keep their existing shape. `--list` returns an
+exact index of every target with its hosts and capability keys, with no
+`--target`, and is available on its own for browsing the index.
 
 Lookup is capability-scoped and performs no web action, transport selection, knowledge mutation, or publication. It does not silently fall back to historical knowledge.
 

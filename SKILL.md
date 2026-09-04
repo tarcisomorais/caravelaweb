@@ -27,32 +27,25 @@ the caller supplied.
 ## Executor flow
 
 1. Identify the stable target ID and the requested capability. A hostname or URL reference resolves to that ID only through a recorded target<->host association, never by mechanical transformation of the hostname -- see `references/target-profile.md` -- so lookup and finalization always agree. First-time Discovery for a new target must supply its stable canonical ID directly. Any task that reads, navigates, or acts on a live web target is in scope here, decided before any tool path is chosen -- not ruled out for being read-only, quick, QA, one-off, or expected to return different results each run. Skip this skill only when no live web target is involved at all.
-2. Before minting a target or capability ID, run `<python> <skill>/scripts/knowledge-lookup --list` once per task and read the exact IDs it returns; then inspect the chosen target with `<python> <skill>/scripts/knowledge-lookup --target <target-id>`. The index is exact IDs only: reuse an ID only under the equivalence rule below, never by resemblance.
-
-   A capability ID is a stable reusable output, action, or intention in
-   lower-kebab-case (`[a-z0-9]+(?:-[a-z0-9]+)*`). Lookup and finalization
-   normalize spaces, underscores, and punctuation to hyphens and reject an
-   empty result. They do not stem, singularize, translate, remove words, or
-   fuzzy-match. Reuse an accepted ID only when its reusable output/action,
-   material scope, authority/access boundary, and completion condition are
-   clearly equivalent; otherwise keep the capabilities distinct.
-
-   The target-only call already returns the accepted context of every capability, so the call below confirms that one exact ID resolves rather than fetching knowledge the first call withheld. Run it once per capability you selected, before calling any of them unknown:
+2. Before minting a target or capability ID, run this once per capability you selected. Use the URL or hostname the task already has as `<target-id>` whenever one exists: host-reference resolution is exact and never guesses. The same response carries `readiness` and the exact index.
 
    ```text
    <python> <skill>/scripts/knowledge-lookup --target <target-id> --capability <capability>
    ```
 
-   Resolve the script relative to this skill. Add `--knowledge-root <path>` only when the caller supplied that override; otherwise the fixed per-user Knowledge Root is found automatically, with no path repeated on every command.
+   A capability ID is a stable reusable output, action, or intention in lower-kebab-case (`[a-z0-9]+(?:-[a-z0-9]+)*`). Lookup and
+   finalization normalize spaces, underscores, and punctuation to hyphens and reject an empty result. They do not stem, singularize,
+   translate, remove words, or fuzzy-match. Reuse an accepted ID only when its reusable output/action, material scope,
+   authority/access boundary, and completion condition are clearly equivalent; otherwise keep the capabilities distinct.
 
    | Result | Next action |
    | --- | --- |
-   | `found` | Read the returned accepted capability context. |
-   | `not_found` | Enter bounded Discovery if the caller authorizes it. If `pending_candidates` is present, do not mint a sibling capability ID: read the pending Claims, resubmit missing material under a new `run_id` to enrich that Candidate, or discard it with `knowledge-resolve`. |
+   | `found` | Read the returned accepted capability context. A `readiness` other than `READY` means run **First run** once, then retry. |
+   | `not_found` | With `index_scope: "all"`, read every `index.targets[].target` and its `hosts` before minting an ID: reuse an exact ID only under the equivalence rule above, never by resemblance, and never from a brand-name guess. A `readiness` other than `READY` means run **First run** once and retry before any Discovery, because the write path is not usable yet. Then enter bounded Discovery if the caller authorizes it. If `pending_candidates` is present, do not mint a sibling capability ID: read the pending Claims, resubmit missing material under a new `run_id` to enrich that Candidate, or discard it with `knowledge-resolve`. |
    | `unresolved` | Run **First run** once, then retry the lookup. If it stays `unresolved`, stop: accepted knowledge could not be consulted. |
    | `bridge_error` | Stop: accepted knowledge could not be consulted. |
 
-   Lookup returns accepted knowledge without silently substituting historical knowledge. Do not use diagnostic, compatibility, database-override, or repair options.
+   Add `--knowledge-root <path>` only when the caller supplied that override; otherwise the fixed per-user Knowledge Root is found automatically. `<python> <skill>/scripts/knowledge-lookup --list` is also available to browse the exact index on its own. Lookup returns accepted knowledge without silently substituting historical knowledge. Do not use diagnostic, compatibility, database-override, or repair options.
 
 3. Choose one mode for that capability, never for the whole target.
 

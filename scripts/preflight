@@ -7,7 +7,6 @@ import argparse
 import json
 import os
 import shutil
-import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -15,90 +14,12 @@ from pathlib import Path
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SKILL_ROOT))
 
-from knowledge_write_freeze import freeze_marker
 from discovery_runs import list_open_discoveries
-from operational_memory.core import SCHEMA_VERSION
-from platform_adapter import (
-    configure_utf8_stdio,
-    filesystem_class,
-    knowledge_root_marker_present,
-    platform_identity,
-    resolve_knowledge_root,
-    safe_marker_stat,
-)
-from read_authority import ReadAuthorityStateError, read_cutover_active
+from platform_adapter import configure_utf8_stdio
+from readiness import core_readiness
 from transport_policy import AVAILABLE, PLATFORM_UNSUPPORTED, UNAVAILABLE
-from write_authority import WriteAuthorityStateError, current_write_authority
 
 configure_utf8_stdio()
-
-
-def _marker_state(path: Path) -> str:
-    try:
-        value = os.lstat(path)
-    except FileNotFoundError:
-        return "INACTIVE"
-    except OSError:
-        return "INVALID"
-    return "ACTIVE" if safe_marker_stat(value) else "INVALID"
-
-
-def _memory_report(root: Path) -> tuple[dict[str, object], list[str]]:
-    errors: list[str] = []
-    db = root / ".caravelaweb" / "operational_memory.db"
-    report: dict[str, object] = {
-        "path": str(db),
-        "present": db.is_file(),
-        "openable": False,
-        "schema_version": None,
-        "expected_schema_version": SCHEMA_VERSION,
-    }
-    if report["present"]:
-        connection: sqlite3.Connection | None = None
-        try:
-            connection = sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True)
-            table_version = connection.execute(
-                "SELECT schema_version FROM schema_metadata WHERE singleton=1"
-            ).fetchone()
-            pragma_version = connection.execute("PRAGMA user_version").fetchone()[0]
-            report["schema_version"] = pragma_version
-            report["openable"] = bool(
-                table_version
-                and table_version[0] == SCHEMA_VERSION
-                and pragma_version == SCHEMA_VERSION
-            )
-        except (OSError, sqlite3.DatabaseError):
-            pass
-        finally:
-            if connection is not None:
-                connection.close()
-    if not report["present"]:
-        errors.append(f"Operational Memory database is absent: {db}")
-    elif not report["openable"]:
-        errors.append(
-            f"Operational Memory database is unreadable or has the wrong schema; expected {SCHEMA_VERSION}: {db}"
-        )
-
-    report["freeze"] = _marker_state(freeze_marker(root))
-    try:
-        report["read_authority"] = (
-            "OPERATIONAL_MEMORY" if read_cutover_active(root) else "LEGACY"
-        )
-    except ReadAuthorityStateError:
-        report["read_authority"] = "INVALID"
-    try:
-        report["write_authority"] = current_write_authority(root)
-    except WriteAuthorityStateError:
-        report["write_authority"] = "INVALID"
-
-    if report["freeze"] != "INACTIVE":
-        errors.append(f"knowledge write freeze is {str(report['freeze']).lower()}")
-    if report["read_authority"] != "OPERATIONAL_MEMORY":
-        errors.append(f"read-authority state is {report['read_authority']}")
-    if report["write_authority"] != "OPERATIONAL_MEMORY":
-        errors.append(f"write-authority state is {report['write_authority']}")
-    report["ready"] = not errors
-    return report, errors
 
 
 def _command(names: tuple[str, ...]) -> str | None:
@@ -211,63 +132,11 @@ def _transports(*, platform_name: str | None = None) -> dict[str, object]:
     return _browser_diagnostics(platform_name=platform_name)["transports"]
 
 
-def _root_warning(
-    root: Path, kind: str, *, platform_name: str | None = None
-) -> str | None:
-    if kind == "native-local":
-        return None
-    platform_name = platform_name or sys.platform
-    value = str(root).replace("\\", "/").casefold()
-    if platform_name == "win32" and (
-        value.startswith("//wsl.localhost/") or value.startswith("//wsl$/")
-    ):
-        return (
-            f"knowledge root {root} is boundary-crossing and deprecated: native "
-            "Windows observed SQLite lock failures on WSL-hosted roots; move it "
-            "to a native Windows path. This warning does not refuse the root."
-        )
-    if platform_name == "linux" and value.startswith("/mnt/"):
-        return (
-            f"knowledge root {root} is boundary-crossing: concurrent Windows and "
-            "WSL2 writers produced an explicit SQLite disk I/O failure; do not "
-            "access the same database from both runtimes concurrently and prefer "
-            "a native Linux path. This warning does not refuse the root."
-        )
-    return (
-        f"knowledge root {root} is {kind}; safety under this workload is "
-        "unproven; prefer a path native to the running platform"
-    )
-
-
 def build_report(override: str | None) -> dict[str, object]:
-    identity = platform_identity()
-    errors: list[str] = []
-    warnings: list[str] = []
-    if not identity["python_meets_floor"]:
-        errors.append(f"Python {identity['python']} is below the required 3.11 floor")
-    root = resolve_knowledge_root(override)
-    root_report: dict[str, object] = {
-        "path": str(root) if root else None,
-        "marker_present": knowledge_root_marker_present(root) if root else False,
-        "targets_present": bool(root),
-        "filesystem_class": filesystem_class(root) if root else "unknown",
-    }
-    if root is None:
-        errors.append(
-            f"knowledge root is unresolved; expected {'.caravelaweb-knowledge-root'} and targets/"
-        )
-        memory: dict[str, object] = {"ready": False}
-    else:
-        if not root_report["marker_present"]:
-            errors.append(f"knowledge-root marker is absent: {root}")
-        if warning := _root_warning(root, str(root_report["filesystem_class"])):
-            warnings.append(warning)
-        memory, memory_errors = _memory_report(root)
-        errors.extend(memory_errors)
+    root, core = core_readiness(override)
     browser = _browser_diagnostics()
     report = {
-        "status": "READY" if not errors else "NOT_READY",
-        "platform": identity,
+        **core,
         "invocation": {
             "preflight": f'"{sys.executable}" "{Path(__file__).resolve()}"',
             "init_knowledge_root": f'"{sys.executable}" "{SKILL_ROOT / "scripts" / "init-knowledge-root"}"',
@@ -276,8 +145,6 @@ def build_report(override: str | None) -> dict[str, object]:
             "discovery_finalize": f'"{sys.executable}" "{SKILL_ROOT / "scripts" / "discovery-finalize"}"',
             "knowledge_resolve": f'"{sys.executable}" "{SKILL_ROOT / "scripts" / "knowledge-resolve"}"',
         },
-        "knowledge_root": root_report,
-        "operational_memory": memory,
         "open_discovery": list_open_discoveries(root) if root else [],
         "transports": browser["transports"],
         "browser_control": browser["browser_control"],
@@ -286,12 +153,10 @@ def build_report(override: str | None) -> dict[str, object]:
         "unsupported_optional_components": {
             "advisory_locking": (
                 "AVAILABLE"
-                if identity["fcntl"]
+                if core["platform"]["fcntl"]
                 else "PLATFORM_UNSUPPORTED: fcntl is absent"
             ),
         },
-        "warnings": warnings,
-        "errors": errors,
     }
     return report
 

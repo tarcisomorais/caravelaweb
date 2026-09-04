@@ -15,11 +15,30 @@ from integration_bridge import BridgeError, KnowledgeLookupBoundary
 from discovery_runs import list_open_discoveries
 from operational_memory import MemoryError
 from platform_adapter import configure_utf8_stdio, resolve_knowledge_root
+from readiness import readiness_status
 
 configure_utf8_stdio()
 
 def emit(status: str, **fields: object) -> None:
     print(json.dumps({"status": status, **fields}, ensure_ascii=False, sort_keys=True))
+
+def index_fields(boundary: KnowledgeLookupBoundary, target_id: str | None) -> dict[str, object]:
+    """Index view for a combined call.
+
+    A resolved target gets its own `--list` row. A miss gets the whole
+    `--list` payload, so the executor sees every exact target ID before it
+    mints one and cannot create a duplicate by naming. The legacy path has
+    no index at all, and says so rather than failing the lookup.
+    """
+    try:
+        rows = boundary.list_index(target_id=target_id)
+    except (BridgeError, MemoryError, KeyError):
+        return {"index_scope": "unavailable"}
+    if target_id is None:
+        return {"index": {"count": len(rows), "targets": rows}, "index_scope": "all"}
+    if not rows:
+        return {"index_scope": "unavailable"}
+    return {"index": rows[0], "index_scope": "target"}
 
 def main() -> int:
     parser = argparse.ArgumentParser(
@@ -37,9 +56,13 @@ def main() -> int:
         parser.error("--list cannot be combined with --target or --capability")
     if not args.list and not args.target:
         parser.error("--target is required unless --list is given")
+    # A combined call is the one mandated lookup per capability, so it also
+    # answers "is this installation ready" and "which exact target IDs exist".
+    combined = bool(args.target and args.capability)
+    readiness = {"readiness": readiness_status(args.knowledge_root)} if combined else {}
     root = resolve_knowledge_root(args.knowledge_root)
     if root is None:
-        emit("unresolved", target=args.target)
+        emit("unresolved", target=args.target, **readiness)
         return 2
     boundary = KnowledgeLookupBoundary(root, args.operational_memory_db)
     if args.list:
@@ -53,7 +76,7 @@ def main() -> int:
     try:
         result = boundary.lookup(args.target, capability=args.capability, use_operational_memory=args.use_operational_memory, use_legacy=args.use_legacy)
     except (BridgeError, MemoryError, KeyError) as error:
-        emit("bridge_error", message=str(error), target=args.target)
+        emit("bridge_error", message=str(error), target=args.target, **readiness)
         return 2
     open_discovery = list_open_discoveries(
         root, target=result.target, capability=result.capability,
@@ -61,17 +84,26 @@ def main() -> int:
     visibility = {"open_discovery": open_discovery} if open_discovery else {}
     if result.pending_candidates:
         visibility["pending_candidates"] = result.pending_candidates
+
+    def combined_fields(resolved: bool) -> dict[str, object]:
+        """Readiness on every combined call; the index where one exists."""
+        if not combined:
+            return {}
+        if result.source == "legacy":
+            return {**readiness, "index_scope": "unavailable"}
+        return {**readiness, **index_fields(boundary, result.resolved_target if resolved else None)}
+
     if result.source == "legacy":
         if result.profile_path is None:
-            emit("not_found", source="legacy", target=args.target, **visibility)
+            emit("not_found", source="legacy", target=args.target, **visibility, **combined_fields(False))
             return 0
-        emit("found", source="legacy", profile=result.profile_path, target=args.target, **visibility)
+        emit("found", source="legacy", profile=result.profile_path, target=args.target, **visibility, **combined_fields(True))
         return 0
     if result.operational_context is None:
-        emit("not_found", source="operational-memory", target=args.target, **visibility)
+        emit("not_found", source="operational-memory", target=args.target, **visibility, **combined_fields(False))
         return 0
     if result.capability:
-        emit("found", source="operational-memory", target=args.target, capability=result.capability, operational_context=result.operational_context, markdown_projection=result.markdown_projection, lifecycle=result.operational_context["lifecycle"], **visibility)
+        emit("found", source="operational-memory", target=args.target, capability=result.capability, operational_context=result.operational_context, markdown_projection=result.markdown_projection, lifecycle=result.operational_context["lifecycle"], **visibility, **combined_fields(True))
     else:
         emit("found", source="operational-memory", target=args.target, capability=result.capability, operational_context=result.operational_context, markdown_projection=result.markdown_projection, **visibility)
     return 0

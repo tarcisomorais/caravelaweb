@@ -26,6 +26,10 @@ class LookupResult:
     operational_context: Mapping[str, Any] | None = None
     markdown_projection: str | None = None
     pending_candidates: Any = None
+    # ``target`` echoes the caller's reference, which may be a hostname or a
+    # URL. ``resolved_target`` is the canonical target ID that reference
+    # resolved to, or None when nothing resolved.
+    resolved_target: str | None = None
 
 
 DEFAULT_OPERATIONAL_MEMORY_RELATIVE_PATH = Path(".caravelaweb") / "operational_memory.db"
@@ -84,12 +88,16 @@ class KnowledgeLookupBoundary:
                     try:
                         memory.resolve_capability(target, capability)
                     except KeyError:
-                        return LookupResult(source="operational-memory", target=target, capability=capability)
+                        return LookupResult(
+                            source="operational-memory", target=target, capability=capability,
+                            resolved_target=target_id,
+                        )
                     context = memory.render_operational_context(target, capability, caller_context)
                     if not any(context["current"].values()):
                         return LookupResult(
                             source="operational-memory", target=target, capability=capability,
                             pending_candidates=context["pending_candidates"] or None,
+                            resolved_target=target_id,
                         )
                     pending_candidates = context["pending_candidates"] or None
                 else:
@@ -106,6 +114,7 @@ class KnowledgeLookupBoundary:
                         return LookupResult(
                             source="operational-memory", target=target, capability=capability,
                             pending_candidates=pending or None,
+                            resolved_target=target_id,
                         )
                     context = {
                         "target_id": target_id,
@@ -125,10 +134,16 @@ class KnowledgeLookupBoundary:
             operational_context=context,
             markdown_projection=markdown,
             pending_candidates=pending_candidates,
+            resolved_target=target_id,
         )
 
-    def list_index(self) -> list[dict[str, Any]]:
-        """Exact index of every target with its hosts and capability keys."""
+    def list_index(self, *, target_id: str | None = None) -> list[dict[str, Any]]:
+        """Exact index of every target with its hosts and capability keys.
+
+        With ``target_id``, the same rows narrowed to that one canonical
+        target ID, so a caller that already resolved a reference does not
+        resolve it a second time.
+        """
         try:
             cutover_active = read_cutover_active(self.legacy_root)
         except ReadAuthorityStateError as error:
@@ -137,7 +152,10 @@ class KnowledgeLookupBoundary:
             raise BridgeError("the legacy path has no index; Operational Memory is not active")
         try:
             with SQLiteOperationalMemory(self.memory_db, create=False) as memory:
-                return memory.list_targets()
+                rows = memory.list_targets()
+                if target_id is None:
+                    return rows
+                return [row for row in rows if row["target_id"] == target_id]
         except (sqlite3.DatabaseError, json.JSONDecodeError, OperationalMemoryError) as error:
             raise BridgeError(f"Operational Memory query failed: {error}") from error
 

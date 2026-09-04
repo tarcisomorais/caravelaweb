@@ -425,5 +425,111 @@ class TargetIdentityCrossProcessTests(unittest.TestCase):
         self.assertEqual("not_found", json.loads(unrelated.stdout)["status"])
 
 
+class CombinedLookupIndexTests(unittest.TestCase):
+    """One lookup call per capability still shows every exact target ID.
+
+    A miss used to be answered by a separate ``--list`` call. Dropping that
+    call must not drop the duplicate guard it provided: the combined
+    response carries the whole index whenever nothing resolved.
+    """
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name) / "knowledge-root"
+        self.home = Path(self.temp.name) / "home"
+        self.env = fake_home_env(self.home)
+        initialize = run(INIT, "--knowledge-root", str(self.root), "--json", env=self.env)
+        self.assertEqual(0, initialize.returncode, initialize.stderr)
+        self._seed("gtolab", "gtolab.com")
+        self._seed("sky-news-world", "news.example")
+
+    def _seed(self, target: str, host: str, capability: str = "public-homepage") -> None:
+        begun = run(
+            BEGIN, "--knowledge-root", str(self.root), "--target", target,
+            "--capability", capability, env=self.env,
+        )
+        self.assertEqual(0, begun.returncode, begun.stderr)
+        payload = {
+            "target": target,
+            "capability": capability,
+            "observations": [{
+                "family": "transport",
+                "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"},
+                "host": host,
+            }],
+            "evidence": [{
+                "kind": "direct-read-validation", "locator": f"https://{host}/",
+                "scope": "TARGET_SURFACE",
+            }],
+            "provenance": {"run_id": json.loads(begun.stdout)["run_id"], "observed_at": RECORDED},
+            "recorded_at": RECORDED,
+        }
+        path = self.root.parent / f"{target}.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        finalize = run(FINALIZER, "--knowledge-root", str(self.root), "--input", str(path), env=self.env)
+        self.assertEqual(0, finalize.returncode, finalize.stderr)
+        self.assertEqual("SAVED", json.loads(finalize.stdout)["status"])
+
+    def _lookup(self, reference: str, capability: str = "public-homepage") -> dict:
+        result = run(
+            LOOKUP, "--knowledge-root", str(self.root), "--target", reference,
+            "--capability", capability, env=self.env,
+        )
+        return json.loads(result.stdout)
+
+    def _standalone_list(self) -> dict:
+        result = run(LOOKUP, "--knowledge-root", str(self.root), "--list", env=self.env)
+        self.assertEqual(0, result.returncode, result.stderr)
+        return json.loads(result.stdout)
+
+    def test_a_known_target_returns_its_own_index_row(self) -> None:
+        payload = self._lookup("gtolab")
+        self.assertEqual("found", payload["status"])
+        self.assertEqual("READY", payload["readiness"])
+        self.assertEqual("target", payload["index_scope"])
+        self.assertEqual("gtolab", payload["index"]["target"])
+        self.assertEqual(["gtolab.com"], payload["index"]["hosts"])
+
+    def test_an_unknown_brand_guess_returns_the_whole_index(self) -> None:
+        payload = self._lookup("sky-news")
+        listed = self._standalone_list()
+        self.assertEqual("not_found", payload["status"])
+        self.assertEqual("all", payload["index_scope"])
+        self.assertEqual(listed["count"], payload["index"]["count"])
+        self.assertEqual(
+            json.dumps(listed["targets"], sort_keys=True),
+            json.dumps(payload["index"]["targets"], sort_keys=True),
+            "a miss must show exactly what the standalone --list call shows",
+        )
+        self.assertIn(
+            "sky-news-world",
+            [row["target"] for row in payload["index"]["targets"]],
+            "the exact ID a brand-name guess would duplicate must be visible",
+        )
+
+    def test_a_hostname_reference_resolves_without_returning_the_whole_index(self) -> None:
+        for reference in ("gtolab.com", "https://www.gtolab.com/path"):
+            with self.subTest(reference=reference):
+                payload = self._lookup(reference)
+                self.assertEqual("found", payload["status"])
+                self.assertEqual("target", payload["index_scope"])
+                self.assertEqual("gtolab", payload["index"]["target"])
+
+    def test_an_unresolved_root_reports_readiness_and_no_index(self) -> None:
+        result = run(LOOKUP, "--target", "gtolab", "--capability", "public-homepage", env=self.env)
+        payload = json.loads(result.stdout)
+        self.assertEqual("unresolved", payload["status"])
+        self.assertNotEqual("READY", payload["readiness"])
+        self.assertNotIn("index", payload)
+
+    def test_a_bare_target_call_keeps_its_shape(self) -> None:
+        result = run(LOOKUP, "--knowledge-root", str(self.root), "--target", "gtolab", env=self.env)
+        payload = json.loads(result.stdout)
+        self.assertEqual("found", payload["status"])
+        for added in ("readiness", "index", "index_scope"):
+            self.assertNotIn(added, payload)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

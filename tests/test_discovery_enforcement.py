@@ -213,13 +213,17 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
         self.assertIn("which is not exhaustion", transport)
         self.assertIn("describe this run or this machine, so they save nothing", transport)
 
-    def test_the_two_lookup_calls_have_distinct_stated_purposes(self) -> None:
+    def test_one_lookup_call_per_capability_still_shows_every_exact_id(self) -> None:
+        """One mandated call; a miss must still carry the whole index."""
         text = SKILL.read_text(encoding="utf-8")
-        self.assertIn(
+        self.assertIn("run this once per capability you selected", text)
+        self.assertNotIn(
             "The target-only call already returns the accepted context of every capability",
             text,
         )
-        self.assertIn("Run it once per capability you selected", text)
+        self.assertNotIn("run `<python> <skill>/scripts/knowledge-lookup --list` once per task", text)
+        self.assertIn('With `index_scope: "all"`, read every `index.targets[].target`', text)
+        self.assertIn("a brand-name guess", text)
 
     def test_missing_browser_control_never_authorizes_a_substitute_stack(self) -> None:
         for text in (SKILL.read_text(encoding="utf-8"), TRANSPORT.read_text(encoding="utf-8")):

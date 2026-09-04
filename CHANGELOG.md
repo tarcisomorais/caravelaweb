@@ -6,6 +6,13 @@ All notable changes to CaravelaWeb will be documented in this file.
 
 ### Changed
 
+- `knowledge-lookup --target <ref> --capability <cap>` is the one lookup
+  call a task needs. It now also reports `readiness` (the status
+  `preflight` reports on the same root) and `index`: on a hit, that
+  target's single `--list` row; on a miss, the whole `--list` payload, so
+  every exact target ID is still visible before a new one is minted.
+  `index_scope` says which of the two, or `unavailable` on the diagnostic
+  legacy path. `--list`, a bare `--target`, and `preflight` are unchanged.
 - The payload examples in `references/discovery-payload-examples.md` no
   longer carry `recorded_at`, so an agent that copies an example lets the
   finalizer stamp the write instant instead of stamping one itself. The
