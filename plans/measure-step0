@@ -10,7 +10,7 @@ runs. Every count therefore comes from the tool result, which carries one JSON
 object per actual CLI call. The command text is read only for the flags that
 the result does not report, such as --validate and --help.
 """
-import json, os, re, sys, glob, datetime, collections, subprocess
+import json, os, re, sys, glob, bisect, datetime, collections, subprocess
 
 RELEASE = datetime.datetime.fromisoformat("2026-09-02T23:34:40-03:00")
 ROOT = os.path.expanduser("~/.claude/projects")
@@ -87,6 +87,36 @@ def command_of(ev):
     if isinstance(inp.get("command"), str): return inp["command"]
     return " ".join(str(v) for v in inp.values() if isinstance(v, str))
 
+# ------------------------------------------------------------- release split
+# A consumer session runs one installed release, and its commands name that
+# release in the plugin cache path
+# (.../plugins/cache/caravelaweb/caravelaweb/<version>/scripts/...). Only the
+# command text is read: a result may list every cached version at once. A
+# session that ran a live checkout names no version, so it reports "unknown".
+CACHE_VERSION = re.compile(r"caravelaweb/caravelaweb/(\d+\.\d+\.\d+)\b")
+LOOSE_VERSION = re.compile(r"caravelaweb[/-](\d+\.\d+\.\d+)\b")
+
+def version_of(cmd):
+    m = CACHE_VERSION.search(cmd or "") or LOOSE_VERSION.search(cmd or "")
+    return m.group(1) if m else None
+
+def session_version(calls):
+    seen = collections.Counter()
+    for ev in calls:
+        v = version_of(ev["cmd"])
+        if v: seen[v] += 1
+    return seen.most_common(1)[0][0] if seen else "unknown"
+
+# ------------------------------------------------------------- web fetch mark
+# The first web fetch closes a session's pre-fetch window. A fetch is the
+# WebFetch tool, or a shell call that reaches the network itself.
+FETCH_CMD = re.compile(r"(?<![\w-])(curl|wget|agent-browser|lightpanda)(?![\w-])|"
+                       r"requests\.(get|post|head)|urllib\.request|httpx\.")
+
+def is_fetch(ev, cmd):
+    if ev.get("name") == "WebFetch": return True
+    return ev.get("name") == "Bash" and bool(FETCH_CMD.search(cmd or ""))
+
 # ------------------------------------------------------- result-side parsing
 # discovery-begin prints one DISCOVERY_OPEN object per run it opens.
 # discovery-finalize prints one object per call: SAVED / ALREADY_EXISTS carry
@@ -134,9 +164,14 @@ for proj in sorted(os.listdir(ROOT)):
     pdir = os.path.join(ROOT, proj)
     if not os.path.isdir(pdir) or proj == EXCLUDE_PROJECT: continue
     for path in sorted(glob.glob(os.path.join(pdir, "**", "*.jsonl"), recursive=True)):
-        calls = []
+        calls, ticks, fetches = [], [], []
         for ev in load_events(path):
             cmd = command_of(ev)
+            if ev["t"]:
+                ticks.append(ev["t"])
+                if is_fetch(ev, cmd):
+                    fetches.append((ev["t"], "%s %s" % (ev.get("name"),
+                                    " ".join((cmd or "").split())[:52])))
             if not cmd: continue
             invs = invocations(cmd)
             if not invs: continue
@@ -144,7 +179,9 @@ for proj in sorted(os.listdir(ROOT)):
             ev["invs"] = invs
             calls.append(ev)
         if calls:
-            sessions.append({"project": proj, "path": path, "calls": calls})
+            sessions.append({"project": proj, "path": path, "calls": calls,
+                             "ticks": sorted(ticks), "fetches": sorted(fetches),
+                             "version": session_version(calls)})
 
 # ---------------------------------------------------------- 0.2.0 filtering
 # Marker for "ran against a 0.2.0+ skill": reason_code in output, a
@@ -204,6 +241,7 @@ for s in eligible:
         for o in objs:
             if o.get("status") == "DISCOVERY_OPEN":
                 r = {"session": s["path"], "project": s["project"],
+                     "version": version_of(ev["cmd"]) or s["version"],
                      "begin_t": ev["t"], "target": o.get("target"),
                      "capability": o.get("capability"),
                      "pre": ev["t"] < RELEASE,   # opened before the release
@@ -235,9 +273,12 @@ for s in eligible:
                 if isinstance(g, str): r["gaps"].append(g)
                 if r in open_runs: open_runs.remove(r)
 
+all_runs = list(runs)
 runs = [r for r in runs if not r["pre"] and r["real"]]
+opened = [r for r in all_runs if not r["pre"]]   # every post-release begin
 sess_set = {r["session"] for r in runs}
 proj_set = {r["project"] for r in runs}
+versions = sorted({r["version"] for r in opened} | {r["version"] for r in runs})
 
 # ------------------------------------------------------------------- report
 print("=" * 74)
@@ -249,8 +290,8 @@ print()
 print("Sessions with any CaravelaWeb CLI call : %d" % len(sessions))
 print("Sessions with a discovery-begin after the release : %d" % len(eligible))
 for s in eligible:
-    print("   %-7s %-42s begins=%d  %s"
-          % ("0.2.0+" if s["marker"] else "pre", s["project"],
+    print("   %-7s release %-7s %-42s begins=%d  %s"
+          % ("0.2.0+" if s["marker"] else "pre", s["version"], s["project"],
              s["opens"], os.path.basename(s["path"])))
 print()
 print("GATE COUNTS (0.2.0+ only)")
@@ -274,38 +315,48 @@ if not gate:
     sys.exit(0)
 
 # ---- metrics (only reached on PASS) -------------------------------------
+# Every metric block is a function over a set of runs, so the same block can
+# be printed for all runs together and again for one release alone. The two
+# contracts differ, so a release-split block never mixes them.
 def stats(xs):
     xs = sorted(xs); n = len(xs)
     med = xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2
     return med, sum(xs) / n, xs[-1]
 
-n = len(runs)
+def pct(a, b):
+    return "%d/%d = %.0f%%" % (a, b, 100.0 * a / b) if b else "0/0 = n/a"
+
 # Infrastructure refusals (a database another session holds) are not
 # ceremony cost: parallel consumer sessions on one live memory lock each
 # other. Count them apart and keep every ceremony metric free of them.
 INFRA = {"OPERATIONAL_MEMORY_UNAVAILABLE"}
-infra = sum(1 for r in runs for x in r["reasons"] if x in INFRA)
-infra_runs = sum(1 for r in runs if any(x in INFRA for x in r["reasons"]))
 for r in runs:
+    r["infra"] = [x for x in r["reasons"] if x in INFRA]
     r["reasons"] = [x for x in r["reasons"] if x not in INFRA]
-rc = [len(r["real"]) for r in runs]
-fc = [len(r["reasons"]) for r in runs]
-med, mean, mx = stats(rc); rmed, rmean, rmx = stats(fc)
-pct = lambda a, b: "%d/%d = %.0f%%" % (a, b, 100.0 * a / b)
-first = sum(1 for c in rc if c == 1); four = sum(1 for c in rc if c >= 4)
-zero = sum(1 for c in fc if c == 0)
-vcalls = sum(len(r["validate"]) for r in runs); vruns = sum(1 for r in runs if r["validate"])
-print()
-print("MEASUREMENT (real finalize calls only; --validate never added in)")
-print("  Real finalize per run median/mean/max : %s / %.2f / %d" % (med, mean, mx))
-print("  Saved on first real finalize          : %s" % pct(first, n))
-print("  Runs needing 4+ real finalize calls   : %s" % pct(four, n))
-print("  Refusals per run median/mean          : %s / %.2f" % (rmed, rmean))
-print("  Runs with zero refusals               : %s" % pct(zero, n))
-print("  --validate                            : %d calls in %s runs" % (vcalls, pct(vruns, n)))
-print("  Refusal reasons: %s" % dict(collections.Counter(x for r in runs for x in r["reasons"])))
-print("  Infrastructure refusals (excluded)    : %d in %d runs (%s)" % (infra, infra_runs, ", ".join(sorted(INFRA))))
-print("  NO_REASON_CODE occurs on 0.2.0 only; 0.2.1 codes every refusal.")
+
+def measurement(rs):
+    n = len(rs)
+    infra = sum(len(r["infra"]) for r in rs)
+    infra_runs = sum(1 for r in rs if r["infra"])
+    rc = [len(r["real"]) for r in rs]
+    fc = [len(r["reasons"]) for r in rs]
+    med, mean, mx = stats(rc); rmed, rmean, rmx = stats(fc)
+    first = sum(1 for c in rc if c == 1); four = sum(1 for c in rc if c >= 4)
+    zero = sum(1 for c in fc if c == 0)
+    vcalls = sum(len(r["validate"]) for r in rs)
+    vruns = sum(1 for r in rs if r["validate"])
+    print()
+    print("MEASUREMENT (real finalize calls only; --validate never added in)")
+    print("  Real finalize per run median/mean/max : %s / %.2f / %d" % (med, mean, mx))
+    print("  Saved on first real finalize          : %s" % pct(first, n))
+    print("  Runs needing 4+ real finalize calls   : %s" % pct(four, n))
+    print("  Refusals per run median/mean          : %s / %.2f" % (rmed, rmean))
+    print("  Runs with zero refusals               : %s" % pct(zero, n))
+    print("  --validate                            : %d calls in %s runs" % (vcalls, pct(vruns, n)))
+    print("  Refusal reasons: %s" % dict(collections.Counter(x for r in rs for x in r["reasons"])))
+    print("  Infrastructure refusals (excluded)    : %d in %d runs (%s)" % (infra, infra_runs, ", ".join(sorted(INFRA))))
+    print("  NO_REASON_CODE occurs on 0.2.0 only; 0.2.1 codes every refusal.")
+    return {"n": n, "mean": mean, "mx": mx, "zero": zero}
 
 # ---- change 4: the payloads those runs submitted ------------------------
 # A payload is recovered from the session log when the log carries it
@@ -361,50 +412,60 @@ def val_key(o):
 for s in eligible:
     if s["marker"]: s["payloads"] = (log_payloads(s), disk_payloads(s))
 
-from_log = from_disk = 0
-dup_hits = dup_total = 0
-proof_runs = proof_no_auth = 0
-for r in runs:
-    s = next(x for x in eligible if x["path"] == r["session"])
-    key = (r["target"], r["capability"])
-    lg, dk = s["payloads"]
-    pay, src_name = lg.get(key), "log"
-    if pay is None: pay, src_name = dk.get(key), "disk"
-    r["payload"] = pay
-    if pay is None: continue
-    from_log += src_name == "log"
-    from_disk += src_name == "disk"
-    tkeys = {val_key(o) for o in obs_of(pay, "transport")} - {None}
-    for fam in ("blocking", "limitation"):
-        for o in obs_of(pay, fam):
-            if not observed(o): continue
-            dup_total += 1
-            if val_key(o) in tkeys: dup_hits += 1
-    functional = any((o.get("value") or {}).get("outcome") == "FUNCTIONAL"
-                     for o in obs_of(pay, "transport"))
-    proof = any("operational_proof" in (o.get("value") or {})
-                for o in obs_of(pay, "validation"))
-    if functional and proof:
-        proof_runs += 1
-        if not obs_of(pay, "authentication"): proof_no_auth += 1
+def session_of(r):
+    return next(x for x in eligible if x["path"] == r["session"])
 
-have = sum(1 for r in runs if r.get("payload"))
-oper = sum(1 for r in runs for e in r["saved"]
-           if e["obj"].get("lifecycle") == "OPERATIONAL")
-gaps = collections.Counter(g for r in runs for g in r["gaps"])
-print()
-print("PAYLOADS RECOVERED")
-print("  Runs with a payload                   : %s (log %d, scratchpad %d)"
-      % (pct(have, n), from_log, from_disk))
-print()
-print("CHANGE 4 METRICS (recovered payloads only)")
-print("  (a) blocking/limitation blocks duplicating transport : %s"
-      % (pct(dup_hits, dup_total) if dup_total else "0/0 = n/a"))
-print("  (b) proof-carrying runs without authentication       : %s"
-      % (pct(proof_no_auth, proof_runs) if proof_runs else "0/0 = n/a"))
-print("  Runs reaching lifecycle OPERATIONAL   : %s" % pct(oper, n))
-print("  Runs carrying a lifecycle_gap         : %d %s"
-      % (sum(1 for r in runs if r["gaps"]), dict(gaps) or "-"))
+# Every opened run is given its payload, finalized or not: change 6 compares
+# the payloads of capabilities that share a target, and one of them may have
+# reached no real finalize at all.
+for r in opened:
+    lg, dk = session_of(r)["payloads"]
+    key = (r["target"], r["capability"])
+    pay, src = lg.get(key), "log"
+    if pay is None: pay, src = dk.get(key), "disk"
+    r["payload"] = pay
+    r["payload_src"] = src if pay is not None else None
+
+def change4(rs):
+    n = len(rs)
+    from_log = sum(1 for r in rs if r["payload_src"] == "log")
+    from_disk = sum(1 for r in rs if r["payload_src"] == "disk")
+    dup_hits = dup_total = proof_runs = proof_no_auth = 0
+    for r in rs:
+        pay = r["payload"]
+        if pay is None: continue
+        tkeys = {val_key(o) for o in obs_of(pay, "transport")} - {None}
+        for fam in ("blocking", "limitation"):
+            for o in obs_of(pay, fam):
+                if not observed(o): continue
+                dup_total += 1
+                if val_key(o) in tkeys: dup_hits += 1
+        functional = any((o.get("value") or {}).get("outcome") == "FUNCTIONAL"
+                         for o in obs_of(pay, "transport"))
+        proof = any("operational_proof" in (o.get("value") or {})
+                    for o in obs_of(pay, "validation"))
+        if functional and proof:
+            proof_runs += 1
+            if not obs_of(pay, "authentication"): proof_no_auth += 1
+    have = sum(1 for r in rs if r["payload"])
+    oper = sum(1 for r in rs for e in r["saved"]
+               if e["obj"].get("lifecycle") == "OPERATIONAL")
+    gaps = collections.Counter(g for r in rs for g in r["gaps"])
+    print()
+    print("PAYLOADS RECOVERED")
+    print("  Runs with a payload                   : %s (log %d, scratchpad %d)"
+          % (pct(have, n), from_log, from_disk))
+    print()
+    print("CHANGE 4 METRICS (recovered payloads only)")
+    print("  (a) blocking/limitation blocks duplicating transport : %s"
+          % pct(dup_hits, dup_total))
+    print("  (b) proof-carrying runs without authentication       : %s"
+          % pct(proof_no_auth, proof_runs))
+    print("  Runs reaching lifecycle OPERATIONAL   : %s" % pct(oper, n))
+    print("  Runs carrying a lifecycle_gap         : %d %s"
+          % (sum(1 for r in rs if r["gaps"]), dict(gaps) or "-"))
+    return {"dup_hits": dup_hits, "dup_total": dup_total,
+            "proof_runs": proof_runs, "proof_no_auth": proof_no_auth}
 
 # ---- change 5: the lookup sequence and duplicate-by-naming targets ------
 # Lookup calls are counted from the results too: knowledge-lookup prints one
@@ -417,15 +478,27 @@ print("  Runs carrying a lifecycle_gap         : %d %s"
 # command then supplies the call count that the result cannot.
 LOOK = ("list", "target", "target+capability", "other")
 LOOKUP_STATUS = {"listed", "not_found", "found", "unresolved", "ambiguous"}
-FOR = re.compile(r"\bfor\s+\w+\s+in\s+([^;\n]+?)(?:;|\n)\s*do\b")
+FOR = re.compile(r"\bfor\s+(\w+)\s+in\s+([^;\n]+?)(?:;|\n)\s*do\b")
 
 def loop_spans(cmd):
+    """(start, end, variable, words) for each for-loop body in the command."""
     out = []
     for m in FOR.finditer(cmd):
-        words = [w for w in m.group(1).split() if w]
+        words = [w.strip("\"'") for w in m.group(2).split() if w]
         end = cmd.find("done", m.end())
-        out.append((m.end(), end if end >= 0 else len(cmd), max(1, len(words))))
+        out.append((m.end(), end if end >= 0 else len(cmd), m.group(1), words))
     return out
+
+def reps_at(spans, pos):
+    """The loop words that drive the invocation at `pos`, or one plain call."""
+    out = [(None, None)]
+    for a, b, var, words in spans:
+        if a <= pos < b: out = [(var, w) for w in words] or [(None, None)]
+    return out
+
+def expand(args, var, word):
+    if not var or not word: return args
+    return args.replace("${%s}" % var, word).replace("$%s" % var, word)
 
 def lookup_kind(args):
     if has_flag(args, "list"): return "list"
@@ -433,6 +506,13 @@ def lookup_kind(args):
         return "target+capability"
     if has_flag(args, "target"): return "target"
     return "other"
+
+def optv(args, name):
+    """A flag value, with the quotes the shell would strip."""
+    m = re.search(r"--%s(?:[=\s]+)(\"[^\"]*\"|'[^']*'|[^\s;|&]+)" % re.escape(name), args)
+    if not m: return None
+    v = m.group(1).strip("\"'")
+    return None if not v or v.startswith("$") or v.startswith("-") else v
 
 def lookup_objects(text):
     out = []
@@ -442,45 +522,44 @@ def lookup_objects(text):
             out.append(o)
     return out
 
-def lookup_calls(s):
-    """Count knowledge-lookup calls in one session, and the not_found answers."""
-    kinds, not_found = collections.Counter(), 0
+def args_at(cmd, m):
+    """The argument text of the invocation matched at `m`."""
+    rest = cmd[m.end():]
+    stop = SEP.search(rest)
+    return rest[:stop.start()] if stop else rest
+
+def lookup_detail(s):
+    """One record per knowledge-lookup call: kind, target, capability, time."""
+    out = []
     for ev in s["calls"]:
         spans, expected = loop_spans(ev["cmd"]), []
         for m in INVOKE.finditer(ev["cmd"]):
             if m.group(2) != "knowledge-lookup": continue
-            rest = ev["cmd"][m.end():]
-            stop = SEP.search(rest)
-            args = rest[:stop.start()] if stop else rest
+            args = args_at(ev["cmd"], m)
             if has_flag(args, "help"): continue
-            reps = 1
-            for a, b, k in spans:
-                if a <= m.start() < b: reps = k
-            expected += [lookup_kind(args)] * reps
+            for var, word in reps_at(spans, m.start()):
+                a = expand(args, var, word)
+                expected.append({"kind": lookup_kind(a), "target": optv(a, "target"),
+                                 "capability": optv(a, "capability"), "t": ev["t"]})
         if not expected: continue
         objs = lookup_objects(ev["result"])
-        not_found += sum(1 for o in objs if o.get("status") == "not_found")
         if len(objs) > len(expected):        # the result shows more calls
-            expected = [expected[i % len(expected)] for i in range(len(objs))]
-        kinds.update(expected)
-    return kinds, not_found
+            expected = [dict(expected[i % len(expected)]) for i in range(len(objs))]
+        for i, e in enumerate(expected):
+            o = objs[i] if i < len(objs) else {}
+            if isinstance(o.get("target"), str) and o["target"]:
+                e["target"] = o["target"]
+            if isinstance(o.get("capability"), str) and o["capability"]:
+                e["capability"] = o["capability"]
+            e["not_found"] = o.get("status") == "not_found"
+            out.append(e)
+    return out
 
-print()
-print("CHANGE 5 METRICS")
-look_total = nf_total = 0
-for path in sorted(sess_set):
-    s = next(x for x in eligible if x["path"] == path)
-    mine = [r for r in runs if r["session"] == path]
-    c, nf = lookup_calls(s)
-    tot = sum(c.values()); look_total += tot; nf_total += nf
-    print("  %-42s lookups=%d (%s) not_found=%d runs=%d per_run=%.2f"
-          % (os.path.basename(path), tot,
-             ", ".join("%s %d" % (k, c[k]) for k in LOOK if c[k]) or "none",
-             nf, len(mine), tot / len(mine)))
-look_run = look_total / n
-look_sess = look_total / len(sess_set)
-print("  Lookups per run / per session         : %.2f / %.2f" % (look_run, look_sess))
-print("  not_found answers                     : %s" % pct(nf_total, look_total))
+def lookup_calls(s):
+    """Count knowledge-lookup calls in one session, and the not_found answers."""
+    d = lookup_detail(s)
+    return (collections.Counter(e["kind"] for e in d),
+            sum(1 for e in d if e["not_found"]))
 
 # Duplicate by naming: the live index, read-only, against the minted IDs.
 TLD = {"www", "com", "net", "org", "co", "io", "uk", "br", "fr", "es", "de",
@@ -494,7 +573,7 @@ def affix(a, b):
     return (a.startswith(b + "-") or a.endswith("-" + b)
             or b.startswith(a + "-") or b.endswith("-" + a))
 
-index, dupes = [], []
+index = []
 try:
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     raw = subprocess.run([sys.executable, os.path.join(root, "scripts", "knowledge-lookup"),
@@ -503,27 +582,334 @@ try:
 except Exception as exc:
     print("  live index unavailable: %s" % exc)
 by_id = {t.get("target") or t.get("name"): t for t in index}
-for tgt in sorted({r["target"] for r in runs if r["target"]}):
-    mine_hosts = set((by_id.get(tgt) or {}).get("hosts") or [])
-    for other, row in sorted(by_id.items()):
-        if not other or other == tgt: continue
-        hosts = set(row.get("hosts") or [])
-        why = None
-        if mine_hosts & hosts: why = "shared host %s" % ", ".join(sorted(mine_hosts & hosts))
-        elif affix(tgt, other): why = "one ID is an affix of the other"
-        elif brand(tgt, "-") and brand(tgt, "-") == brand(other, "-"): why = "same brand token"
-        elif mine_hosts and hosts and any(brand(h, ".") == brand(k, ".")
-                                          for h in mine_hosts for k in hosts):
-            why = "hosts normalize to the same brand token"
-        if why: dupes.append((tgt, other, why))
-print("  Duplicate-by-naming minted targets    : %d" % len(dupes))
-for a, b, why in dupes:
-    print("      %s <-> %s (%s)" % (a, b, why))
+
+def change5(rs):
+    n = len(rs)
+    paths = sorted({r["session"] for r in rs})
+    print()
+    print("CHANGE 5 METRICS")
+    look_total = nf_total = 0
+    for path in paths:
+        s = next(x for x in eligible if x["path"] == path)
+        mine = [r for r in rs if r["session"] == path]
+        c, nf = lookup_calls(s)
+        tot = sum(c.values()); look_total += tot; nf_total += nf
+        print("  %-42s lookups=%d (%s) not_found=%d runs=%d per_run=%.2f"
+              % (os.path.basename(path), tot,
+                 ", ".join("%s %d" % (k, c[k]) for k in LOOK if c[k]) or "none",
+                 nf, len(mine), tot / len(mine)))
+    look_run = look_total / n
+    look_sess = look_total / len(paths)
+    print("  Lookups per run / per session         : %.2f / %.2f" % (look_run, look_sess))
+    print("  not_found answers                     : %s" % pct(nf_total, look_total))
+    dupes = []
+    for tgt in sorted({r["target"] for r in rs if r["target"]}):
+        mine_hosts = set((by_id.get(tgt) or {}).get("hosts") or [])
+        for other, row in sorted(by_id.items()):
+            if not other or other == tgt: continue
+            hosts = set(row.get("hosts") or [])
+            why = None
+            if mine_hosts & hosts: why = "shared host %s" % ", ".join(sorted(mine_hosts & hosts))
+            elif affix(tgt, other): why = "one ID is an affix of the other"
+            elif brand(tgt, "-") and brand(tgt, "-") == brand(other, "-"): why = "same brand token"
+            elif mine_hosts and hosts and any(brand(h, ".") == brand(k, ".")
+                                              for h in mine_hosts for k in hosts):
+                why = "hosts normalize to the same brand token"
+            if why: dupes.append((tgt, other, why))
+    print("  Duplicate-by-naming minted targets    : %d" % len(dupes))
+    for a, b, why in dupes:
+        print("      %s <-> %s (%s)" % (a, b, why))
+    return {"look_run": look_run, "dupes": dupes}
+
+# ---- change 6: a second capability on a target the task already opened --
+# A task is one consumer session's assignment, so the session is the task.
+# Capabilities that share a target inside one task pay the ceremony twice:
+# a second begin, a second finalize sequence, its own lookups, and a payload
+# that may repeat the first capability's evidence. Every count below is per
+# release, because the ceremony each release asks for is different.
+CEREMONY = ("discovery-begin", "discovery-finalize", "knowledge-lookup",
+            "knowledge-resolve", "preflight", "init-knowledge-root")
+
+def cli_call_count(ev):
+    """How many CaravelaWeb CLI calls one tool event really drove.
+
+    The result is authoritative when it prints protocol objects. A piped or
+    truncated result prints fewer, so the loop-aware invocation text is the
+    floor: one textual call inside a four-word loop is four calls.
+    """
+    n_res = len(protocol_objects(ev["result"])) + len(lookup_objects(ev["result"]))
+    spans, n_txt = loop_spans(ev["cmd"]), 0
+    for m in INVOKE.finditer(ev["cmd"]):
+        if m.group(2) not in CEREMONY: continue
+        if has_flag(args_at(ev["cmd"], m), "help"): continue
+        n_txt += len(reps_at(spans, m.start()))
+    return max(n_res, n_txt)
+
+def prefetch_calls(s):
+    """CLI calls made before a web fetch closes the pre-fetch window.
+
+    Two windows are reported. The session window ends at the first fetch the
+    session ever made. A session that did unrelated work first fetched for
+    that work, so the task window ends instead at the first fetch that
+    follows the session's first CaravelaWeb CLI call.
+    """
+    times = [ev["t"] for ev in s["calls"] if ev["t"]]
+    first_cli = min(times) if times else None
+    cut = s["fetches"][0] if s["fetches"] else None
+    task = next((f for f in s["fetches"]
+                 if first_cli is not None and f[0] >= first_cli), None)
+
+    def before(edge):
+        if edge is None: return sum(cli_call_count(ev) for ev in s["calls"] if ev["t"])
+        return sum(cli_call_count(ev) for ev in s["calls"]
+                   if ev["t"] and ev["t"] < edge[0])
+    return before(cut), cut, before(task), task
+
+def span_calls(s, t0, t1):
+    """Tool calls the session made between two moments, ends included."""
+    ticks = s["ticks"]
+    return bisect.bisect_right(ticks, t1) - bisect.bisect_left(ticks, t0)
+
+def merge(iv):
+    """One list of non-overlapping intervals out of overlapping ones."""
+    out = []
+    for a, b in sorted(iv):
+        if out and a <= out[-1][1]: out[-1][1] = max(out[-1][1], b)
+        else: out.append([a, b])
+    return [(a, b) for a, b in out]
+
+def subtract(A, B):
+    """The part of merged intervals A that merged intervals B do not cover."""
+    out = []
+    for a, b in A:
+        cur = [(a, b)]
+        for c, d in B:
+            nxt = []
+            for x, y in cur:
+                if d <= x or c >= y: nxt.append((x, y)); continue
+                if x < c: nxt.append((x, c))
+                if d < y: nxt.append((d, y))
+            cur = nxt
+        out += cur
+    return out
+
+def cover(s, iv):
+    """Tool calls and seconds inside a list of non-overlapping intervals."""
+    calls = sum(span_calls(s, a, b) for a, b in iv)
+    return calls, sum((b - a).total_seconds() for a, b in iv)
+
+def ceremony_calls(r):
+    """The CLI calls one run costs: its begin, plus every finalize call."""
+    return 1 + len(r["real"]) + len(r["validate"])
+
+def ev_keys(pay):
+    out = set()
+    for e in (pay.get("evidence") or []):
+        if isinstance(e, dict):
+            out.add((e.get("locator"), e.get("kind"), e.get("scope")))
+    return out
+
+def obs_keys(pay, family):
+    return {json.dumps({"value": o.get("value"), "host": o.get("host"),
+                        "validation": o.get("validation")},
+                       sort_keys=True, default=str)
+            for o in obs_of(pay, family)}
+
+def cmp_sets(a, b):
+    if a == b: return "identical"
+    if a & b: return "overlapping"
+    return "disjoint"
+
+def change6(op, rs):
+    """op: every run opened in scope. rs: the finalized runs of the same scope."""
+    paths = sorted({r["session"] for r in op})
+    sess = {p: next(x for x in eligible if x["path"] == p) for p in paths}
+    look = {p: lookup_detail(sess[p]) for p in paths}
+    print()
+    print("CHANGE 6 METRICS")
+
+    # (1) lookup calls per task, per capability, per target.
+    look_total = sum(len(look[p]) for p in paths)
+    by_cap = collections.Counter(e["capability"] or "(no capability)"
+                                 for p in paths for e in look[p])
+    by_tgt = collections.Counter(e["target"] or "(no target)"
+                                 for p in paths for e in look[p])
+    named_t = [t for t in by_tgt if t != "(no target)"]
+    named_c = [c for c in by_cap if c != "(no capability)"]
+    print("  (1) lookup calls: %d total in %d tasks" % (look_total, len(paths)))
+    print("      per task %.2f | per capability %.2f (%d named) | per target %.2f (%d named)"
+          % (look_total / len(paths),
+             (sum(by_cap[c] for c in named_c) / len(named_c)) if named_c else 0.0,
+             len(named_c),
+             (sum(by_tgt[t] for t in named_t) / len(named_t)) if named_t else 0.0,
+             len(named_t)))
+    for p in paths:
+        c = collections.Counter(e["capability"] or "-" for e in look[p])
+        print("      %-42s lookups=%d caps={%s}"
+              % (os.path.basename(p), len(look[p]),
+                 ", ".join("%s %d" % kv for kv in sorted(c.items()))))
+    for t in sorted(named_t):
+        print("      target %-46s lookups=%d" % (t, by_tgt[t]))
+
+    # (2) CaravelaWeb CLI calls made before the first web fetch of the task.
+    pre, pre_task = [], []
+    print("  (2) pre-fetch CLI calls per task")
+    print("      session window ends at the session's first fetch; task window")
+    print("      ends at the first fetch after the first CaravelaWeb CLI call")
+    for p in paths:
+        tot, cut, tot_t, cut_t = prefetch_calls(sess[p])
+        pre.append(tot); pre_task.append(tot_t)
+        print("      %-42s session=%-3d task=%-3d first_fetch=%s"
+              % (os.path.basename(p), tot, tot_t,
+                 cut[0].isoformat() if cut else "none in log"))
+        print("          fetch that closed the task window: %s"
+              % (cut_t[1] if cut_t else "none in log"))
+    pmed, pmean, pmax = stats(pre) if pre else (0, 0.0, 0)
+    tmed, tmean, tmax = stats(pre_task) if pre_task else (0, 0.0, 0)
+    print("      session window median/mean/max    : %s / %.2f / %d"
+          % (pmed, pmean, pmax))
+    print("      task window median/mean/max       : %s / %.2f / %d"
+          % (tmed, tmean, tmax))
+
+    # (3) targets carrying two or more capabilities inside one task.
+    groups = {}
+    for r in sorted(op, key=lambda r: (r["begin_t"] or RELEASE)):
+        groups.setdefault((r["session"], r["target"]), []).append(r)
+    multi = {}
+    for key, grp in groups.items():
+        caps, order = {}, []
+        for r in grp:
+            if r["capability"] not in caps:
+                caps[r["capability"]] = []
+                order.append(r["capability"])
+            caps[r["capability"]].append(r)
+        if len(order) >= 2: multi[key] = (order, caps, grp)
+    multi_tasks = sorted({k[0] for k in multi})
+    print("  (3) targets with 2+ capabilities      : %s"
+          % pct(len(multi), len(groups)))
+    print("      tasks holding such a target       : %s"
+          % pct(len(multi_tasks), len(paths)))
+    for (p, tgt), (order, caps, grp) in sorted(multi.items(), key=lambda kv: str(kv[0])):
+        print("      %-24s %-18s caps=%s"
+              % (tgt, os.path.basename(p)[:18], ", ".join(str(c) for c in order)))
+
+    # (4) the ceremony those extra capabilities repeat.
+    extra_begin = extra_final = repeat_look = 0
+    first_begin = first_final = 0
+    for (p, tgt), (order, caps, grp) in multi.items():
+        first = order[0]
+        first_begin += len(caps[first])
+        first_final += sum(len(r["real"]) + len(r["validate"]) for r in caps[first])
+        for cap in order[1:]:
+            extra_begin += len(caps[cap])
+            extra_final += sum(len(r["real"]) + len(r["validate"]) for r in caps[cap])
+        n_look = sum(1 for e in look[p] if e["target"] == tgt)
+        repeat_look += max(0, n_look - 1)
+    print("  (4) duplicated ceremony on those targets")
+    print("      discovery-begin beyond the first cap  : %d (first cap: %d)"
+          % (extra_begin, first_begin))
+    print("      discovery-finalize beyond the first   : %d (first cap: %d)"
+          % (extra_final, first_final))
+    print("      lookups repeated for the same target  : %d" % repeat_look)
+
+    # (5) what the second and later capabilities cost in calls and clock.
+    # A run still open has no last finalize, so its window is not measurable
+    # yet: it is counted apart instead of entering the comparison as zero.
+    def cost(r):
+        s = sess[r["session"]]
+        t0, t1 = r["begin_t"], r["last_t"]
+        if not t0 or not t1: return 0, 0.0
+        return span_calls(s, t0, t1), (t1 - t0).total_seconds()
+    f_calls = f_secs = l_calls = l_secs = 0.0
+    f_n = l_n = open_n = 0
+    spans = {}      # session -> (first-capability windows, second+ windows)
+    for (p, tgt), (order, caps, grp) in multi.items():
+        for cap in order:
+            for r in caps[cap]:
+                if not (r["real"] or r["validate"]):
+                    open_n += 1
+                    continue
+                c, sec = cost(r)
+                w = spans.setdefault(p, ([], []))[0 if cap == order[0] else 1]
+                if r["begin_t"] and r["last_t"]: w.append((r["begin_t"], r["last_t"]))
+                if cap == order[0]: f_calls += c; f_secs += sec; f_n += 1
+                else: l_calls += c; l_secs += sec; l_n += 1
+    # A batch run opens every capability in one loop and finalizes them in the
+    # next, so the windows of the first and the later capabilities overlap and
+    # the per-run figures repeat the same tool calls. The marginal cost is the
+    # part of the later windows that the first capability's windows never
+    # cover, so it is reported beside them.
+    m_calls = m_secs = 0.0
+    for p, (fw, lw) in spans.items():
+        m = subtract(merge(lw), merge(fw))
+        c, sec = cover(sess[p], m)
+        m_calls += c; m_secs += sec
+    print("  (5) cost of the second and later capabilities")
+    print("      runs still open (no finalize yet, excluded) : %d" % open_n)
+    print("      first capability   : %d runs, %d tool calls, %.0f s (mean %.1f calls, %.0f s)"
+          % (f_n, f_calls, f_secs, (f_calls / f_n) if f_n else 0.0,
+             (f_secs / f_n) if f_n else 0.0))
+    print("      second+ capability : %d runs, %d tool calls, %.0f s (mean %.1f calls, %.0f s)"
+          % (l_n, l_calls, l_secs, (l_calls / l_n) if l_n else 0.0,
+             (l_secs / l_n) if l_n else 0.0))
+    print("      marginal window    : %d tool calls, %.0f s outside the first"
+          " capability's windows" % (m_calls, m_secs))
+
+    # (6) whether the payloads really repeated the shared evidence.
+    fams = ["evidence", "transport", "validation"]
+    verdicts = {f: collections.Counter() for f in fams}
+    dup_items = {f: [0, 0] for f in fams}     # repeated, total on second+
+    pairs = 0
+    for (p, tgt), (order, caps, grp) in multi.items():
+        base = next((r["payload"] for r in caps[order[0]] if r["payload"]), None)
+        if base is None: continue
+        for cap in order[1:]:
+            pay = next((r["payload"] for r in caps[cap] if r["payload"]), None)
+            if pay is None: continue
+            pairs += 1
+            for f in fams:
+                a = ev_keys(base) if f == "evidence" else obs_keys(base, f)
+                b = ev_keys(pay) if f == "evidence" else obs_keys(pay, f)
+                verdicts[f][cmp_sets(a, b)] += 1
+                dup_items[f][0] += len(a & b)
+                dup_items[f][1] += len(b)
+    print("  (6) shared evidence across capabilities on one target (%d comparable pairs)"
+          % pairs)
+    for f in fams:
+        v = verdicts[f]
+        print("      %-10s identical %d, overlapping %d, disjoint %d | repeated items %s"
+              % (f, v["identical"], v["overlapping"], v["disjoint"],
+                 pct(dup_items[f][0], dup_items[f][1])))
+
+    # ---- the residual the maintainer decides from -----------------------
+    total_cer = sum(ceremony_calls(r) for r in op) + look_total
+    second_cer = extra_begin + extra_final + repeat_look
+    dup_all = sum(dup_items[f][0] for f in fams)
+    tot_all = sum(dup_items[f][1] for f in fams)
+    if len(multi) < 5:
+        print("  CHANGE 6 INSUFFICIENT DATA : %d multi-capability targets, need >= 5"
+              % len(multi))
+    else:
+        print("  CHANGE 6 residual : second+ capabilities take %s of ceremony calls; "
+              "%s of their evidence repeats the first capability's"
+              % (pct(second_cer, total_cer), pct(dup_all, tot_all)))
+    return {"multi": len(multi), "second_cer": second_cer, "total_cer": total_cer}
+
+# ---- combined report -----------------------------------------------------
+M = measurement(runs)
+C4 = change4(runs)
+C5 = change5(runs)
+C6 = change6(opened, runs)
 
 # ---- verdicts ------------------------------------------------------------
 def verdict(proceed, enough=True):
     if not enough: return "INSUFFICIENT DATA"
     return "PROCEED" if proceed else "NOT NEEDED"
+
+n, mean, mx, zero = M["n"], M["mean"], M["mx"], M["zero"]
+dup_hits, dup_total = C4["dup_hits"], C4["dup_total"]
+proof_no_auth, proof_runs = C4["proof_no_auth"], C4["proof_runs"]
+look_run, dupes = C5["look_run"], C5["dupes"]
 
 c3 = (mean >= 2) or (mx >= 4) or (zero < 0.5 * n)
 a_ok, b_ok = dup_total >= 10, proof_runs >= 10
@@ -536,7 +922,35 @@ print("  Change 3 %-18s mean %.2f, max %d, zero-refusal %s"
       % (verdict(c3), mean, mx, pct(zero, n)))
 print("  Change 4 %-18s (a) %s, (b) %s"
       % (verdict(a_hit or b_hit, a_ok or b_ok),
-         pct(dup_hits, dup_total) if dup_total else "0/0",
-         pct(proof_no_auth, proof_runs) if proof_runs else "0/0"))
+         pct(dup_hits, dup_total), pct(proof_no_auth, proof_runs)))
 print("  Change 5 %-18s %.2f lookups per run, %d duplicate-by-naming targets"
       % (verdict(c5), look_run, len(dupes)))
+print("  Change 6 has no verdict: the maintainer reads the numbers.")
+
+# ---- the same blocks again, one release at a time ------------------------
+# 0.2.1 and 0.2.2 ask for different ceremony, so a mixed average describes
+# neither. Every block above is repeated per release, over that release's
+# runs alone.
+print()
+print("=" * 74)
+print("PER-RELEASE SPLIT (%d release(s): %s)" % (len(versions), ", ".join(versions)))
+print("=" * 74)
+for v in versions:
+    rs = [r for r in runs if r["version"] == v]
+    op = [r for r in opened if r["version"] == v]
+    print()
+    print("-" * 74)
+    print("RELEASE %s -- %d run(s), %d session(s), %d opened"
+          % (v, len(rs), len({r["session"] for r in rs}), len(op)))
+    for p in sorted({r["session"] for r in op}):
+        print("   %s" % os.path.basename(p))
+    print("-" * 74)
+    if rs:
+        measurement(rs)
+        change4(rs)
+        change5(rs)
+    else:
+        print()
+        print("  no finalized run on this release yet; the blocks that need a")
+        print("  finalize are skipped. Change 6 reads the opened runs.")
+    if op: change6(op, rs)

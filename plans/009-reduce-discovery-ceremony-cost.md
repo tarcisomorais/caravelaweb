@@ -71,6 +71,27 @@
   shrank 26 to 19 lines, file 151 to 144, budget untouched. DX-05 landed
   as `9374df3`. Next: release, then a second re-measurement on the new
   contract before change 6 is considered.
+- **Second sample 2026-09-04, release 0.2.2** (`0130703`, tag `v0.2.2`):
+  21 runs, 3 consumer sessions, 2 projects (quintace-toolbox, tarsila),
+  each session vetting three targets for two capabilities plus one
+  single-capability control. Real finalize per run median/mean/max
+  1 / 1.14 / 2; saved on first real finalize 18/21 = 86%; zero-refusal
+  runs 18/21 = 86%; refusals `TASK_DATA_REJECTED` 2, `PAYLOAD_SHAPE` 1;
+  `--validate` 3 calls in 2 runs. 16/21 = 76% reached `OPERATIONAL`; the
+  5 gaps are all `NO_OPERATIONAL_PROOF` on paywalled or Cloudflare-blocked
+  article bodies, recorded as constraints within read-only authority.
+  Change 5 effect: lookups 2.10 per run (was 3.35 on 0.2.1), 14.7 per
+  seven-run session; `not_found` 18/44 = 41%; pre-fetch CLI calls per
+  task median 21. Change 6 residual: 9/12 targets carried two
+  capabilities; second capabilities cost 9 extra begins, 13 extra
+  finalizes, 3 repeated lookups, 25/92 = 27% of ceremony calls; their
+  evidence repeated the first capability's in 4/27 = 15% of items
+  (evidence 1/10, transport 3/11, validation 0/6); marginal wall-clock
+  43 s and 5 tool calls outside the first capability's windows, because
+  sessions batched both capabilities in one loop. Read: the duplicated
+  cost is ceremony (one begin/finalize round per capability), not repeated
+  proof work; the shared-evidence half of the change 6 design would save
+  almost nothing. Decision on change 6 is the maintainer's.
 
 ## Why this matters
 
