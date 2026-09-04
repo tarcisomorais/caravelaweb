@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+"""Plan 009 Step 0 re-measurement gate. Read-only over Claude Code session logs.
+
+Release 0.2.0 is commit 7e13209, 2026-09-02 23:34:40 -0300.
+
+A shell command in the logs is usually a compound one-liner (`A; B | C`), so a
+flag such as --validate or --help must be read from the individual CLI
+invocation, not from the whole command string. This script splits every Bash
+command into invocations first, then classifies each invocation on its own.
+"""
+import json, os, re, sys, glob, datetime, collections
+
+RELEASE = datetime.datetime.fromisoformat("2026-09-02T23:34:40-03:00")
+ROOT = os.path.expanduser("~/.claude/projects")
+EXCLUDE_PROJECT = "-home-tarciso-projects-caravelaweb"   # the skill's own repo
+
+SCRIPTS = ["discovery-begin", "discovery-finalize", "knowledge-lookup",
+           "knowledge-resolve", "preflight", "init-knowledge-root"]
+
+# ------------------------------------------------------------------ parsing
+def ts(s):
+    if not s: return None
+    try: return datetime.datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except Exception: return None
+
+def text_of(c):
+    if isinstance(c, str): return c
+    if isinstance(c, list):
+        out = []
+        for p in c:
+            if isinstance(p, dict): out.append(p.get("text") or "")
+            elif isinstance(p, str): out.append(p)
+        return "\n".join(out)
+    if isinstance(c, dict): return c.get("text") or ""
+    return ""
+
+def load_events(path):
+    uses, events = {}, []
+    with open(path, "r", errors="replace") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line: continue
+            try: rec = json.loads(line)
+            except Exception: continue
+            t = ts(rec.get("timestamp"))
+            content = (rec.get("message") or {}).get("content")
+            if not isinstance(content, list): continue
+            for blk in content:
+                if not isinstance(blk, dict): continue
+                if blk.get("type") == "tool_use":
+                    ev = {"t": t, "id": blk.get("id"), "name": blk.get("name"),
+                          "input": blk.get("input") or {}, "result": "", "file": path}
+                    uses[ev["id"]] = ev
+                    events.append(ev)
+                elif blk.get("type") == "tool_result":
+                    ev = uses.get(blk.get("tool_use_id"))
+                    if ev is not None:
+                        ev["result"] = text_of(blk.get("content"))
+    return events
+
+# One invocation = from the script name to the next shell separator.
+SEP = re.compile(r"[;|&\n]|\|\||&&")
+INVOKE = re.compile(r"(?:^|[\s;|&(`$])((?:[^\s;|&]*/)?(%s))\b" % "|".join(SCRIPTS))
+
+def invocations(cmd):
+    """Yield (script_name, argument_text) for each CLI call inside `cmd`."""
+    out = []
+    for m in INVOKE.finditer(cmd):
+        name = m.group(2)
+        rest = cmd[m.end():]
+        stop = SEP.search(rest)
+        args = rest[:stop.start()] if stop else rest
+        out.append((name, args))
+    return out
+
+def has_flag(args, flag):
+    return re.search(r"(?<![\w-])--%s(?![\w-])" % re.escape(flag), args) is not None
+
+def opt(args, name):
+    m = re.search(r"--%s[=\s]+([^\s'\";|&]+)" % re.escape(name), args)
+    return m.group(1) if m else None
+
+def command_of(ev):
+    inp = ev.get("input") or {}
+    if isinstance(inp.get("command"), str): return inp["command"]
+    return " ".join(str(v) for v in inp.values() if isinstance(v, str))
+
+# --------------------------------------------------------------- collection
+sessions = []
+for proj in sorted(os.listdir(ROOT)):
+    pdir = os.path.join(ROOT, proj)
+    if not os.path.isdir(pdir) or proj == EXCLUDE_PROJECT: continue
+    for path in sorted(glob.glob(os.path.join(pdir, "**", "*.jsonl"), recursive=True)):
+        calls = []
+        for ev in load_events(path):
+            cmd = command_of(ev)
+            if not cmd: continue
+            invs = invocations(cmd)
+            if not invs: continue
+            ev["cmd"] = cmd
+            ev["invs"] = invs
+            calls.append(ev)
+        if calls:
+            sessions.append({"project": proj, "path": path, "calls": calls})
+
+# ---------------------------------------------------------- 0.2.0 filtering
+# Marker for "ran against a 0.2.0+ skill": reason_code in output, a
+# knowledge-resolve call, a 0.2.0 skill path, or accepted-set/pending output.
+MARKER = re.compile(r'"reason_code"|knowledge-resolve|caravelaweb/0\.2\.0|'
+                    r'pending_candidate|accepted_set|"accepted"')
+
+def post_begins(s):
+    out = []
+    for ev in s["calls"]:
+        if not ev["t"] or ev["t"] < RELEASE: continue
+        for name, args in ev["invs"]:
+            if name == "discovery-begin" and not has_flag(args, "help"):
+                out.append((ev, args))
+    return out
+
+eligible = []
+for s in sessions:
+    pb = post_begins(s)
+    if not pb: continue
+    blob = "\n".join(e["cmd"] + "\n" + (e["result"] or "") for e in s["calls"])
+    s["post_begins"] = pb
+    s["marker"] = bool(MARKER.search(blob))
+    eligible.append(s)
+
+# ----------------------------------------------------------------- run build
+runs = []
+for s in eligible:
+    if not s["marker"]: continue
+    for ev in sorted([e for e in s["calls"] if e["t"]], key=lambda e: e["t"]):
+        for name, args in ev["invs"]:
+            if has_flag(args, "help"): continue
+            if name == "discovery-begin":
+                if ev["t"] < RELEASE:
+                    runs.append(None)          # marks a pre-release boundary
+                    continue
+                runs.append({"session": s["path"], "project": s["project"],
+                             "begin_t": ev["t"], "target": opt(args, "target"),
+                             "capability": opt(args, "capability"),
+                             "real": [], "validate": [], "reasons": [],
+                             "saved": [], "gaps": [], "last_t": ev["t"]})
+            elif name == "discovery-finalize":
+                cur = runs[-1] if runs and runs[-1] else None
+                if cur is None: continue
+                res = ev["result"] or ""
+                entry = {"t": ev["t"], "res": res, "cmd": ev["cmd"]}
+                if has_flag(args, "validate"):
+                    cur["validate"].append(entry)
+                    continue
+                cur["real"].append(entry)
+                cur["last_t"] = ev["t"]
+                if '"NOT_SAVED"' in res and "would_finalize_as" not in res:
+                    m = re.search(r'"reason_code"\s*:\s*"([A-Z_]+)"', res)
+                    cur["reasons"].append(m.group(1) if m else "NO_REASON_CODE")
+                if re.search(r'"status"\s*:\s*"SAVED"', res):
+                    cur["saved"].append(entry)
+                    m = re.search(r'"lifecycle_gap"\s*:\s*"([A-Z_]+)"', res)
+                    if m: cur["gaps"].append(m.group(1))
+
+runs = [r for r in runs if r and r["real"]]
+sess_set = {r["session"] for r in runs}
+proj_set = {r["project"] for r in runs}
+
+# ------------------------------------------------------------------- report
+print("=" * 74)
+print("PLAN 009 STEP 0 -- RE-MEASUREMENT GATE")
+print("release 0.2.0 (7e13209): %s" % RELEASE.isoformat())
+print("consumer projects only; %s excluded" % EXCLUDE_PROJECT)
+print("=" * 74)
+print()
+print("Sessions with any CaravelaWeb CLI call : %d" % len(sessions))
+print("Sessions with a discovery-begin after the release : %d" % len(eligible))
+for s in eligible:
+    print("   %-7s %-42s begins=%d  %s"
+          % ("0.2.0+" if s["marker"] else "pre", s["project"],
+             len(s["post_begins"]), os.path.basename(s["path"])))
+print()
+print("GATE COUNTS (0.2.0+ only)")
+print("  Discovery runs (begin + >=1 real finalize) : %2d   need >= 10" % len(runs))
+print("  Consumer sessions                          : %2d   need >=  3" % len(sess_set))
+print("  Consumer projects                          : %2d   want >=  2" % len(proj_set))
+print()
+for r in runs:
+    print("  run %s / %s : real=%d validate=%d refusals=%d saved=%d gaps=%s [%s]"
+          % (r["target"], r["capability"], len(r["real"]), len(r["validate"]),
+             len(r["reasons"]), len(r["saved"]), r["gaps"] or "-",
+             os.path.basename(r["session"])))
+print()
+gate = len(runs) >= 10 and len(sess_set) >= 3
+print("GATE: %s" % ("PASS" if gate else "FAIL"))
+
+if not gate:
+    print()
+    print("Stopping per Step 0: insufficient sample. No metric is computed,")
+    print("and no per-change threshold can be evaluated.")
+    sys.exit(0)
+
+# ---- metrics (only reached on PASS) -------------------------------------
+def stats(xs):
+    xs = sorted(xs); n = len(xs)
+    med = xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2
+    return med, sum(xs) / n, xs[-1]
+
+n = len(runs)
+rc = [len(r["real"]) for r in runs]
+fc = [len(r["reasons"]) for r in runs]
+med, mean, mx = stats(rc); rmed, rmean, rmx = stats(fc)
+pct = lambda a, b: "%d/%d = %.0f%%" % (a, b, 100.0 * a / b)
+first = sum(1 for c in rc if c == 1); four = sum(1 for c in rc if c >= 4)
+zero = sum(1 for c in fc if c == 0)
+vcalls = sum(len(r["validate"]) for r in runs); vruns = sum(1 for r in runs if r["validate"])
+print()
+print("MEASUREMENT (real finalize calls only; --validate never added in)")
+print("  Real finalize per run median/mean/max : %s / %.2f / %d" % (med, mean, mx))
+print("  Saved on first real finalize          : %s" % pct(first, n))
+print("  Runs needing 4+ real finalize calls   : %s" % pct(four, n))
+print("  Refusals per run median/mean          : %s / %.2f" % (rmed, rmean))
+print("  Runs with zero refusals               : %s" % pct(zero, n))
+print("  --validate                            : %d calls in %s runs" % (vcalls, pct(vruns, n)))
+print("  Refusal reasons: %s" % dict(collections.Counter(x for r in runs for x in r["reasons"])))
+print()
+print("THRESHOLDS")
+print("  Change 3 PROCEED=%s" % ((mean >= 2) or (mx >= 4) or (zero < 0.5 * n)))
