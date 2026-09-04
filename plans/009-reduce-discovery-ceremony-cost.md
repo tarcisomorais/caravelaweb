@@ -44,6 +44,27 @@
   locked database), 0 from the change 1 trap cluster. 45 `--validate`
   calls, 42 of them diagnosing those two refusals. Fixed on `main` as
   `02be2ab`. 21 lookup calls preceded the first fetch (supports change 5).
+- **Re-measured 2026-09-04, gate PASS** on release 0.2.1 (`c0d7f77`,
+  tag `v0.2.1`): 17 runs, 5 consumer sessions, 2 projects (disperta,
+  quintace-toolbox); 16 of them from four dispatched sessions vetting four
+  sources each, all read-only, all on the installed 0.2.1 plugin. Real
+  finalize per run median/mean/max 1 / 1.35 / 3; saved on first real
+  finalize 12/17 = 71%; runs needing 4+ calls 0/17 = 0%; zero-refusal runs
+  12/17 = 71%; `--validate` 1 call in 1/17 runs. Refusals: `PAYLOAD_VALUE`
+  4 (all one session, `recorded_at` a few seconds ahead of the clock),
+  `HOST_SCOPE` 1, uncoded 2 (0.2.0 session, pre-hotfix). Payloads
+  recovered 17/17. Change 4: (a) 2/3 = 67% duplicated blocks, under the
+  10-item floor; (b) 0/16 = 0% proof-carrying runs without
+  `authentication`; 16/17 reached `OPERATIONAL`, no `lifecycle_gap`.
+  Change 5: lookups 3.35 per run, 11.4 per session, 1 + 4 + 4 = 9 before
+  the first run in every four-source session, 32/57 = 56% answered
+  `not_found`; 0 duplicate-by-naming targets minted. Verdicts: change 3
+  REJECTED (not needed), change 4 REJECTED (not needed on (b); (a) has
+  insufficient data), change 5 PROCEED, change 6 waits on change 5 and a
+  second re-measurement. Primary KPI already met on this sample. Method:
+  `plans/measure-step0` counts runs and finalize results from tool
+  results, since the agents ran the CLI in shell loops; lookups are
+  counted over the whole session including post-save verification.
 
 ## Why this matters
 

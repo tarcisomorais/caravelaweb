@@ -3,12 +3,14 @@
 
 Release 0.2.0 is commit 7e13209, 2026-09-02 23:34:40 -0300.
 
-A shell command in the logs is usually a compound one-liner (`A; B | C`), so a
-flag such as --validate or --help must be read from the individual CLI
-invocation, not from the whole command string. This script splits every Bash
-command into invocations first, then classifies each invocation on its own.
+A shell command in the logs is usually a compound one-liner (`A; B | C`), and
+often a for-loop over several targets, so the command text says nothing about
+how many runs it drove: one textual `discovery-begin` inside a loop opens four
+runs. Every count therefore comes from the tool result, which carries one JSON
+object per actual CLI call. The command text is read only for the flags that
+the result does not report, such as --validate and --help.
 """
-import json, os, re, sys, glob, datetime, collections
+import json, os, re, sys, glob, datetime, collections, subprocess
 
 RELEASE = datetime.datetime.fromisoformat("2026-09-02T23:34:40-03:00")
 ROOT = os.path.expanduser("~/.claude/projects")
@@ -85,6 +87,47 @@ def command_of(ev):
     if isinstance(inp.get("command"), str): return inp["command"]
     return " ".join(str(v) for v in inp.values() if isinstance(v, str))
 
+# ------------------------------------------------------- result-side parsing
+# discovery-begin prints one DISCOVERY_OPEN object per run it opens.
+# discovery-finalize prints one object per call: SAVED / ALREADY_EXISTS carry
+# target and capability, NOT_SAVED carries only reason and reason_code, and
+# --validate carries would_finalize_as. A loop prints them all in one result.
+DEC = json.JSONDecoder()
+PROTOCOL = ("DISCOVERY_OPEN", "SAVED", "ALREADY_EXISTS", "NOT_SAVED")
+
+def result_objects(text):
+    """Yield every JSON object in a tool result, in printed order."""
+    out, i = [], 0
+    while True:
+        i = text.find("{", i)
+        if i < 0: return out
+        try: obj, end = DEC.raw_decode(text, i)
+        except ValueError:
+            i += 1
+            continue
+        if isinstance(obj, dict): out.append(obj)
+        i = end
+
+def protocol_objects(text):
+    """Only the CLI protocol objects: one per discovery-begin/-finalize call."""
+    out = []
+    for o in result_objects(text or ""):
+        if o.get("status") in PROTOCOL or "would_finalize_as" in o:
+            out.append(o)
+    return out
+
+def validate_flags(ev, n):
+    """Say, for each of the n finalize results, whether its call had --validate.
+
+    One invocation in a loop drives every result, so its flag applies to all.
+    """
+    flags = [has_flag(a, "validate") for name, a in ev["invs"]
+             if name == "discovery-finalize" and not has_flag(a, "help")]
+    if not flags: return [has_flag(ev["cmd"], "validate")] * n
+    if len(flags) == n: return flags
+    if len(set(flags)) == 1: return [flags[0]] * n
+    return [flags[i % len(flags)] for i in range(n)]
+
 # --------------------------------------------------------------- collection
 sessions = []
 for proj in sorted(os.listdir(ROOT)):
@@ -124,44 +167,75 @@ for s in sessions:
     if not pb: continue
     blob = "\n".join(e["cmd"] + "\n" + (e["result"] or "") for e in s["calls"])
     s["post_begins"] = pb
+    s["opens"] = sum(1 for e in s["calls"] if e["t"] and e["t"] >= RELEASE
+                     for o in protocol_objects(e["result"])
+                     if o.get("status") == "DISCOVERY_OPEN")
     s["marker"] = bool(MARKER.search(blob))
     eligible.append(s)
 
 # ----------------------------------------------------------------- run build
+# A session opens runs in a known order and closes one when a SAVED names its
+# target and capability. A refusal names no target, so it is attributed
+# round-robin over the runs still open, in opened order: a loop that refuses
+# four open targets charges one refusal to each, and a lone open run takes
+# them all.
+def rr_pick(open_runs, rr, key):
+    if not open_runs: return None
+    i = rr[key] % len(open_runs)
+    rr[key] = i + 1
+    return open_runs[i]
+
+def named_run(pool, o):
+    t, c = o.get("target"), o.get("capability")
+    if t is None and c is None: return None
+    for r in pool:
+        if r["target"] == t and r["capability"] == c: return r
+    return None
+
 runs = []
 for s in eligible:
     if not s["marker"]: continue
+    mine, open_runs, rr = [], [], {"real": 0, "validate": 0}
     for ev in sorted([e for e in s["calls"] if e["t"]], key=lambda e: e["t"]):
-        for name, args in ev["invs"]:
-            if has_flag(args, "help"): continue
-            if name == "discovery-begin":
-                if ev["t"] < RELEASE:
-                    runs.append(None)          # marks a pre-release boundary
-                    continue
-                runs.append({"session": s["path"], "project": s["project"],
-                             "begin_t": ev["t"], "target": opt(args, "target"),
-                             "capability": opt(args, "capability"),
-                             "real": [], "validate": [], "reasons": [],
-                             "saved": [], "gaps": [], "last_t": ev["t"]})
-            elif name == "discovery-finalize":
-                cur = runs[-1] if runs and runs[-1] else None
-                if cur is None: continue
-                res = ev["result"] or ""
-                entry = {"t": ev["t"], "res": res, "cmd": ev["cmd"]}
-                if has_flag(args, "validate"):
-                    cur["validate"].append(entry)
-                    continue
-                cur["real"].append(entry)
-                cur["last_t"] = ev["t"]
-                if '"NOT_SAVED"' in res and "would_finalize_as" not in res:
-                    m = re.search(r'"reason_code"\s*:\s*"([A-Z_]+)"', res)
-                    cur["reasons"].append(m.group(1) if m else "NO_REASON_CODE")
-                if re.search(r'"status"\s*:\s*"SAVED"', res):
-                    cur["saved"].append(entry)
-                    m = re.search(r'"lifecycle_gap"\s*:\s*"([A-Z_]+)"', res)
-                    if m: cur["gaps"].append(m.group(1))
+        objs = protocol_objects(ev["result"])
+        if not objs: continue
+        fin = [o for o in objs if o.get("status") != "DISCOVERY_OPEN"]
+        flags, k = validate_flags(ev, len(fin)), 0
+        for o in objs:
+            if o.get("status") == "DISCOVERY_OPEN":
+                r = {"session": s["path"], "project": s["project"],
+                     "begin_t": ev["t"], "target": o.get("target"),
+                     "capability": o.get("capability"),
+                     "pre": ev["t"] < RELEASE,   # opened before the release
+                     "real": [], "validate": [], "reasons": [],
+                     "saved": [], "gaps": [], "last_t": ev["t"]}
+                runs.append(r); mine.append(r); open_runs.append(r)
+                continue
+            is_validate = flags[k] or ("would_finalize_as" in o); k += 1
+            entry = {"t": ev["t"], "obj": o, "cmd": ev["cmd"]}
+            if is_validate:
+                r = named_run(open_runs, o) or rr_pick(open_runs, rr, "validate")
+                if r is not None: r["validate"].append(entry)
+                continue
+            st = o.get("status")
+            if st in ("SAVED", "ALREADY_EXISTS"):
+                r = (named_run(open_runs, o) or named_run(mine, o)
+                     or rr_pick(open_runs, rr, "real"))
+            else:
+                r = rr_pick(open_runs, rr, "real")
+            if r is None: continue
+            r["real"].append(entry)
+            r["last_t"] = ev["t"]
+            if st == "NOT_SAVED":
+                rc = o.get("reason_code")
+                r["reasons"].append(rc if isinstance(rc, str) else "NO_REASON_CODE")
+            elif st == "SAVED":
+                r["saved"].append(entry)
+                g = o.get("lifecycle_gap")
+                if isinstance(g, str): r["gaps"].append(g)
+                if r in open_runs: open_runs.remove(r)
 
-runs = [r for r in runs if r and r["real"]]
+runs = [r for r in runs if not r["pre"] and r["real"]]
 sess_set = {r["session"] for r in runs}
 proj_set = {r["project"] for r in runs}
 
@@ -177,7 +251,7 @@ print("Sessions with a discovery-begin after the release : %d" % len(eligible))
 for s in eligible:
     print("   %-7s %-42s begins=%d  %s"
           % ("0.2.0+" if s["marker"] else "pre", s["project"],
-             len(s["post_begins"]), os.path.basename(s["path"])))
+             s["opens"], os.path.basename(s["path"])))
 print()
 print("GATE COUNTS (0.2.0+ only)")
 print("  Discovery runs (begin + >=1 real finalize) : %2d   need >= 10" % len(runs))
@@ -231,6 +305,238 @@ print("  Runs with zero refusals               : %s" % pct(zero, n))
 print("  --validate                            : %d calls in %s runs" % (vcalls, pct(vruns, n)))
 print("  Refusal reasons: %s" % dict(collections.Counter(x for r in runs for x in r["reasons"])))
 print("  Infrastructure refusals (excluded)    : %d in %d runs (%s)" % (infra, infra_runs, ", ".join(sorted(INFRA))))
+print("  NO_REASON_CODE occurs on 0.2.0 only; 0.2.1 codes every refusal.")
+
+# ---- change 4: the payloads those runs submitted ------------------------
+# A payload is recovered from the session log when the log carries it
+# literally (a Write body, or a `cat > file <<EOF` heredoc). Payloads built
+# by a Python one-liner are not literal in the log, so the run's scratchpad
+# directory, named by the same log, is read as a second source.
+SCRATCH = re.compile(r"/tmp/[^\s'\";|&)>]*scratchpad[^\s'\";|&)>]*")
+
+def log_payloads(s):
+    """Payloads written literally anywhere in the log, not only beside a CLI call."""
+    out = {}
+    for ev in load_events(s["path"]):
+        blob = " ".join(str(v) for v in (ev.get("input") or {}).values()
+                        if isinstance(v, str))
+        for o in result_objects(blob):
+            if isinstance(o.get("observations"), list) and o.get("target"):
+                out[(o["target"], o.get("capability"))] = o
+    return out
+
+def disk_payloads(s):
+    dirs, out = set(), {}
+    base = os.path.join("/tmp", "claude-1000", s["project"],
+                        os.path.basename(s["path"])[:-6], "scratchpad")
+    dirs.add(base)
+    for ev in s["calls"]:
+        for m in SCRATCH.finditer(ev["cmd"]):
+            d = m.group(0)
+            dirs.add(d if not d.endswith(".json") else os.path.dirname(d))
+    seen = 0
+    for d in sorted(dirs):
+        for f in sorted(glob.glob(os.path.join(d, "**", "*.json"), recursive=True)):
+            seen += 1
+            if seen > 400: break
+            try: o = json.load(open(f, errors="replace"))
+            except Exception: continue
+            if isinstance(o, dict) and isinstance(o.get("observations"), list) \
+               and o.get("target"):
+                out.setdefault((o["target"], o.get("capability")), o)
+    return out
+
+def obs_of(payload, family):
+    return [o for o in payload["observations"]
+            if isinstance(o, dict) and o.get("family") == family]
+
+def observed(o):
+    return o.get("epistemic", "OBSERVED") == "OBSERVED"   # the finalizer default
+
+def val_key(o):
+    v = o.get("validation")
+    if not isinstance(v, dict): return None
+    return json.dumps({k: v[k] for k in v if k != "outcome"}, sort_keys=True)
+
+for s in eligible:
+    if s["marker"]: s["payloads"] = (log_payloads(s), disk_payloads(s))
+
+from_log = from_disk = 0
+dup_hits = dup_total = 0
+proof_runs = proof_no_auth = 0
+for r in runs:
+    s = next(x for x in eligible if x["path"] == r["session"])
+    key = (r["target"], r["capability"])
+    lg, dk = s["payloads"]
+    pay, src_name = lg.get(key), "log"
+    if pay is None: pay, src_name = dk.get(key), "disk"
+    r["payload"] = pay
+    if pay is None: continue
+    from_log += src_name == "log"
+    from_disk += src_name == "disk"
+    tkeys = {val_key(o) for o in obs_of(pay, "transport")} - {None}
+    for fam in ("blocking", "limitation"):
+        for o in obs_of(pay, fam):
+            if not observed(o): continue
+            dup_total += 1
+            if val_key(o) in tkeys: dup_hits += 1
+    functional = any((o.get("value") or {}).get("outcome") == "FUNCTIONAL"
+                     for o in obs_of(pay, "transport"))
+    proof = any("operational_proof" in (o.get("value") or {})
+                for o in obs_of(pay, "validation"))
+    if functional and proof:
+        proof_runs += 1
+        if not obs_of(pay, "authentication"): proof_no_auth += 1
+
+have = sum(1 for r in runs if r.get("payload"))
+oper = sum(1 for r in runs for e in r["saved"]
+           if e["obj"].get("lifecycle") == "OPERATIONAL")
+gaps = collections.Counter(g for r in runs for g in r["gaps"])
+print()
+print("PAYLOADS RECOVERED")
+print("  Runs with a payload                   : %s (log %d, scratchpad %d)"
+      % (pct(have, n), from_log, from_disk))
+print()
+print("CHANGE 4 METRICS (recovered payloads only)")
+print("  (a) blocking/limitation blocks duplicating transport : %s"
+      % (pct(dup_hits, dup_total) if dup_total else "0/0 = n/a"))
+print("  (b) proof-carrying runs without authentication       : %s"
+      % (pct(proof_no_auth, proof_runs) if proof_runs else "0/0 = n/a"))
+print("  Runs reaching lifecycle OPERATIONAL   : %s" % pct(oper, n))
+print("  Runs carrying a lifecycle_gap         : %d %s"
+      % (sum(1 for r in runs if r["gaps"]), dict(gaps) or "-"))
+
+# ---- change 5: the lookup sequence and duplicate-by-naming targets ------
+# Lookup calls are counted from the results too: knowledge-lookup prints one
+# JSON object per call, and a loop prints one per iteration. Two outputs
+# cannot be told apart by content -- `--target X` and `--target X --capability
+# Y` both answer not_found with the same object -- so the kind of each call
+# comes from the invocation flags, cycled over the results in printed order,
+# the way the loop bodies actually run. When a caller pipes the output through
+# its own formatter, no JSON reaches the log; the loop word count in the
+# command then supplies the call count that the result cannot.
+LOOK = ("list", "target", "target+capability", "other")
+LOOKUP_STATUS = {"listed", "not_found", "found", "unresolved", "ambiguous"}
+FOR = re.compile(r"\bfor\s+\w+\s+in\s+([^;\n]+?)(?:;|\n)\s*do\b")
+
+def loop_spans(cmd):
+    out = []
+    for m in FOR.finditer(cmd):
+        words = [w for w in m.group(1).split() if w]
+        end = cmd.find("done", m.end())
+        out.append((m.end(), end if end >= 0 else len(cmd), max(1, len(words))))
+    return out
+
+def lookup_kind(args):
+    if has_flag(args, "list"): return "list"
+    if has_flag(args, "target") and has_flag(args, "capability"):
+        return "target+capability"
+    if has_flag(args, "target"): return "target"
+    return "other"
+
+def lookup_objects(text):
+    out = []
+    for o in result_objects(text or ""):
+        if o.get("status") in LOOKUP_STATUS or "markdown_projection" in o \
+           or ("count" in o and "targets" in o):
+            out.append(o)
+    return out
+
+def lookup_calls(s):
+    """Count knowledge-lookup calls in one session, and the not_found answers."""
+    kinds, not_found = collections.Counter(), 0
+    for ev in s["calls"]:
+        spans, expected = loop_spans(ev["cmd"]), []
+        for m in INVOKE.finditer(ev["cmd"]):
+            if m.group(2) != "knowledge-lookup": continue
+            rest = ev["cmd"][m.end():]
+            stop = SEP.search(rest)
+            args = rest[:stop.start()] if stop else rest
+            if has_flag(args, "help"): continue
+            reps = 1
+            for a, b, k in spans:
+                if a <= m.start() < b: reps = k
+            expected += [lookup_kind(args)] * reps
+        if not expected: continue
+        objs = lookup_objects(ev["result"])
+        not_found += sum(1 for o in objs if o.get("status") == "not_found")
+        if len(objs) > len(expected):        # the result shows more calls
+            expected = [expected[i % len(expected)] for i in range(len(objs))]
+        kinds.update(expected)
+    return kinds, not_found
+
+print()
+print("CHANGE 5 METRICS")
+look_total = nf_total = 0
+for path in sorted(sess_set):
+    s = next(x for x in eligible if x["path"] == path)
+    mine = [r for r in runs if r["session"] == path]
+    c, nf = lookup_calls(s)
+    tot = sum(c.values()); look_total += tot; nf_total += nf
+    print("  %-42s lookups=%d (%s) not_found=%d runs=%d per_run=%.2f"
+          % (os.path.basename(path), tot,
+             ", ".join("%s %d" % (k, c[k]) for k in LOOK if c[k]) or "none",
+             nf, len(mine), tot / len(mine)))
+look_run = look_total / n
+look_sess = look_total / len(sess_set)
+print("  Lookups per run / per session         : %.2f / %.2f" % (look_run, look_sess))
+print("  not_found answers                     : %s" % pct(nf_total, look_total))
+
+# Duplicate by naming: the live index, read-only, against the minted IDs.
+TLD = {"www", "com", "net", "org", "co", "io", "uk", "br", "fr", "es", "de",
+       "us", "in", "tv", "info", "ai", "app", "dev", "me", "ru", "jp", "cn",
+       "it", "nl", "se", "ca", "au", "za", "eu", "gov", "edu"}
+
+def brand(text, sep):
+    return "".join(w for w in text.lower().split(sep) if w and w not in TLD)
+
+def affix(a, b):
+    return (a.startswith(b + "-") or a.endswith("-" + b)
+            or b.startswith(a + "-") or b.endswith("-" + a))
+
+index, dupes = [], []
+try:
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    raw = subprocess.run([sys.executable, os.path.join(root, "scripts", "knowledge-lookup"),
+                          "--list"], capture_output=True, text=True, timeout=120).stdout
+    index = (json.loads(raw) or {}).get("targets") or []
+except Exception as exc:
+    print("  live index unavailable: %s" % exc)
+by_id = {t.get("target") or t.get("name"): t for t in index}
+for tgt in sorted({r["target"] for r in runs if r["target"]}):
+    mine_hosts = set((by_id.get(tgt) or {}).get("hosts") or [])
+    for other, row in sorted(by_id.items()):
+        if not other or other == tgt: continue
+        hosts = set(row.get("hosts") or [])
+        why = None
+        if mine_hosts & hosts: why = "shared host %s" % ", ".join(sorted(mine_hosts & hosts))
+        elif affix(tgt, other): why = "one ID is an affix of the other"
+        elif brand(tgt, "-") and brand(tgt, "-") == brand(other, "-"): why = "same brand token"
+        elif mine_hosts and hosts and any(brand(h, ".") == brand(k, ".")
+                                          for h in mine_hosts for k in hosts):
+            why = "hosts normalize to the same brand token"
+        if why: dupes.append((tgt, other, why))
+print("  Duplicate-by-naming minted targets    : %d" % len(dupes))
+for a, b, why in dupes:
+    print("      %s <-> %s (%s)" % (a, b, why))
+
+# ---- verdicts ------------------------------------------------------------
+def verdict(proceed, enough=True):
+    if not enough: return "INSUFFICIENT DATA"
+    return "PROCEED" if proceed else "NOT NEEDED"
+
+c3 = (mean >= 2) or (mx >= 4) or (zero < 0.5 * n)
+a_ok, b_ok = dup_total >= 10, proof_runs >= 10
+a_hit = a_ok and dup_hits >= 0.33 * dup_total
+b_hit = b_ok and proof_no_auth >= 0.33 * proof_runs
+c5 = (look_run >= 3) or bool(dupes)
 print()
 print("THRESHOLDS")
-print("  Change 3 PROCEED=%s" % ((mean >= 2) or (mx >= 4) or (zero < 0.5 * n)))
+print("  Change 3 %-18s mean %.2f, max %d, zero-refusal %s"
+      % (verdict(c3), mean, mx, pct(zero, n)))
+print("  Change 4 %-18s (a) %s, (b) %s"
+      % (verdict(a_hit or b_hit, a_ok or b_ok),
+         pct(dup_hits, dup_total) if dup_total else "0/0",
+         pct(proof_no_auth, proof_runs) if proof_runs else "0/0"))
+print("  Change 5 %-18s %.2f lookups per run, %d duplicate-by-naming targets"
+      % (verdict(c5), look_run, len(dupes)))
