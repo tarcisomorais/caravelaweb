@@ -2,7 +2,12 @@
 
 All notable changes to CaravelaWeb will be documented in this file.
 
-## Unreleased
+## 0.2.2 - 2026-09-04
+
+One lookup call per capability. The combined `knowledge-lookup` call now
+answers readiness and carries the exact target index on a miss, so a task
+no longer spends three calls before its first fetch, and the payload
+examples stop teaching agents to stamp their own `recorded_at`.
 
 ### Changed
 
