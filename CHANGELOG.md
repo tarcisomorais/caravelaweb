@@ -2,7 +2,23 @@
 
 All notable changes to CaravelaWeb will be documented in this file.
 
-## Unreleased
+## 0.2.1 - 2026-09-04
+
+Cheaper Discovery finalization: a checklist in the contract for the four
+payload traps that caused most refusals, and a reason code on every
+refusal the finalizer decides, including the two that used to print the
+generic message.
+
+### Added
+
+- SKILL.md step 7 carries a "Before you finalize" checklist covering the
+  host literal, evidence scope and kind, the transport ladder, the
+  validation block on OBSERVED blocking and limitation observations, and
+  field path forms; the same list sits above example 1 of the payload
+  reference. `--validate` stays optional and the contract now says when it
+  pays: a payload with a `transport_trace`, a contradiction, or a
+  replacement of accepted knowledge, where a terminal `NOT_SAVED` would
+  close the run.
 
 ### Changed
 

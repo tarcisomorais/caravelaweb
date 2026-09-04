@@ -61,7 +61,7 @@ into its own versioned cache and discovers
 `skills/caravelaweb/SKILL.md`. That thin adapter reads the canonical root
 `SKILL.md`; it does not duplicate the contract.
 
-Both plugin manifests declare the same semantic version (`0.2.0` at this
+Both plugin manifests declare the same semantic version (`0.2.1` at this
 release), and public releases bump it together with `CHANGELOG.md`.
 `/plugin update caravelaweb@caravelaweb` moves you to the newest published
 version of the marketplace entry.
