@@ -106,7 +106,7 @@ for proj in sorted(os.listdir(ROOT)):
 # ---------------------------------------------------------- 0.2.0 filtering
 # Marker for "ran against a 0.2.0+ skill": reason_code in output, a
 # knowledge-resolve call, a 0.2.0 skill path, or accepted-set/pending output.
-MARKER = re.compile(r'"reason_code"|knowledge-resolve|caravelaweb/0\.2\.0|'
+MARKER = re.compile(r'"reason_code"|knowledge-resolve|caravelaweb/0\.2\.[0-9]+|'
                     r'pending_candidate|accepted_set|"accepted"')
 
 def post_begins(s):
@@ -206,6 +206,14 @@ def stats(xs):
     return med, sum(xs) / n, xs[-1]
 
 n = len(runs)
+# Infrastructure refusals (a database another session holds) are not
+# ceremony cost: parallel consumer sessions on one live memory lock each
+# other. Count them apart and keep every ceremony metric free of them.
+INFRA = {"OPERATIONAL_MEMORY_UNAVAILABLE"}
+infra = sum(1 for r in runs for x in r["reasons"] if x in INFRA)
+infra_runs = sum(1 for r in runs if any(x in INFRA for x in r["reasons"]))
+for r in runs:
+    r["reasons"] = [x for x in r["reasons"] if x not in INFRA]
 rc = [len(r["real"]) for r in runs]
 fc = [len(r["reasons"]) for r in runs]
 med, mean, mx = stats(rc); rmed, rmean, rmx = stats(fc)
@@ -222,6 +230,7 @@ print("  Refusals per run median/mean          : %s / %.2f" % (rmed, rmean))
 print("  Runs with zero refusals               : %s" % pct(zero, n))
 print("  --validate                            : %d calls in %s runs" % (vcalls, pct(vruns, n)))
 print("  Refusal reasons: %s" % dict(collections.Counter(x for r in runs for x in r["reasons"])))
+print("  Infrastructure refusals (excluded)    : %d in %d runs (%s)" % (infra, infra_runs, ", ".join(sorted(INFRA))))
 print()
 print("THRESHOLDS")
 print("  Change 3 PROCEED=%s" % ((mean >= 2) or (mx >= 4) or (zero < 0.5 * n)))
