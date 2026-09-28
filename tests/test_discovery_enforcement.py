@@ -289,6 +289,20 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
             SAFETY.read_text(encoding="utf-8"),
         )
 
+    def test_every_browser_session_is_closed(self) -> None:
+        skill = SKILL.read_text(encoding="utf-8")
+        self.assertIn("It ends with `agent-browser close --session <name>` on every outcome", skill)
+        self.assertIn("success, block, or error", skill)
+        transport = TRANSPORT.read_text(encoding="utf-8")
+        for rule in (
+            "### Closing sessions",
+            "`AGENT_BROWSER_NAMESPACE`",
+            "`AGENT_BROWSER_IDLE_TIMEOUT_MS`",
+            "CaravelaWeb never sets either itself",
+            "guaranteed cleanup after the caller ends a call is the caller's job",
+        ):
+            self.assertIn(rule, transport)
+
 
 if __name__ == "__main__":
     unittest.main()

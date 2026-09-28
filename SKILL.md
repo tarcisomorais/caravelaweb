@@ -79,7 +79,7 @@ the caller supplied.
 
    Operation uses its validated transport. In Discovery, first test whether `DIRECT_READ` satisfies the requested result; Chrome is the behavioral baseline when browser Discovery is necessary. After Chrome-based Discovery, SIMPLIFY is mandatory: validate Lightpanda, then `DIRECT_READ`, against the same capability. Chrome remains valid when neither simpler transport preserves it.
 
-   Every browser workflow uses an explicit isolated session: `agent-browser --session <name>`. A bounded workflow may reuse its own session; unrelated or concurrent workflows may not share one.
+   Every browser workflow uses an explicit isolated session: `agent-browser --session <name>`. A bounded workflow may reuse its own session; unrelated or concurrent workflows may not share one. It ends with `agent-browser close --session <name>` on every outcome — success, block, or error — before the answer is reported.
    If `agent-browser` is missing or broken, report browser coverage incomplete and stop browser escalation: never install, bootstrap, or substitute Playwright, Puppeteer, Selenium, CDP/MCP tooling, or another browser-control stack. Offer the upstream `agent-browser` setup only with explicit user authorization.
 
    **Stopping rules for direct work:**

@@ -27,6 +27,11 @@ All notable changes to CaravelaWeb will be documented in this file.
   and Discovery actions become "report the class and stop" only in this
   mode; the accepted cost is that a blocked capability is retried through
   the bounded ladder on every call.
+- Every browser workflow now ends with `agent-browser close --session
+  <name>` on every outcome: success, block, or error. The transport
+  reference documents two upstream caller hooks CaravelaWeb never sets
+  itself, `AGENT_BROWSER_NAMESPACE` and `AGENT_BROWSER_IDLE_TIMEOUT_MS`,
+  and states that cleanup after a caller kills a call is the caller's job.
 
 ## 0.2.2 - 2026-09-04
 

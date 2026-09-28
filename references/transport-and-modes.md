@@ -159,6 +159,17 @@ An `agent-browser` session holds navigation state, open pages, cookies, and othe
 
 `DIRECT_READ` uses plain HTTP requests with no browser runtime and no session. It needs no `--session` flag and has no session state to isolate.
 
+### Closing sessions
+
+An `agent-browser` session's daemon and its engine outlive the command that started them: the daemon detaches into its own process session, and nothing stops it until the session is closed. Closing is therefore part of every browser workflow. Run `agent-browser close --session <name>` once the workflow ends — on success, on a block, and on an error — and never between that workflow's own steps. Closing a session that never opened is harmless, so close unconditionally rather than guessing whether a failed command started one.
+
+Two upstream `agent-browser` settings serve callers that run CaravelaWeb as a subprocess. CaravelaWeb never sets either itself:
+
+- `AGENT_BROWSER_NAMESPACE` scopes daemon sockets to one namespace, so `agent-browser close --all` run under the same namespace closes only that call's sessions.
+- `AGENT_BROWSER_IDLE_TIMEOUT_MS` shuts a daemon down after that many milliseconds without a command; it is off by default.
+
+CaravelaWeb does not wrap `agent-browser`. A call that is killed, or that ends before the model can close its sessions, leaves them behind, so guaranteed cleanup after the caller ends a call is the caller's job.
+
 ### Session isolation is execution hygiene, not evidence
 
 Session isolation prevents runtime context collisions. It does not imply that browser state (cookies, localStorage, session tokens) belongs in reusable Target knowledge. Target Profiles capture capability-level behavior and access patterns — never browser session artifacts. Profiles may record "authentication required" or "session needed," never session cookies or tokens.
