@@ -119,6 +119,14 @@ Checked read-only on a copy of `~/.local/share/caravelaweb/knowledge-root`:
   database that it is corrupt. The finalize hotfix walks the cause chain
   to the SQLite error instead; fix the root in core so the wrappers stop
   lying. Effort S.
+- **DEBT-07** The write-freeze marker does not gate `discovery-begin`, and a
+  frozen finalize falls into the uncoded generic `NOT_SAVED` branch
+  (`scripts/discovery-finalize:204-212`). The same class as the 2026-09-04
+  uncoded refusals. Effort S.
+- **DEBT-08** `discovery-begin`, `knowledge-resolve` and
+  `init-knowledge-root` refusals carry no `reason_code` outside plan 010's
+  `LEARNING_DISABLED` code. Effort S; changes learning-enabled output, so it
+  needs its own plan.
 - **DX-05** (DONE `9374df3`) The 2026-09-04 sample's only 0.2.1 refusals were four
   `PAYLOAD_VALUE` for a `recorded_at` a few seconds ahead of the finalizer
   clock, in one session that stamped the field itself. The rule is stated
