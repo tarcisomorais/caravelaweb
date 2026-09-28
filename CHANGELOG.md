@@ -2,7 +2,13 @@
 
 All notable changes to CaravelaWeb will be documented in this file.
 
-## Unreleased
+## 0.3.0 - 2026-09-28
+
+Caller guarantees for bounded acquisition. A caller can now forbid every
+Knowledge Root write for one call with `CARAVELAWEB_LEARNING=disabled`,
+the contract says how such a call still does the task and how it ends on
+a block, every browser session is closed, and the model no longer
+chooses a transport's identity.
 
 ### Added
 
