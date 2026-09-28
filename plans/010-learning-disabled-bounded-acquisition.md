@@ -36,6 +36,79 @@
   3 and 5 are independent; 4 depends on OD-1; 6 depends on 1–5
 - **Category**: caller contract, safety
 - **Planned at**: commit `89f701e`, 2026-09-28
+- **Implemented 2026-09-28** on branch `learning-disabled-mode`, one commit
+  per change:
+  - `51dbc04` change 1 (learning-disabled mode at every write path);
+  - `d19ec37` change 2 (bounded direct work, clean stops);
+  - `d8cf0fa` change 3 (session close, caller hooks);
+  - `f94a4c7` change 4 (transport identity, OD-1 option a);
+  - `a377312` change 5 (PATH note).
+
+  Drift check at `89f701e` was empty. The full suite
+  (`env -u CARAVELAWEB_LEARNING`) ran 402 tests OK: 386 prior tests
+  unchanged, 16 new. No existing test was edited. SKILL.md is 146 of 151
+  lines. The case 9 write-primitive inventory found exactly the "Current
+  state" table.
+- **Change 6 acceptance run 2026-09-28**, in the owner's amended call shape.
+  - Setup:
+    - claude 2.1.284 at the absolute nvm path;
+    - `--plugin-dir /home/tarciso/projects/caravelaweb` on the branch
+      working tree at `a377312`;
+    - `claude-sonnet-5-5`, effort medium, `--tools "Skill,Bash"`, the
+      owner's `--json-schema`;
+    - prompt on stdin, a fresh empty working directory per call;
+    - `env -i` with only `HOME`, a `PATH` with the nvm and `~/.local/bin`
+      directories, `CARAVELAWEB_LEARNING=disabled`, and
+      `CARAVELAWEB_KNOWLEDGE_ROOT` set to a fresh scratch copy of the real
+      root.
+  - Every call's init event loaded `caravelaweb@inline` from the checkout
+    (the manifest still reads `0.2.2`), exposed only `Bash`, `Skill`, and
+    `StructuredOutput`, and ran `cat` on the checkout's root `SKILL.md`,
+    whose output contains the new step-3 rule.
+  - Every scratch copy started at tree hash `a1ca12acc65e…`, identical to
+    the real root.
+
+  | Case | URL | Hash after | Envelope | Page | Browser sessions | Leftover | Model usage |
+  | --- | --- | --- | --- | --- | --- | --- | --- |
+  | direct | Guardian `drc-politician-beaten-death-radio-appearance-ebola` | unchanged | `ok`, `html` | 429,386 B HTML | none | none | sonnet-5-5 only |
+  | rendered | Le Monde live blog `…_6783795_3210.html` | unchanged | `ok`, `rendered_dom` | 496,268 B HTML | `cw-lp-1` (Lightpanda), closed | none | sonnet-5-5 only |
+  | blocked | WSJ `egypt-warned-netanyahu…-8e3d5ae0` | unchanged | `failed`, `SITE_BLOCKING` | none written | `lp1` (Lightpanda) and `ch1` (Chrome), both closed | none | sonnet-5-5 only |
+  | unknown | Times of India `…/134548235.cms` | unchanged | `ok`, `html` | 309,100 B HTML | none | none | sonnet-5-5 only |
+  | G control (learning unset, Discovery authorized) | same as unknown | changed (`7b8c4e54d207…`) | `ok`, `html` | 309,100 B HTML | none | none | sonnet-5-5 only |
+
+  The four learning-disabled calls:
+  - The first lookup showed `not_found`, `readiness: READY`,
+    `learning: DISABLED`.
+  - None ran `discovery-begin`, `discovery-finalize`, `knowledge-resolve`,
+    or `init-knowledge-root`.
+  - No command set or changed identity (no `User-Agent`, `-A`,
+    `--user-agent`, `AutomationControlled`, `--proxy`, `--headed`,
+    `--profile`, or `--auto-connect`).
+
+  The blocked call walked the ladder once: `DIRECT_READ` HTTP 403, then
+  Lightpanda and Chrome, each an empty "wsj.com" page. Its error reads
+  "SITE_BLOCKING: … The ladder is exhausted. No file was written, and
+  nothing was recorded because learning was disabled."
+
+  The G control ran `discovery-begin` and `discovery-finalize` as before
+  (`SAVED`, `run_state CLOSED`, `lifecycle_gap NO_OPERATIONAL_PROOF`).
+
+  Cost: 16–33 s and $0.13–$0.18 per call. After every call, no process
+  from the call and no session it opened remained. The real Knowledge Root
+  still hashes `a1ca12acc65e…` with its three open runs untouched. The
+  scratch copies were deleted.
+- **Deviation in change 6.** Another agent-browser user was active on this
+  machine during the run: sessions `mock*` from a different project, all
+  Chrome, all in the default namespace. Diffing the process table before
+  and after the first rendered call therefore showed 19 new Chrome
+  processes. They belonged to that user; this call used only a Lightpanda
+  session, which it closed. With no per-call namespace (the amendment
+  allows only four environment variables), leftovers were then
+  attributed by the call's unique `CARAVELAWEB_KNOWLEDGE_ROOT`, which
+  every child process and each agent-browser daemon inherits. The
+  rendered case was rerun under that check, and its row above is the
+  rerun. The other user's processes were not touched. The optional fifth
+  case (reusing the accepted `sky-news` block) was not run.
 
 ## Why this matters
 
@@ -886,16 +959,16 @@ at the end.
 
 ## Done criteria (caller guarantees)
 
-- [ ] **A** — `tests/test_learning_disabled.py` cases 2–6 and 9 pass; change 6 shows no refused-or-not write command succeeding and an unchanged copy hash for every disabled-mode case.
-- [ ] **B** — cases 7–8 pass; change 6's first lookup shows `READY` + `DISABLED`.
-- [ ] **C** — change 6 "unknown" and "direct" return the page with no `discovery-begin` in the transcript.
-- [ ] **D** — change 6 "blocked" reports a failure class, stops, no fallback call, no identity change, hash unchanged; change 2 tests pass.
-- [ ] **E** — change 3 test passes; change 6 finds no session and no process in the call's namespace after a normal exit, for all cases.
-- [ ] **F** — change 4 test passes (after OD-1); change 6 transcripts contain none of the identity markers.
-- [ ] **G** — `env -u CARAVELAWEB_LEARNING python3 -m unittest discover -s tests -p 'test_*.py'` exits 0 with the 386 prior tests unchanged; the change 6 control learns as today.
-- [ ] **H** — change 6 ran on `claude-sonnet-5-5`, effort medium, headless, on scratch copies, with no Haiku in `modelUsage`.
-- [ ] `wc -l SKILL.md` ≤ 151; `git diff --check` prints nothing; `git status` shows only in-scope files.
-- [ ] `plans/README.md` row updated.
+- [x] **A** — `tests/test_learning_disabled.py` cases 2–6 and 9 pass; change 6 shows no refused-or-not write command succeeding and an unchanged copy hash for every disabled-mode case.
+- [x] **B** — cases 7–8 pass; change 6's first lookup shows `READY` + `DISABLED`.
+- [x] **C** — change 6 "unknown" and "direct" return the page with no `discovery-begin` in the transcript.
+- [x] **D** — change 6 "blocked" reports a failure class, stops, no fallback call, no identity change, hash unchanged; change 2 tests pass.
+- [x] **E** — change 3 test passes; change 6 finds no session and no process in the call's namespace after a normal exit, for all cases.
+- [x] **F** — change 4 test passes (after OD-1); change 6 transcripts contain none of the identity markers.
+- [x] **G** — `env -u CARAVELAWEB_LEARNING python3 -m unittest discover -s tests -p 'test_*.py'` exits 0 with the 386 prior tests unchanged; the change 6 control learns as today.
+- [x] **H** — change 6 ran on `claude-sonnet-5-5`, effort medium, headless, on scratch copies, with no Haiku in `modelUsage`.
+- [x] `wc -l SKILL.md` ≤ 151; `git diff --check` prints nothing; `git status` shows only in-scope files.
+- [x] `plans/README.md` row updated.
 
 ## STOP conditions
 
