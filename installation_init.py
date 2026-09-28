@@ -16,6 +16,7 @@ from platform_adapter import (
     KNOWLEDGE_ROOT_ENV,
     KNOWLEDGE_ROOT_MARKER,
     TARGETS_DIRECTORY,
+    assert_learning_enabled,
     default_knowledge_root,
     validate_knowledge_root,
 )
@@ -123,6 +124,7 @@ def initialize_knowledge_root(knowledge_root: str | Path | None = None) -> Path:
     initialization never records a default anywhere, so it cannot change what
     any later command -- in this session or another -- resolves.
     """
+    assert_learning_enabled()
     root, _ = resolve_initialization_root(knowledge_root)
     assert_initializable(root)
     created: list[Path] = []

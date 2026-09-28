@@ -15,7 +15,9 @@ SKILL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SKILL_ROOT))
 
 from discovery_runs import list_open_discoveries
-from platform_adapter import configure_utf8_stdio
+from platform_adapter import (
+    LEARNING_ENV, configure_utf8_stdio, learning_mode, unrecognized_learning_value,
+)
 from readiness import core_readiness
 from transport_policy import AVAILABLE, PLATFORM_UNSUPPORTED, UNAVAILABLE
 
@@ -146,6 +148,9 @@ def build_report(override: str | None) -> dict[str, object]:
             "knowledge_resolve": f'"{sys.executable}" "{SKILL_ROOT / "scripts" / "knowledge-resolve"}"',
         },
         "open_discovery": list_open_discoveries(root) if root else [],
+        # Learning is the caller's per-process choice, never a readiness
+        # error: a DISABLED installation is still READY.
+        "learning": learning_mode(),
         "transports": browser["transports"],
         "browser_control": browser["browser_control"],
         "browser_engine": browser["browser_engine"],
@@ -158,6 +163,11 @@ def build_report(override: str | None) -> dict[str, object]:
             ),
         },
     }
+    if (value := unrecognized_learning_value()) is not None:
+        report["warnings"] = [
+            *report["warnings"],
+            f"{LEARNING_ENV}={value} is not recognized; learning is ENABLED",
+        ]
     return report
 
 
@@ -181,6 +191,7 @@ def main() -> int:
         print(f"filesystem: {report['knowledge_root']['filesystem_class']}")
         print(f"operational_memory: {'READY' if report['operational_memory'].get('ready') else 'NOT_READY'}")
         print(f"open_discovery: {len(report['open_discovery'])}")
+        print(f"learning: {report['learning']}")
         print(
             "transports: "
             + ", ".join(

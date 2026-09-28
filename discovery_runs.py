@@ -16,11 +16,28 @@ from operational_memory.core import (
     normalize_capability_id,
     validate_timestamp,
 )
-from platform_adapter import safe_marker_stat
+from platform_adapter import (
+    LearningDisabledError,
+    assert_learning_enabled,
+    safe_marker_stat,
+)
 
 
 class DiscoveryRunError(ValueError):
     """A Discovery run marker is missing, invalid, or unavailable."""
+
+
+def _require_learning() -> None:
+    """Refuse run-marker writes when the caller disabled learning.
+
+    The refusal is a ``DiscoveryRunError`` so every existing caller handles
+    it; its ``__cause__`` is the ``LearningDisabledError`` the CLIs map to
+    the ``LEARNING_DISABLED`` reason code.
+    """
+    try:
+        assert_learning_enabled()
+    except LearningDisabledError as exc:
+        raise DiscoveryRunError(str(exc)) from exc
 
 
 def _now() -> str:
@@ -50,6 +67,7 @@ def begin_discovery(
     root: Path, target: str, capability: str, *,
     run_id: str | None = None, opened_at: str | None = None,
 ) -> dict[str, str]:
+    _require_learning()
     target, capability = _identity(target, capability)
     run_id = run_id or f"run:{target}:{uuid.uuid4()}"
     opened_at = opened_at or _now()
@@ -145,6 +163,7 @@ def require_open_discovery(
 
 
 def close_discovery(root: Path, target: str, capability: str, run_id: str) -> None:
+    _require_learning()
     require_open_discovery(root, target, capability, run_id)
     try:
         _marker(root, run_id).unlink()

@@ -16,6 +16,48 @@ TARGETS_DIRECTORY = "targets"
 # An advanced, session-scoped override -- e.g. to point at a second
 # installation temporarily without disturbing the fixed per-user default.
 KNOWLEDGE_ROOT_ENV = "CARAVELAWEB_KNOWLEDGE_ROOT"
+# A per-process caller choice: "disabled" means no public command writes to
+# the Knowledge Root in this process. Session-scoped like the root override,
+# so it never changes what another session may write.
+LEARNING_ENV = "CARAVELAWEB_LEARNING"
+LEARNING_DISABLED = "LEARNING_DISABLED"  # reason_code on every refusal
+_LEARNING_VALUES = {"disabled": "DISABLED", "enabled": "ENABLED"}
+
+
+class LearningDisabledError(RuntimeError):
+    """The caller disabled Knowledge Root writes for this process."""
+
+
+def _learning_value(environ: Mapping[str, str] | None) -> str:
+    environment = os.environ if environ is None else environ
+    return environment.get(LEARNING_ENV, "").strip().lower()
+
+
+def learning_mode(environ: Mapping[str, str] | None = None) -> str:
+    """``"DISABLED"`` when the caller set the variable to ``disabled``.
+
+    The value is read case-insensitively after trimming whitespace. Anything
+    else, including an unrecognized value, leaves learning ``"ENABLED"``:
+    the mode only ever removes writes, so no value can widen what a caller
+    allowed, and preflight names an unrecognized value as a warning.
+    """
+    return "DISABLED" if _learning_value(environ) == "disabled" else "ENABLED"
+
+
+def unrecognized_learning_value(environ: Mapping[str, str] | None = None) -> str | None:
+    """The raw value when it is set, non-empty, and neither known spelling."""
+    environment = os.environ if environ is None else environ
+    raw = environment.get(LEARNING_ENV)
+    if raw is None or not raw.strip() or _learning_value(environ) in _LEARNING_VALUES:
+        return None
+    return raw
+
+
+def assert_learning_enabled(environ: Mapping[str, str] | None = None) -> None:
+    if learning_mode(environ) == "DISABLED":
+        raise LearningDisabledError(
+            f"knowledge writes are disabled for this process by {LEARNING_ENV}=disabled"
+        )
 
 
 def configure_utf8_stdio() -> None:
@@ -148,14 +190,20 @@ def safe_marker_stat(value: object) -> bool:
 
 __all__ = [
     "KNOWLEDGE_ROOT_ENV",
+    "LEARNING_DISABLED",
+    "LEARNING_ENV",
+    "LearningDisabledError",
     "PYTHON_FLOOR",
+    "assert_learning_enabled",
     "configure_utf8_stdio",
     "default_knowledge_root",
     "filesystem_class",
     "is_wsl",
     "knowledge_root_marker_present",
+    "learning_mode",
     "platform_identity",
     "resolve_knowledge_root",
     "safe_marker_stat",
+    "unrecognized_learning_value",
     "validate_knowledge_root",
 ]

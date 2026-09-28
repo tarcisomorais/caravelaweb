@@ -14,12 +14,16 @@ sys.path.insert(0, str(SKILL_ROOT))
 from integration_bridge import BridgeError, KnowledgeLookupBoundary
 from discovery_runs import list_open_discoveries
 from operational_memory import MemoryError
-from platform_adapter import configure_utf8_stdio, resolve_knowledge_root
+from platform_adapter import configure_utf8_stdio, learning_mode, resolve_knowledge_root
 from readiness import readiness_status
 
 configure_utf8_stdio()
 
 def emit(status: str, **fields: object) -> None:
+    # A caller that disabled learning is told so in the one call the executor
+    # always makes; learning-enabled output stays exactly as it was.
+    if learning_mode() == "DISABLED":
+        fields["learning"] = "DISABLED"
     print(json.dumps({"status": status, **fields}, ensure_ascii=False, sort_keys=True))
 
 def index_fields(boundary: KnowledgeLookupBoundary, target_id: str | None) -> dict[str, object]:

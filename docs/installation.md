@@ -217,6 +217,36 @@ incompatible state. It does not overwrite or import that content.
 openable schema, and Operational Memory read/write authority. A first lookup
 against an empty installation returns `not_found`, not an error.
 
+## Learning-disabled calls
+
+A caller that must guarantee one call learns nothing sets this in the
+environment of the process it starts:
+
+```bash
+export CARAVELAWEB_LEARNING=disabled
+```
+
+The value is read case-insensitively after trimming whitespace. Every other
+value leaves learning enabled; `preflight` warns about a non-empty value it
+does not recognize. Like `CARAVELAWEB_KNOWLEDGE_ROOT`, it applies to that
+process and its children only and never changes another session.
+
+With it set, no public command writes to the Knowledge Root.
+`discovery-begin`, `discovery-finalize` (including `--validate`),
+`knowledge-resolve`, and `init-knowledge-root` refuse with
+`"reason_code": "LEARNING_DISABLED"` and exit 2, and so does any
+Operational Memory write transaction or database creation. `preflight` and
+`knowledge-lookup` keep working and report `READY` when the installation is
+ready, with `"learning": "DISABLED"` beside it; the executor then does the
+task as bounded direct work with no Discovery. Set up the Knowledge Root
+before such calls: root creation is refused too.
+
+The guarantee covers every public CaravelaWeb command. A model with shell
+access could still clear the variable in its own command or write to the
+database file directly, which no command can prevent without OS-level
+enforcement. A caller can detect such a bypass by hashing the Knowledge Root
+before and after the call.
+
 ## Optional browser transports
 
 CaravelaWeb does not install or vendor browsers. `agent-browser`, Lightpanda,

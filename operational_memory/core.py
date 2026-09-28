@@ -17,6 +17,7 @@ from knowledge_write_freeze import (
     assert_knowledge_writes_allowed,
     inferred_knowledge_root,
 )
+from platform_adapter import assert_learning_enabled
 
 SCHEMA_VERSION = 2
 RENDERING_VERSION = "operational-memory-v1"
@@ -533,6 +534,8 @@ class SQLiteOperationalMemory:
         if not exists and not create:
             raise DatabaseOpenError(f"Operational Memory database does not exist: {self.path}")
         if not exists:
+            # Creating a database is a Knowledge Root write like any other.
+            assert_learning_enabled()
             self.path.parent.mkdir(parents=True, exist_ok=True)
         conn: sqlite3.Connection | None = None
         try:
@@ -594,6 +597,9 @@ class SQLiteOperationalMemory:
     @contextmanager
     def write_transaction(self) -> Iterator[_Writer]:
         """Start one explicit compound write; any failure rolls back the whole batch."""
+        # The caller's per-process choice is checked before the root-wide
+        # freeze, so a call that meets both always reports LEARNING_DISABLED.
+        assert_learning_enabled()
         if self.knowledge_root is not None:
             assert_knowledge_writes_allowed(self.knowledge_root)
         try:

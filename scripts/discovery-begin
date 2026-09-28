@@ -12,7 +12,10 @@ SKILL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SKILL_ROOT))
 
 from discovery_runs import DiscoveryRunError, begin_discovery
-from platform_adapter import configure_utf8_stdio, resolve_knowledge_root
+from platform_adapter import (
+    LEARNING_DISABLED, assert_learning_enabled, configure_utf8_stdio,
+    LearningDisabledError, resolve_knowledge_root,
+)
 
 configure_utf8_stdio()
 
@@ -23,6 +26,13 @@ def main() -> int:
     parser.add_argument("--target", required=True)
     parser.add_argument("--capability", required=True)
     args = parser.parse_args()
+    try:
+        assert_learning_enabled()
+    except LearningDisabledError as exc:
+        print(json.dumps({
+            "status": "NOT_OPEN", "reason": str(exc), "reason_code": LEARNING_DISABLED,
+        }, ensure_ascii=False, sort_keys=True), file=sys.stderr)
+        return 2
     try:
         root = resolve_knowledge_root(args.knowledge_root)
         if root is None:

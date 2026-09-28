@@ -15,7 +15,10 @@ from installation_init import (
     DEFAULT_SOURCE, ENVIRONMENT_SOURCE, InitializationRefusedError,
     initialize_knowledge_root, resolve_initialization_root,
 )
-from platform_adapter import KNOWLEDGE_ROOT_ENV, configure_utf8_stdio
+from platform_adapter import (
+    KNOWLEDGE_ROOT_ENV, LEARNING_DISABLED, LearningDisabledError,
+    assert_learning_enabled, configure_utf8_stdio,
+)
 
 configure_utf8_stdio()
 
@@ -33,6 +36,17 @@ def main() -> int:
     )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
+    try:
+        assert_learning_enabled()
+    except LearningDisabledError as error:
+        if args.json:
+            print(json.dumps(
+                {"status": "REFUSED", "reason": str(error), "reason_code": LEARNING_DISABLED},
+                ensure_ascii=False, sort_keys=True,
+            ))
+        else:
+            print(f"status: REFUSED\nreason_code: {LEARNING_DISABLED}\nerror: {error}")
+        return 2
     try:
         # Resolve with the same precedence every other command applies
         # (flag, environment variable, per-user default), so init never

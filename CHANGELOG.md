@@ -2,6 +2,21 @@
 
 All notable changes to CaravelaWeb will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `CARAVELAWEB_LEARNING=disabled` in a process's environment guarantees
+  that no public command writes to the Knowledge Root from that process.
+  `discovery-begin`, `discovery-finalize` (including `--validate`),
+  `knowledge-resolve`, and `init-knowledge-root` refuse with
+  `"reason_code": "LEARNING_DISABLED"`, and so do Operational Memory write
+  transactions and database creation. `knowledge-lookup` adds
+  `"learning": "DISABLED"` to its output in that mode and is otherwise
+  unchanged; `preflight` reports `learning` in both modes, stays `READY`,
+  and warns about an unrecognized non-empty value, which leaves learning
+  enabled.
+
 ## 0.2.2 - 2026-09-04
 
 One lookup call per capability. The combined `knowledge-lookup` call now

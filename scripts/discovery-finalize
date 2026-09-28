@@ -19,7 +19,10 @@ from discovery_finalize import (
 )
 from discovery_runs import DiscoveryRunError, close_discovery, require_open_discovery
 from operational_memory import DatabaseOpenError, SQLiteOperationalMemory
-from platform_adapter import configure_utf8_stdio, resolve_knowledge_root
+from platform_adapter import (
+    LEARNING_DISABLED, LearningDisabledError, assert_learning_enabled,
+    configure_utf8_stdio, resolve_knowledge_root,
+)
 
 configure_utf8_stdio()
 
@@ -106,6 +109,17 @@ def memory_unavailable(detail: str) -> DiscoveryFinalizationError:
     )
 
 
+def learning_refusal(exc: LearningDisabledError) -> int:
+    """The caller disabled learning: nothing was written, no run was touched."""
+    print(json.dumps({
+        "status": "NOT_SAVED",
+        "run_state": "OPEN",
+        "reason": str(exc),
+        "reason_code": LEARNING_DISABLED,
+    }, ensure_ascii=False, sort_keys=True), file=sys.stderr)
+    return 2
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Save reusable Discovery knowledge in local Operational Memory")
     parser.add_argument("--input", default="-", help="JSON file, or - for stdin")
@@ -117,6 +131,8 @@ def main() -> int:
     parser.add_argument("--operational-memory-db", help="diagnostic DB override for tests; not part of the supported interface")
     args = parser.parse_args()
     try:
+        # First, so the refusal never depends on the payload or run state.
+        assert_learning_enabled()
         payload = read_input(args.input)
         root = resolve_root(args.knowledge_root)
         if root is None:
@@ -168,7 +184,11 @@ def main() -> int:
                     "reason": str(exc),
                 }, ensure_ascii=False, sort_keys=True), file=sys.stderr)
                 return 2
+    except LearningDisabledError as exc:
+        return learning_refusal(exc)
     except (DiscoveryFinalizationError, DiscoveryRunError) as exc:
+        if isinstance(exc.__cause__, LearningDisabledError):
+            return learning_refusal(exc.__cause__)
         # Payload validation refusals, a missing run marker, and an
         # unresolved Knowledge Root already carry a specific, non-internal
         # reason and a code. Surface both so the caller can act without

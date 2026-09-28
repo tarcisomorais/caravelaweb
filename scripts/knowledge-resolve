@@ -23,7 +23,10 @@ from om_native_writes import (
 )
 from operational_memory import MemoryError as OMMemoryError, RecordValidationError, SQLiteOperationalMemory
 from operational_memory.core import normalize_capability_id
-from platform_adapter import configure_utf8_stdio, resolve_knowledge_root
+from platform_adapter import (
+    LEARNING_DISABLED, LearningDisabledError, assert_learning_enabled,
+    configure_utf8_stdio, resolve_knowledge_root,
+)
 from write_authority import WriteAuthorityStateError
 
 configure_utf8_stdio()
@@ -37,6 +40,13 @@ def main() -> int:
     parser.add_argument("--reject-pending", required=True, metavar="PROPOSAL_ID")
     parser.add_argument("--reason", required=True)
     args = parser.parse_args()
+    try:
+        assert_learning_enabled()
+    except LearningDisabledError as exc:
+        print(json.dumps({
+            "status": "NOT_REJECTED", "reason": str(exc), "reason_code": LEARNING_DISABLED,
+        }, ensure_ascii=False, sort_keys=True), file=sys.stderr)
+        return 2
     try:
         root = resolve_knowledge_root(args.knowledge_root)
         if root is None:
