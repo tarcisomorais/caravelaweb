@@ -32,6 +32,13 @@ All notable changes to CaravelaWeb will be documented in this file.
   reference documents two upstream caller hooks CaravelaWeb never sets
   itself, `AGENT_BROWSER_NAMESPACE` and `AGENT_BROWSER_IDLE_TIMEOUT_MS`,
   and states that cleanup after a caller kills a call is the caller's job.
+- A transport-identity policy in `references/safety.md`: each transport
+  uses its own default identity, the model never sets or changes the
+  User-Agent or other identity headers, flags, or launch arguments, a
+  caller-supplied identity is used unchanged from the first request, and
+  changing identity within a transport after a block is circumvention
+  that ends the run as that block. Moving up the transport ladder is not
+  an identity change. It applies with learning enabled and disabled.
 
 ## 0.2.2 - 2026-09-04
 

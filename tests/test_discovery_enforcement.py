@@ -303,6 +303,26 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
         ):
             self.assertIn(rule, transport)
 
+    def test_transport_identity_is_never_adjusted(self) -> None:
+        self.assertIn(
+            "never set or change a transport's identity unless the caller supplied it"
+            " — after a block, that is circumvention",
+            SKILL.read_text(encoding="utf-8"),
+        )
+        safety = SAFETY.read_text(encoding="utf-8")
+        for rule in (
+            "## Transport Identity",
+            "Each transport uses its own default identity",
+            "The model never chooses or changes identity",
+            "`--user-agent`",
+            "AutomationControlled",
+            "used from the first request of the run and never changed",
+            "is not an identity change",
+            "changing identity within a transport is circumvention",
+            "whether learning is enabled or disabled",
+        ):
+            self.assertIn(rule, safety)
+
 
 if __name__ == "__main__":
     unittest.main()

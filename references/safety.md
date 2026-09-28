@@ -45,6 +45,33 @@ and any prohibition on evasion remain binding. A caller may also supply an
 acquisition policy; that is an external constraint, not `robots.txt` becoming
 CaravelaWeb authority.
 
+## Transport Identity
+
+Identity means the User-Agent, client-hint headers (`Sec-CH-UA*`), `From`,
+and any header, flag, launch argument, proxy, or profile chosen so that a
+request looks like a different client. Content negotiation (`Accept`,
+`Accept-Language`) is not identity.
+
+Each transport uses its own default identity:
+
+- `DIRECT_READ`: the HTTP client's own default; a host fetch tool's
+  identity is set by the host.
+- `LIGHTPANDA` and `CHROME`: the engine defaults `agent-browser` launches
+  with.
+
+The model never chooses or changes identity. It adds no `User-Agent` header
+(`curl -A`, `-H 'User-Agent: ...'`, a client library's header), passes no
+`--user-agent` or `AGENT_BROWSER_USER_AGENT`, no stealth launch argument such
+as `--disable-blink-features=AutomationControlled`, no `--headed` to avoid
+headless detection, and no `--proxy`, `--profile`, or `--auto-connect` to
+borrow another identity. A caller-supplied identity (an acquisition policy in
+the task) is used from the first request of the run and never changed.
+
+Moving along the `DIRECT_READ -> LIGHTPANDA -> CHROME` ladder, each transport
+with its own default identity, is not an identity change. After a block,
+changing identity within a transport is circumvention: the run ends as that
+block. These rules hold whether learning is enabled or disabled.
+
 ## Discovery Safety
 
 Prefer READ / NAVIGATE / safe INPUT. Stop — recording `UNKNOWN` — the moment the next question would require account creation, consent, submission, messaging, upload, payment, account mutation, or unauthorized authentication. Do not cross the boundary merely to complete a Target Profile.
