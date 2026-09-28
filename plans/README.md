@@ -22,6 +22,7 @@ in the backlog and rejection sections so it is not re-audited.
 | 007 | `knowledge-lookup --list` memory index | P2 | S | — | DONE (reviewed 2026-09-02; one commit on `advisor/plans-2026-09-02`) |
 | 008 | Correct stale public documentation claims | P2 | S | — | DONE (reviewed 2026-09-02; one commit on `advisor/plans-2026-09-02`) |
 | 009 | Reduce the Discovery ceremony cost (checklist, reason codes, aggregated diagnostics, derived claims, one lookup, multi-capability design) | P1–P3 | S–L | Step 0 re-measurement gate for changes 3–6 | DONE (closed 2026-09-04: changes 1, 2, 5 shipped in 0.2.1 `c0d7f77` and 0.2.2 `0130703`; changes 3, 4, 6 REJECTED by measurement, see the plan's status section; gate script `plans/measure-step0`) |
+| 010 | Caller guarantees for bounded, learning-disabled acquisition (`CARAVELAWEB_LEARNING=disabled`, session close, identity policy, PATH note, live acceptance) | P1–P2 | S–M | Owner decision OD-1 before change 4 | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale)
 
