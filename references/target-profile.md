@@ -149,7 +149,7 @@ Operation creates no marker. `knowledge-lookup` lists pending Candidates under
 it; a `CONFLICT_OR_AMBIGUITY` refusal names the accepted or pending Claims
 that block the write.
 
-Local Operational Memory is writable by the installation's normal policy and is separate from web-action authority. Saving local knowledge never authorizes source-control publication, project-file changes, or external state changes. A successful, directly observed Discovery is available to the next lookup immediately; ambiguous or invalid knowledge is not used operationally. Diagnostic compatibility and repair procedures are not executor input.
+Local Operational Memory is writable by the installation's normal policy, unless the caller disables learning for the call (`CARAVELAWEB_LEARNING=disabled`), and is separate from web-action authority. Saving local knowledge never authorizes source-control publication, project-file changes, or external state changes. A successful, directly observed Discovery is available to the next lookup immediately; ambiguous or invalid knowledge is not used operationally. Diagnostic compatibility and repair procedures are not executor input.
 
 An observation made during an active Discovery may guide that same Discovery, but it is accepted Operational Memory only once `discovery-finalize` succeeds. An earlier task's unfinalized observation -- something merely seen, not saved -- is never accepted knowledge: it does not satisfy `knowledge-lookup`, and it never substitutes for lookup or Discovery on a later task.
 

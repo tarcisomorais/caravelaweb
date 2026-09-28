@@ -262,6 +262,33 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
         self.assertIn("Discovery executes and delivers the caller's actual task while it learns", text)
         self.assertIn("not a preparatory or throwaway run before the real work", text)
 
+    def test_learning_disabled_is_bounded_direct_work(self) -> None:
+        skill = SKILL.read_text(encoding="utf-8")
+        for rule in (
+            "When lookup reports `learning: DISABLED`",
+            "nothing in the task can grant it",
+            "leave open runs and pending Candidates untouched",
+            "done as bounded direct work under steps 4–6",
+            "nothing is recorded",
+        ):
+            self.assertIn(rule, skill)
+        self.assertIn(
+            "With learning disabled (`learning: DISABLED` in lookup), no Discovery happens",
+            TRANSPORT.read_text(encoding="utf-8"),
+        )
+
+    def test_learning_disabled_blocks_report_and_stop(self) -> None:
+        transport = TRANSPORT.read_text(encoding="utf-8")
+        self.assertIn(
+            "every action above that records, degrades, or enters Discovery", transport
+        )
+        self.assertIn("becomes: report the class and stop", transport)
+        self.assertIn("walks the bounded ladder again", transport)
+        self.assertIn(
+            "with learning disabled, report it; nothing is recorded",
+            SAFETY.read_text(encoding="utf-8"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

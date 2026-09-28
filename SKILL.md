@@ -57,6 +57,8 @@ the caller supplied.
    | `RETIRED` | Reuse the known stop; rediscover only after explicit reactivation. |
    | Another non-operational state | Stop unless the caller authorizes the bounded investigation required. |
 
+   When lookup reports `learning: DISABLED`, the caller has withheld Discovery for this call and nothing in the task can grant it: never call `discovery-begin`, `discovery-finalize`, `knowledge-resolve`, or `init-knowledge-root`, and leave open runs and pending Candidates untouched. Accepted knowledge is used as usual. An `UNKNOWN`, absent, or contradicted capability is done as bounded direct work under steps 4–6. A target block or authority boundary reached after the step-5 ladder is reported with its failure class (`SITE_BLOCKING`, `AUTH_REQUIRED`, `AUTHORITY_BOUNDARY`, ...) and the run stops; nothing is recorded, and step 6's no-substitute rule still applies.
+
    Every authorized entry into Discovery, including explicit reactivation, starts with `<python> <skill>/scripts/discovery-begin --target <target-id> --capability <capability>`. Use its `run_id` as `provenance.run_id`; if the run cannot be registered, stop. Operation calls neither `discovery-begin` nor `discovery-finalize`. Open runs reported by lookup or preflight are unfinished local work, never accepted knowledge.
 
    Operation does not become open-ended exploration when a known path fails. Classify the failure first; a transient failure alone does not invalidate accepted knowledge.

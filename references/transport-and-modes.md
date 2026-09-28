@@ -8,7 +8,7 @@
 
 Discovery does not expand authority — see `safety.md`. When a question can't be answered within current authority, record it `UNKNOWN` and stop; don't cross the boundary to complete the profile.
 
-Discovery executes and delivers the caller's actual task while it learns — it is not a preparatory or throwaway run before the real work.
+Discovery executes and delivers the caller's actual task while it learns — it is not a preparatory or throwaway run before the real work. With learning disabled (`learning: DISABLED` in lookup), no Discovery happens: the task is delivered as bounded direct work and nothing is learned; see SKILL.md step 3.
 
 After caller authorization and before the first target read, call
 `discovery-begin` for the selected target and capability. Its `run_id` follows
@@ -113,6 +113,8 @@ UNKNOWN               → stop escalating; preserve evidence; request bounded Di
 ```
 
 Lifecycle mutation follows the *cause*, not the symptom — e.g. a Lightpanda 404 is not automatically `TARGET_CHANGED` until classified.
+
+With learning disabled, every action above that records, degrades, or enters Discovery (`SITE_BLOCKING`, `TARGET_CHANGED`, `PROFILE_INCORRECT`, `UNKNOWN`) becomes: report the class and stop. Nothing is written, and each later blocked acquisition of that capability walks the bounded ladder again — the accepted cost of this mode.
 
 ### Bot-protection-flavored 403 handling
 

@@ -17,6 +17,17 @@ All notable changes to CaravelaWeb will be documented in this file.
   and warns about an unrecognized non-empty value, which leaves learning
   enabled.
 
+### Changed
+
+- With learning disabled, the contract defines the task instead of
+  leaving it to Discovery: SKILL.md step 3 forbids the write commands,
+  handles an unknown, absent, or contradicted capability as bounded
+  direct work under steps 4-6, and ends a blocked ladder by reporting its
+  failure class with nothing recorded. The failure-class table's record
+  and Discovery actions become "report the class and stop" only in this
+  mode; the accepted cost is that a blocked capability is retried through
+  the bounded ladder on every call.
+
 ## 0.2.2 - 2026-09-04
 
 One lookup call per capability. The combined `knowledge-lookup` call now
