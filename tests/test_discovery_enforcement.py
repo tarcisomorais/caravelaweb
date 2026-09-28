@@ -323,6 +323,15 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
         ):
             self.assertIn(rule, safety)
 
+    def test_browser_tools_resolve_on_the_executor_path(self) -> None:
+        dependencies = (REPO / "references" / "external-dependencies.md").read_text(encoding="utf-8")
+        self.assertIn(
+            "must resolve on the `PATH` of the process\nthat runs the executor's commands",
+            dependencies,
+        )
+        self.assertIn("`transports.LIGHTPANDA.path`", dependencies)
+        self.assertIn("Choosing that `PATH` is the caller's job", dependencies)
+
 
 if __name__ == "__main__":
     unittest.main()

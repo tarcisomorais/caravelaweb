@@ -39,6 +39,10 @@ All notable changes to CaravelaWeb will be documented in this file.
   changing identity within a transport after a block is circumvention
   that ends the run as that block. Moving up the transport ladder is not
   an identity change. It applies with learning enabled and disabled.
+- `references/external-dependencies.md` states that `agent-browser` and
+  `lightpanda` must resolve on the `PATH` of the process that runs the
+  executor's commands, and that `preflight --json` reports the resolved
+  paths.
 
 ## 0.2.2 - 2026-09-04
 

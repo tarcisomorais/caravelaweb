@@ -24,5 +24,12 @@ becomes target knowledge. Do not substitute Playwright, Puppeteer, Selenium,
 CDP/MCP tooling, or another browser-control stack when `agent-browser` is
 unavailable or broken.
 
+`agent-browser` and `lightpanda` must resolve on the `PATH` of the process
+that runs the executor's commands -- the first `agent-browser` command of a
+session passes that `PATH` to its daemon, which finds Lightpanda there --
+and `preflight --json` reports the resolved paths
+(`transports.agent-browser.path`, `transports.LIGHTPANDA.path`,
+`transports.CHROME.path`). Choosing that `PATH` is the caller's job.
+
 A separate, intentionally chosen Linux/WSL2 runtime may support Lightpanda;
 CaravelaWeb does not bridge Windows and WSL2 automatically.
