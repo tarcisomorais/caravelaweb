@@ -233,6 +233,9 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
         # exists, so a second target ID is never minted for it.
         self.assertIn('With `index_scope: "target"`, the target exists: never mint a new target ID', text)
         self.assertIn("with `targets` at the top level", text)
+        # A listed equivalent capability may hold a recorded block: P2 of plan
+        # 011 retried Le Monde's blocked search because it never looked it up.
+        self.assertIn("look its ID up before acting: its record may be a block", text)
 
     def test_missing_browser_control_never_authorizes_a_substitute_stack(self) -> None:
         for text in (SKILL.read_text(encoding="utf-8"), TRANSPORT.read_text(encoding="utf-8")):

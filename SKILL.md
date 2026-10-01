@@ -46,7 +46,7 @@ the caller supplied.
    | Result | Next action |
    | --- | --- |
    | `found` | Read the returned accepted capability context. |
-   | `not_found` | With `index_scope: "target"`, the target exists: never mint a new target ID. Its `index` row lists its capability IDs with lifecycle; reuse one only under the equivalence rule (a headlines list does not serve a search task). Otherwise enter Discovery if authorized, or do bounded work when learning is disabled. |
+   | `not_found` | With `index_scope: "target"`, the target exists: never mint a new target ID. Its `index` row lists its capability IDs with lifecycle; reuse one only under the equivalence rule (a headlines list does not serve a search task), and look its ID up before acting: its record may be a block. Otherwise enter Discovery if authorized, or do bounded work when learning is disabled. |
    | `not_found` | With `index_scope: "all"`, read every `index.targets[].target` and its `hosts` before minting an ID: reuse an exact ID only under the equivalence rule, never by resemblance or a brand-name guess. Then enter bounded Discovery if authorized. |
    | `unresolved` | Run **First run** once and retry; if still `unresolved`, stop: accepted knowledge could not be consulted. |
    | `bridge_error` | Stop: accepted knowledge could not be consulted. |
@@ -209,7 +209,6 @@ the caller supplied.
    `ALREADY_EXISTS` means no duplicate was created; `NOT_SAVED` means nothing was added to accepted knowledge.
    `SAVED` and lookup `found` mean accepted context exists, not that the capability is `OPERATIONAL`; a `SAVED` that is not `OPERATIONAL` names the first missing proof condition in `lifecycle_gap`.
    To earn `OPERATIONAL` in one run, copy example 8: one `FUNCTIONAL` `transport` observation, one `authentication` observation whose `access_model` equals the proof's `context.authentication`, and one `validation` observation carrying `operational_proof` whose own `validation` has `outcome: "SUCCESS"` and payload evidence.
-   This local write never authorizes Git, project-file, or external state changes.
    A finalizer error means **Discovery finalization is incomplete** and must never be silently described as a completed Discovery, even if the task result can be reported.
 
 ## Executor references

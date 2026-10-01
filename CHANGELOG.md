@@ -52,6 +52,9 @@ All notable changes to CaravelaWeb will be documented in this file.
   and dismiss controls are never clicked without caller authority, and the
   content behind the overlay is read instead. Blanking the User-Agent
   (`curl -A ''`) counts as setting identity.
+- A `not_found` with `"index_scope": "target"` now tells the executor to
+  look a listed equivalent capability up by its ID before acting, because
+  its record may be a recorded block.
 - The SKILL.md size test is a 3,000-word budget instead of a 151-line
   budget; duplicates in step 7 were cut to pay for the additions.
 
