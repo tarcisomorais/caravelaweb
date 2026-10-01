@@ -397,6 +397,16 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
         self.assertIn("Read the content behind the overlay from the snapshot or DOM", text)
         self.assertIn("cookie and consent banners", SAFETY.read_text(encoding="utf-8"))
 
+    def test_every_claim_stays_inside_what_the_run_demonstrated(self) -> None:
+        text = SKILL.read_text(encoding="utf-8")
+        self.assertIn("Every claim stays inside what this run demonstrated", text)
+        self.assertIn("never advice that generalizes beyond them", text)
+        self.assertIn("only if they were executed as selectors against the page", text)
+        self.assertIn(
+            "That scope rule covers every claim, not only absence claims",
+            TARGET_PROFILE.read_text(encoding="utf-8"),
+        )
+
     def test_learning_disabled_contradiction_continues_as_bounded_work(self) -> None:
         skill = SKILL.read_text(encoding="utf-8")
         self.assertIn("stop relying on that claim for this call only, continue as bounded work", skill)

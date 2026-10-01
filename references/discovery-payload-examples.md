@@ -25,6 +25,8 @@ host is never reachable by URL.
 - Every evidence item for a first-time host has `"scope": "TARGET_SURFACE"` and a lowercase `kind` such as `direct-read-validation`.
 - A browser-backed result needs a complete `transport_trace` starting at `DIRECT_READ` and stopping at the first `FUNCTIONAL` transport. A `DIRECT_READ`-only result needs none.
 - An `OBSERVED` `blocking` or `limitation` observation carries its own `validation` block with transport, engine, javascript, and both `context` keys.
+- Every claim stays inside what this run demonstrated. A `condition` or `constraint` states the observed behavior and the input shapes it was seen with, never advice that generalizes beyond them (example 9).
+- `extraction.selectors` are `OBSERVED` only if they were executed as selectors against the page. A structure inferred from markup is not.
 - `field_paths` use `$.field`, `a.b`, or `items[].field`. `structure`, `state`, `signal`, and similar fields are single symbolic tokens.
 
 ## 1. Functional `DIRECT_READ`
@@ -309,6 +311,63 @@ the `OPERATIONAL` lifecycle in one run: a `FUNCTIONAL` transport, a matching
     "locator": "https://example-operational.example/articles/1",
     "scope": "TARGET_SURFACE"
   }],
+  "provenance": {"run_id": "<from discovery-begin>", "observed_at": "2026-08-14T12:00:00Z"}
+}
+```
+
+## 9. A limitation scoped to the input shapes the run tried
+
+The run tried one single-term query, which returned results, and one two-term
+and one five-term query, which returned none. The `condition` records exactly
+those shapes. It does not say "use one or two distinctive terms": no two-term
+query succeeded, so that advice reaches past the evidence. The limitation's
+`validation` cites the queries that showed it, each as its own evidence item,
+beside the query that worked.
+
+```json
+{
+  "target": "example-scoped-limitation",
+  "capability": "site-search",
+  "observations": [
+    {
+      "family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"},
+      "host": "example-scoped-limitation.example"
+    },
+    {
+      "family": "limitation",
+      "value": {
+        "kind": "QUERY_SHAPE",
+        "condition": "the single-term query tried returned results; the two- and five-term queries returned none"
+      },
+      "host": "example-scoped-limitation.example",
+      "validation": {
+        "transport": "DIRECT_READ", "outcome": "OBSERVED", "engine": null, "javascript": false,
+        "context": {"authentication": "PUBLIC", "environment": "PRODUCTION"},
+        "evidence": [
+          "https://example-scoped-limitation.example/search?q=harbor",
+          "https://example-scoped-limitation.example/search?q=harbor+lights",
+          "https://example-scoped-limitation.example/search?q=old+harbor+lights+night+walk"
+        ]
+      }
+    }
+  ],
+  "evidence": [
+    {
+      "kind": "direct-read-validation",
+      "locator": "https://example-scoped-limitation.example/search?q=harbor",
+      "scope": "TARGET_SURFACE"
+    },
+    {
+      "kind": "limitation-validation",
+      "locator": "https://example-scoped-limitation.example/search?q=harbor+lights",
+      "scope": "TARGET_SURFACE"
+    },
+    {
+      "kind": "limitation-validation",
+      "locator": "https://example-scoped-limitation.example/search?q=old+harbor+lights+night+walk",
+      "scope": "TARGET_SURFACE"
+    }
+  ],
   "provenance": {"run_id": "<from discovery-begin>", "observed_at": "2026-08-14T12:00:00Z"}
 }
 ```

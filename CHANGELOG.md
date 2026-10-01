@@ -55,6 +55,16 @@ All notable changes to CaravelaWeb will be documented in this file.
 - The SKILL.md size test is a 3,000-word budget instead of a 151-line
   budget; duplicates in step 7 were cut to pay for the additions.
 
+### Added
+
+- The pre-finalize checklist in SKILL.md step 7, and
+  `references/target-profile.md`, now keep every learned claim inside what
+  the run demonstrated: a `condition` or `constraint` names the observed
+  behavior and the input shapes it was seen with, never advice that
+  generalizes past them, and `extraction.selectors` are `OBSERVED` only
+  when they were executed as selectors. Payload example 9 shows a
+  limitation scoped that way, citing the requests that showed it.
+
 ## 0.3.0 - 2026-09-28
 
 Caller guarantees for bounded acquisition. A caller can now forbid every

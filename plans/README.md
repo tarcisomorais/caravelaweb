@@ -166,6 +166,19 @@ Checked read-only on a copy of `~/.local/share/caravelaweb/knowledge-root`:
   Name the engine flag and Chrome-as-default in step 5 within the
   151-line budget, then re-measure in the same call shape. Effort S.
   ABSORBED by plan 011 change 3 (the budget became 3,000 words).
+- **DIRECTION-09** Learned claims cannot be validated deterministically.
+  The Ukrinform learning run (Disperta P7c) saved a `limitation` whose
+  condition advised "use one or two distinctive terms" although the only
+  two-term query had failed, and extraction selectors never executed as
+  selectors, all as `OBSERVED`. The structured `mode` token was right; the
+  free-text condition was wrong. Plan 011 change 4 tightened the contract
+  only: no cheap check works, because `validation` blocks attest a
+  transport and URLs, not a claim (a constraint's evidence URL is often
+  shared with a working transport's). Deterministic validation would need
+  evidence CaravelaWeb captures itself. Plan it only if a learning run
+  under the new checklist still saves a claim broader than its evidence,
+  a second accepted claim causes an operational failure, or a
+  `direct-read` helper is built (plan 011 gates).
 - **CORRECTNESS-07** `transport_policy.next_transport` halts when preflight
   reports Lightpanda `UNAVAILABLE` (agent-browser present, the `lightpanda`
   binary missing) while Chrome is `AVAILABLE`: only `PLATFORM_UNSUPPORTED`

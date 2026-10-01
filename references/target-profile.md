@@ -337,6 +337,18 @@ was actually seen. "No functional feed was found on the surfaces reached" is
 supportable; "no official feed exists" claims the whole permitted scope and
 needs evidence covering it.
 
+That scope rule covers every claim, not only absence claims: each one stays
+inside what this run demonstrated. A `condition` or `constraint` states the
+observed behavior and the input shapes it was seen with, such as "the single-term
+query tried returned results; the two- and five-term queries returned
+none". It never gives advice that generalizes beyond them, such as "use one
+or two distinctive terms" when no two-term query succeeded. Its `validation`
+cites the requests that actually showed the constraint, not only the one that
+succeeded; example 9 in `discovery-payload-examples.md` is shaped this way.
+`extraction.selectors` are `OBSERVED` only when they were executed as
+selectors against the page. A structure inferred from markup was not observed:
+leave it out of an `OBSERVED` extraction.
+
 ## Authentication
 
 Knowledge may state where authentication is required or whether human-assisted auth is expected. It must never contain passwords, tokens, API secrets, recovery codes, MFA seeds, or reusable session cookies. Credentials remain in the consuming environment.

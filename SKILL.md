@@ -176,6 +176,8 @@ the caller supplied.
    - Every evidence item for a first-time host has `"scope": "TARGET_SURFACE"` and a lowercase `kind` such as `direct-read-validation`.
    - A browser-backed result needs a complete `transport_trace` (below). A `DIRECT_READ`-only result needs none.
    - An `OBSERVED` `blocking` or `limitation` observation carries its own `validation` with the explicit transport, engine, JavaScript, authentication, and environment context that saw it.
+   - Every claim stays inside what this run demonstrated. A `condition` or `constraint` states the observed behavior and the input shapes it was seen with ("the single-term query tried returned results; the two- and five-term queries returned none"), never advice that generalizes beyond them.
+   - `extraction.selectors` are `OBSERVED` only if they were executed as selectors against the page. A structure inferred from markup is not.
    - `field_paths` use `$.field`, `a.b`, or `items[].field`. `structure`, `state`, `signal`, and similar fields are single symbolic tokens.
    - Values hold reusable operating facts only, never task results: no found articles, shop lists, current results or prices, raw logs, complete HTML, or browser-session state.
 
