@@ -2,15 +2,19 @@
 
 All notable changes to CaravelaWeb will be documented in this file.
 
-## Unreleased
+## 0.4.0 - 2026-10-01
 
-Closes the gaps Disperta's access evidence exposed. A lookup miss on a
+Narrows the gaps Disperta's access evidence exposed. A lookup miss on a
 known target answers with that target's own row, Discovery refuses an
 observation time outside its run, and the rules every call needs now live
-in SKILL.md. Operational Memory written by earlier versions is not
-re-validated or repaired: a claim broader than its evidence, or an
-`observed_at` outside its run, stays until a caller-authorized
-re-Discovery replaces it.
+in SKILL.md. Measured against 0.3.0 in Disperta's call shape, callers
+tried Lightpanda before Chrome far more often, set no identity flag, and
+sent fewer unencoded direct-read URLs; how they handled a response, apart
+from that ladder order, did not measurably improve. The numbers are in
+`plans/011-disperta-access-evidence.md`. Operational Memory written by
+earlier versions is not re-validated or repaired: a claim broader than
+its evidence, or an `observed_at` outside its run, stays until a
+caller-authorized re-Discovery replaces it.
 
 ### Fixed
 
@@ -74,8 +78,9 @@ re-Discovery replaces it.
   machine has to its `invocation` block, in ladder order:
   `lightpanda_open` (`agent-browser --engine lightpanda --session <name>
   open <url>`) when Lightpanda is `AVAILABLE`, `chrome_open` when Chrome is,
-  and `browser_close`. Callers copy those lines; plan 011's measurement
-  still saw Chrome opened first in 2 of 13 browser entries.
+  and `browser_close`, for callers to copy. Plan 011 added them after
+  its first two runs saw Chrome opened without Lightpanda in 2 of 13
+  browser entries.
 - The pre-finalize checklist in SKILL.md step 7, and
   `references/target-profile.md`, now keep every learned claim inside what
   the run demonstrated: a `condition` or `constraint` names the observed
