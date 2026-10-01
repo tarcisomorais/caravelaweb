@@ -134,6 +134,23 @@ def _transports(*, platform_name: str | None = None) -> dict[str, object]:
     return _browser_diagnostics(platform_name=platform_name)["transports"]
 
 
+def _browser_invocations(transports: dict[str, object]) -> dict[str, str]:
+    """The open command for each browser tier this machine has, in ladder order.
+
+    Callers that never read the references opened Chrome without trying an
+    available Lightpanda; the exact form for each tier sits beside the script
+    invocations they do copy.
+    """
+    commands: dict[str, str] = {}
+    if transports["LIGHTPANDA"]["status"] == AVAILABLE:
+        commands["lightpanda_open"] = "agent-browser --engine lightpanda --session <name> open <url>"
+    if transports["CHROME"]["status"] == AVAILABLE:
+        commands["chrome_open"] = "agent-browser --engine chrome --session <name> open <url>"
+    if commands:
+        commands["browser_close"] = "agent-browser close --session <name>"
+    return commands
+
+
 def build_report(override: str | None) -> dict[str, object]:
     root, core = core_readiness(override)
     browser = _browser_diagnostics()
@@ -146,6 +163,7 @@ def build_report(override: str | None) -> dict[str, object]:
             "discovery_begin": f'"{sys.executable}" "{SKILL_ROOT / "scripts" / "discovery-begin"}"',
             "discovery_finalize": f'"{sys.executable}" "{SKILL_ROOT / "scripts" / "discovery-finalize"}"',
             "knowledge_resolve": f'"{sys.executable}" "{SKILL_ROOT / "scripts" / "knowledge-resolve"}"',
+            **_browser_invocations(browser["transports"]),
         },
         "open_discovery": list_open_discoveries(root) if root else [],
         # Learning is the caller's per-process choice, never a readiness

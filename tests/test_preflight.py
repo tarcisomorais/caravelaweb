@@ -211,5 +211,26 @@ class PreflightTests(unittest.TestCase):
                 self.assertEqual("READY", report["status"])
 
 
+    def test_invocation_names_each_available_browser_tier_in_ladder_order(self) -> None:
+        api = runpy.run_path(str(PREFLIGHT))
+        lightpanda = "agent-browser --engine lightpanda --session <name> open <url>"
+        chrome = "agent-browser --engine chrome --session <name> open <url>"
+        close = "agent-browser close --session <name>"
+        cases = {
+            ("AVAILABLE", "AVAILABLE"): {"lightpanda_open": lightpanda, "chrome_open": chrome, "browser_close": close},
+            ("PLATFORM_UNSUPPORTED", "AVAILABLE"): {"chrome_open": chrome, "browser_close": close},
+            ("UNAVAILABLE", "UNAVAILABLE"): {},
+        }
+        for (lp, ch), expected in cases.items():
+            with self.subTest(lightpanda=lp, chrome=ch):
+                commands = api["_browser_invocations"]({"LIGHTPANDA": {"status": lp}, "CHROME": {"status": ch}})
+                self.assertEqual(list(expected), list(commands), "ladder order")
+                self.assertEqual(expected, commands)
+        # A real report carries exactly what its own transports imply.
+        result = self.run_preflight("--knowledge-root", str(self.root), "--json")
+        report = json.loads(result.stdout)
+        browser = {k: v for k, v in report["invocation"].items() if k in ("lightpanda_open", "chrome_open", "browser_close")}
+        self.assertEqual(api["_browser_invocations"](report["transports"]), browser)
+
 if __name__ == "__main__":
     unittest.main()

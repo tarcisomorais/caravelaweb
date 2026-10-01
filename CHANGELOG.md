@@ -57,6 +57,12 @@ All notable changes to CaravelaWeb will be documented in this file.
 
 ### Added
 
+- `preflight` adds the exact open command for each browser tier this
+  machine has to its `invocation` block, in ladder order:
+  `lightpanda_open` (`agent-browser --engine lightpanda --session <name>
+  open <url>`) when Lightpanda is `AVAILABLE`, `chrome_open` when Chrome is,
+  and `browser_close`. Callers copy those lines; plan 011's measurement
+  still saw Chrome opened first in 2 of 13 browser entries.
 - The pre-finalize checklist in SKILL.md step 7, and
   `references/target-profile.md`, now keep every learned claim inside what
   the run demonstrated: a `condition` or `constraint` names the observed
