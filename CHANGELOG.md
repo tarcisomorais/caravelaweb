@@ -2,7 +2,13 @@
 
 All notable changes to CaravelaWeb will be documented in this file.
 
-## Unreleased
+## 0.4.1 - 2026-10-01
+
+Lets a caller correct an accepted claim that was wrong when it was
+recorded. Only a `TARGET_CHANGED` contradiction could replace accepted
+knowledge, so a claim broader than its evidence -- the case 0.4.0 said a
+caller-authorized re-Discovery must repair -- stayed accepted even after
+fresh evidence disproved it.
 
 ### Fixed
 
