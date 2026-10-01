@@ -7,8 +7,12 @@ re-deriving the schema from prose.
 
 Each `provenance.run_id` below is a placeholder. A real payload uses the
 `run_id` returned by `scripts/discovery-begin` for that exact target and
-capability -- never a literal string. `tests/test_discovery_payload_examples.py`
-extracts every JSON block below, opens a matching synthetic Discovery run, and
+capability -- never a literal string. `provenance.observed_at` is a
+placeholder too: a real payload carries the instant this run made the
+observation, from `date -u +%Y-%m-%dT%H:%M:%SZ`, which must fall inside the
+run window; the fixed example instant is refused with `PROVENANCE`.
+`tests/test_discovery_payload_examples.py` extracts every JSON block below,
+opens a matching synthetic Discovery run at the example's own instant, and
 finalizes it for real: if a runtime rule changes, this file fails the suite
 instead of silently drifting from the contract.
 

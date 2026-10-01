@@ -19,6 +19,7 @@ REFERENCE = REPO / "references" / "discovery-payload-examples.md"
 from write_authority import MIGRATED_WRITE_AUTHORITY_KIND
 
 sys.path.insert(0, str(REPO))
+from discovery_runs import begin_discovery
 from operational_memory.core import SQLiteOperationalMemory
 
 _JSON_BLOCK = re.compile(r"```json\n(.*?)\n```", re.S)
@@ -46,19 +47,24 @@ class DiscoveryPayloadExamplesTests(unittest.TestCase):
         ):
             pass
 
+    def open_run(self, payload: dict) -> None:
+        # Open the run at the documented `observed_at`, so the example keeps
+        # its own timestamp and still falls inside the run window. A marker
+        # from `discovery-begin` opens at the real current time, later than
+        # any fixed example instant.
+        opened = begin_discovery(
+            self.root, payload["target"], payload["capability"],
+            opened_at=payload["provenance"]["observed_at"],
+        )
+        payload["provenance"]["run_id"] = opened["run_id"]
+
     def test_the_reference_documents_at_least_the_seven_required_examples(self) -> None:
         self.assertGreaterEqual(len(_payloads()), 8)
 
     def test_every_documented_example_finalizes_successfully(self) -> None:
         for payload in _payloads():
             with self.subTest(target=payload["target"], capability=payload["capability"]):
-                begun = subprocess.run(
-                    [sys.executable, str(BEGIN), "--knowledge-root", str(self.root),
-                     "--target", payload["target"], "--capability", payload["capability"]],
-                    text=True, capture_output=True, encoding="utf-8",
-                )
-                self.assertEqual(0, begun.returncode, begun.stderr)
-                payload["provenance"]["run_id"] = json.loads(begun.stdout)["run_id"]
+                self.open_run(payload)
                 finalized = subprocess.run(
                     [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root),
                      "--input", "-"],
@@ -115,13 +121,7 @@ class DiscoveryPayloadExamplesTests(unittest.TestCase):
         payload = next(
             item for item in _payloads() if item["target"] == "example-operational"
         )
-        begun = subprocess.run(
-            [sys.executable, str(BEGIN), "--knowledge-root", str(self.root),
-             "--target", payload["target"], "--capability", payload["capability"]],
-            text=True, capture_output=True, encoding="utf-8",
-        )
-        self.assertEqual(0, begun.returncode, begun.stderr)
-        payload["provenance"]["run_id"] = json.loads(begun.stdout)["run_id"]
+        self.open_run(payload)
         finalized = subprocess.run(
             [sys.executable, str(FINALIZER), "--knowledge-root", str(self.root),
              "--input", "-"],

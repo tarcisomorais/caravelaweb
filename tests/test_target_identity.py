@@ -405,7 +405,11 @@ class TargetIdentityCrossProcessTests(unittest.TestCase):
             "--capability", payload["capability"], env=self.env,
         )
         self.assertEqual(0, begun.returncode, begun.stderr)
-        payload["provenance"]["run_id"] = json.loads(begun.stdout)["run_id"]
+        opened = json.loads(begun.stdout)
+        payload["provenance"]["run_id"] = opened["run_id"]
+        # Observed and recorded at the instant the run opened: inside its window.
+        payload["provenance"]["observed_at"] = opened["opened_at"]
+        payload["recorded_at"] = opened["opened_at"]
         payload_path.write_text(json.dumps(payload), encoding="utf-8")
         finalize = run(FINALIZER, "--knowledge-root", str(self.root), "--input", str(payload_path), env=self.env)
         self.assertEqual(0, finalize.returncode, finalize.stderr)
@@ -450,6 +454,7 @@ class CombinedLookupIndexTests(unittest.TestCase):
             "--capability", capability, env=self.env,
         )
         self.assertEqual(0, begun.returncode, begun.stderr)
+        opened = json.loads(begun.stdout)
         payload = {
             "target": target,
             "capability": capability,
@@ -462,8 +467,9 @@ class CombinedLookupIndexTests(unittest.TestCase):
                 "kind": "direct-read-validation", "locator": f"https://{host}/",
                 "scope": "TARGET_SURFACE",
             }],
-            "provenance": {"run_id": json.loads(begun.stdout)["run_id"], "observed_at": RECORDED},
-            "recorded_at": RECORDED,
+            # Observed and recorded at the instant the run opened: inside its window.
+            "provenance": {"run_id": opened["run_id"], "observed_at": opened["opened_at"]},
+            "recorded_at": opened["opened_at"],
         }
         path = self.root.parent / f"{target}.json"
         path.write_text(json.dumps(payload), encoding="utf-8")

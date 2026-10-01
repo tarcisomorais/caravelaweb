@@ -100,7 +100,12 @@ def begin_for_payload(
         "--capability", payload["capability"], cwd=cwd, env=env,
     )
     if result.returncode == 0:
-        payload["provenance"]["run_id"] = json.loads(result.stdout)["run_id"]
+        opened = json.loads(result.stdout)
+        payload["provenance"]["run_id"] = opened["run_id"]
+        # Observed and recorded at the instant the run opened, so
+        # `observed_at` falls inside the run window `discovery-begin` opened.
+        payload["provenance"]["observed_at"] = opened["opened_at"]
+        payload["recorded_at"] = opened["opened_at"]
         payload_path.write_text(json.dumps(payload), encoding="utf-8")
     return result
 

@@ -77,9 +77,10 @@ class CliPortabilityTests(unittest.TestCase):
                     "--target", body["target"], "--capability", body["capability"],
                 ], capture_output=True, env=environment)
                 self.assertEqual(0, opened.returncode, opened.stderr.decode("utf-8"))
-                body["provenance"]["run_id"] = json.loads(
-                    opened.stdout.decode("utf-8")
-                )["run_id"]
+                run = json.loads(opened.stdout.decode("utf-8"))
+                # Observed at the instant the run opened: inside its window.
+                body["provenance"]["run_id"] = run["run_id"]
+                body["provenance"]["observed_at"] = run["opened_at"]
                 payload.write_text(json.dumps(body), encoding="utf-8")
 
             command = [

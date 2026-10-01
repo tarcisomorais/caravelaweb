@@ -4,6 +4,18 @@ All notable changes to CaravelaWeb will be documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+- `discovery-finalize` now refuses a `provenance.observed_at` outside the
+  Discovery run window, earlier than the `opened_at` that
+  `discovery-begin` recorded or later than the write (the supplied
+  `recorded_at`, or the current time when it is omitted), with
+  `"reason_code": "PROVENANCE"` before anything is written, identically
+  under `--validate`; the run stays open for a corrected payload. A
+  malformed `observed_at` now gets the same code instead of an uncoded
+  refusal. A payload with no observations stores nothing and is not
+  bounded.
+
 ### Changed
 
 - A `knowledge-lookup` miss on a target that resolved (a known URL or

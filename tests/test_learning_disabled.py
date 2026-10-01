@@ -107,7 +107,9 @@ class LearningDisabledTests(unittest.TestCase):
                 "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"},
             }],
             "evidence": [{"kind": "direct-read-validation", "locator": "https://example.com/"}],
-            "provenance": {"run_id": opened["run_id"], "observed_at": RECORDED},
+            # Observed at the instant `discovery-begin` opened the run, so the
+            # control finalize falls inside the run window.
+            "provenance": {"run_id": opened["run_id"], "observed_at": opened["opened_at"]},
         })
 
     def open_markers(self) -> list[Path]:

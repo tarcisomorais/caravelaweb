@@ -147,7 +147,7 @@ def main() -> int:
         try:
             with SQLiteOperationalMemory(db, create=False, knowledge_root=root) as memory:
                 target = _resolve_target_argument(memory, payload.get("target"))
-                require_open_discovery(
+                record = require_open_discovery(
                     root, target, payload.get("capability"), run_id
                 )
                 result = finalize_discovery(
@@ -156,6 +156,7 @@ def main() -> int:
                     observations=payload.get("observations"), evidence=payload.get("evidence"),
                     provenance=payload.get("provenance"), recorded_at=payload.get("recorded_at"),
                     transport_trace=payload.get("transport_trace"),
+                    opened_at=record["opened_at"],
                     dry_run=args.validate,
                 )
         except (DatabaseOpenError, sqlite3.OperationalError) as exc:

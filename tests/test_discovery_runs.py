@@ -63,6 +63,9 @@ class DiscoveryRunTests(unittest.TestCase):
         return json.loads(result.stdout)
 
     def payload(self, opened, *, observations=None):
+        # The observation and the write happen at the instant the run opened,
+        # which keeps `observed_at` inside the run window. `discovery-begin`
+        # opens at the real current time; `begin_discovery` may pin it.
         return {
             "target": opened["target"], "capability": opened["capability"],
             "observations": observations if observations is not None else [{
@@ -70,8 +73,8 @@ class DiscoveryRunTests(unittest.TestCase):
                 "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"},
             }],
             "evidence": [{"kind": "direct-read-validation", "locator": "https://example.com/"}],
-            "provenance": {"run_id": opened["run_id"], "observed_at": RECORDED},
-            "recorded_at": RECORDED,
+            "provenance": {"run_id": opened["run_id"], "observed_at": opened["opened_at"]},
+            "recorded_at": opened["opened_at"],
         }
 
     def finalize(self, payload):

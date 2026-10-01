@@ -146,7 +146,9 @@ Checked read-only on a copy of `~/.local/share/caravelaweb/knowledge-root`:
   A future value saves today. If the former is normative, future values
   should be refused with `PROVENANCE`; if not, they are legitimate. Kept
   out of the uncoded-refusals hotfix because no downstream failure was
-  demonstrated; needs an explicit maintainer decision.
+  demonstrated; needs an explicit maintainer decision. RESOLVED by plan
+  011 change 2: `observed_at` is the observation instant, refused with
+  `PROVENANCE` outside the run window.
 - **CORRECTNESS-06** Bounded direct work skips or reorders the Lightpanda
   tier. `SKILL.md:69-77` names `DIRECT_READ -> LIGHTPANDA -> CHROME` but
   not how to reach Lightpanda: `agent-browser open` without

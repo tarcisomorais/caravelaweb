@@ -811,7 +811,12 @@ def _validate_provenance(provenance: Mapping[str, Any]) -> dict[str, Any]:
     )
     run_id, observed_at = provenance["run_id"], provenance["observed_at"]
     run_id = _text(run_id, field="provenance.run_id")
-    validate_timestamp(observed_at, field="provenance.observed_at")
+    # Coded like `recorded_at`: a malformed instant is a provenance defect
+    # the caller fixes from the message, not an internal failure.
+    try:
+        validate_timestamp(observed_at, field="provenance.observed_at")
+    except RecordValidationError as exc:
+        raise DiscoveryFinalizationError(str(exc), code=PROVENANCE) from exc
     return {"run_id": run_id, "observed_at": observed_at}
 
 
@@ -1469,6 +1474,7 @@ def finalize_discovery(
     evidence: Sequence[Mapping[str, Any]], provenance: Mapping[str, Any],
     transport_trace: Mapping[str, Any] | None = None,
     recorded_at: str | None = None,
+    opened_at: str | None = None,
     dry_run: bool = False,
 ) -> DiscoveryFinalization:
     """Finalize Discovery into local OM, accepting only direct observations.
@@ -1478,6 +1484,11 @@ def finalize_discovery(
     a separate prediction path. Early no-write results (schema rejection,
     ``NO_REUSABLE_KNOWLEDGE``, ``ALREADY_EXISTS``, ...) return normally
     without reaching ``write_transaction()`` at all.
+
+    ``opened_at`` is the open run marker's ``opened_at``, the lower bound of
+    the run window ``provenance.observed_at`` must fall inside.
+    `scripts/discovery-finalize` always passes it; a library caller that
+    omits it still gets the upper bound.
     """
     if not isinstance(target, str) or not target.strip():
         raise DiscoveryFinalizationError(
@@ -1496,6 +1507,7 @@ def finalize_discovery(
     # The clock comes from the memory, so a test that injects one pins the
     # refusal boundary too.
     now = memory._clock()
+    recorded_at_supplied = bool(recorded_at)
     recorded_at = recorded_at or now
     try:
         validate_timestamp(recorded_at, field="finalize_discovery.recorded_at")
@@ -1520,6 +1532,38 @@ def finalize_discovery(
             "NOT_SAVED", target, capability,
             reason="Discovery found no reusable operating knowledge.",
             reason_code="NO_REUSABLE_KNOWLEDGE",
+        )
+    # `observed_at` is the instant of observation, so it falls inside this
+    # run's window: no earlier than the marker's `opened_at` and no later than
+    # the write, which is the supplied `recorded_at` (already bounded by `now`
+    # above) or `now`. Refuse it here, before any write, so `--validate`
+    # reports it too. Every value is canonical second-precision UTC, checked
+    # by `validate_timestamp`, so comparing the strings compares the instants.
+    # A payload with no observations stores nothing and is not bounded.
+    observed_at = clean_provenance["observed_at"]
+    if opened_at is not None:
+        validate_timestamp(opened_at, field="opened_at")
+        # A write instant before the run opened leaves no window at all, so no
+        # `observed_at` could pass; name the field that is actually wrong.
+        if recorded_at_supplied and recorded_at < opened_at:
+            raise DiscoveryFinalizationError(
+                f"recorded_at {recorded_at} is earlier than the run's opened_at "
+                f"{opened_at}; omit it or use a time at or after the run opened",
+                code=PAYLOAD_VALUE,
+            )
+    if (opened_at is not None and observed_at < opened_at) or observed_at > recorded_at:
+        until = (
+            f"the supplied recorded_at {recorded_at}" if recorded_at_supplied
+            else f"the current time {recorded_at}"
+        )
+        window = (
+            f"from the run's opened_at {opened_at} to {until}"
+            if opened_at is not None else f"ending at {until}"
+        )
+        raise DiscoveryFinalizationError(
+            f"provenance.observed_at {observed_at} is outside the Discovery run "
+            f"window {window}; use the instant this run made the observation",
+            code=PROVENANCE,
         )
     clean_evidence = _validate_evidence(evidence)
     host_ids, hosts_to_create = _host_plan(memory, target, normalized, clean_evidence)

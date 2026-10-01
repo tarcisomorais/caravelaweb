@@ -168,6 +168,11 @@ instant on purpose, and then only with a value at or before the current
 time. `recorded_at` is never later than the current time: a Proposal
 recorded in the future is invisible to its own write, so the finalizer
 refuses it with `PAYLOAD_VALUE` before writing anything.
+`provenance.observed_at` is the instant of observation, never a time taken
+from the evidence, so it falls inside the run window: no earlier than the
+`opened_at` that `discovery-begin` returned and no later than the write
+(`recorded_at`, or the current time when it is omitted). The finalizer
+refuses one outside that window with `PROVENANCE` before writing anything.
 
 `observation.host` is a literal behavior scope: `www.example.com` and
 `example.com` are distinct hosts there, and the `TARGET_SURFACE` evidence
@@ -185,7 +190,7 @@ this closed list of eleven:
 - `TASK_DATA_REJECTED` — raw or task-specific content, not reusable knowledge.
 - `HOST_SCOPE` — an observation host is missing evidence or already claimed by another target.
 - `EVIDENCE_LINKAGE` — an evidence item, or a reference to one, is malformed or unresolved.
-- `PROVENANCE` — the run provenance wrapper is missing or malformed.
+- `PROVENANCE` — the run provenance wrapper is missing or malformed, or its `observed_at` is outside the run window.
 - `TRANSPORT_TRACE` — the transport ladder trace is malformed or inconsistent.
 - `TARGET_REFERENCE` — the `target` argument cannot be resolved to one canonical target.
 - `RUN_MARKER` — no open Discovery run marker matches this target, capability, and `run_id`.

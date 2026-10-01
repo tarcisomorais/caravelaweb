@@ -27,7 +27,7 @@ from discovery_finalize import (
     RUN_MARKER, TARGET_REFERENCE, TASK_DATA_REJECTED, TRANSPORT_TRACE,
     DiscoveryFinalizationError, finalize_discovery,
 )
-from discovery_runs import begin_discovery
+from discovery_runs import begin_discovery, list_open_discoveries
 from operational_memory.core import SQLiteOperationalMemory
 from platform_adapter import KNOWLEDGE_ROOT_ENV, resolve_knowledge_root
 from write_authority import MIGRATED_WRITE_AUTHORITY_KIND, WriteAuthorityStateError
@@ -394,6 +394,184 @@ class DiscoveryFinalizeTests(unittest.TestCase):
         result = self.run_cli(payload)
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual("SAVED", json.loads(result.stdout)["status"])
+
+    # `provenance.observed_at` is the instant of observation, so it must fall
+    # inside the run window: from the marker's `opened_at` to the write. A
+    # live run once stored an observation 8.5 minutes in the future as exact.
+    WINDOW_NOW = "2026-07-28T12:10:00Z"
+
+    def finalize_at(
+        self, now, *, observed_at, recorded_at=None, opened_at=None,
+        observations=None, evidence=None,
+    ):
+        """Finalize ``self.payload()`` with the memory clock pinned to ``now``."""
+        memory = SQLiteOperationalMemory(
+            self.db, clock=lambda: now, create=False, knowledge_root=self.root,
+        )
+        self.addCleanup(memory.close)
+        payload = self.payload()
+        return finalize_discovery(
+            memory, target=payload["target"], capability=payload["capability"],
+            observations=payload["observations"] if observations is None else observations,
+            evidence=payload["evidence"] if evidence is None else evidence,
+            provenance={**payload["provenance"], "observed_at": observed_at},
+            recorded_at=recorded_at, opened_at=opened_at,
+        )
+
+    def assert_outside_the_run_window(self, refusal, *fragments):
+        self.assertEqual(PROVENANCE, refusal.exception.code)
+        message = str(refusal.exception)
+        self.assertIn("provenance.observed_at", message)
+        self.assertIn("outside the Discovery run window", message)
+        for fragment in fragments:
+            self.assertIn(fragment, message)
+
+    def test_a_malformed_observed_at_is_a_provenance_refusal(self):
+        # It used to escape as an uncoded internal error.
+        for value in ("not-a-time", "2026-07-28T12:05:00.500Z", "2026-07-28T12:05:00+00:00"):
+            with self.subTest(observed_at=value):
+                with self.assertRaises(DiscoveryFinalizationError) as refusal:
+                    self.finalize_at(self.WINDOW_NOW, observed_at=value, opened_at=RECORDED)
+                self.assertEqual(PROVENANCE, refusal.exception.code)
+                self.assertIn("provenance.observed_at", str(refusal.exception))
+
+    def test_a_recorded_at_before_the_run_opened_names_recorded_at(self):
+        # The window would be empty; blaming observed_at would send the caller
+        # after the wrong field.
+        with self.assertRaises(DiscoveryFinalizationError) as refusal:
+            self.finalize_at(
+                self.WINDOW_NOW, observed_at=RECORDED,
+                recorded_at="2026-07-28T11:59:59Z", opened_at=RECORDED,
+            )
+        self.assertEqual(PAYLOAD_VALUE, refusal.exception.code)
+        self.assertIn("recorded_at 2026-07-28T11:59:59Z is earlier than the run's opened_at", str(refusal.exception))
+
+    def test_an_observed_at_equal_to_opened_at_saves(self):
+        result = self.finalize_at(
+            self.WINDOW_NOW, observed_at=RECORDED, opened_at=RECORDED,
+        )
+        self.assertEqual("SAVED", result.status)
+
+    def test_an_observed_at_equal_to_the_current_time_saves(self):
+        # With recorded_at omitted the write happens at "now", the inclusive
+        # upper end of the window.
+        result = self.finalize_at(
+            self.WINDOW_NOW, observed_at=self.WINDOW_NOW, opened_at=RECORDED,
+        )
+        self.assertEqual("SAVED", result.status)
+        validations = {
+            row[0] for row in self.memory._conn.execute(
+                "SELECT observed_at FROM validations"
+            )
+        }
+        self.assertEqual({self.WINDOW_NOW}, validations)
+
+    def test_an_observed_at_before_the_run_opened_is_refused(self):
+        before = self._table_snapshot()
+        with self.assertRaises(DiscoveryFinalizationError) as refusal:
+            self.finalize_at(
+                self.WINDOW_NOW, observed_at="2026-07-28T11:59:59Z",
+                recorded_at=RECORDED, opened_at=RECORDED,
+            )
+        self.assert_outside_the_run_window(
+            refusal, "2026-07-28T11:59:59Z", f"opened_at {RECORDED}",
+            f"the supplied recorded_at {RECORDED}",
+        )
+        self.assertEqual(before, self._table_snapshot())
+
+    def test_an_observed_at_after_the_current_time_is_refused(self):
+        # A library caller that has no marker still gets the upper bound.
+        for opened_at in (RECORDED, None):
+            with self.subTest(opened_at=opened_at):
+                before = self._table_snapshot()
+                with self.assertRaises(DiscoveryFinalizationError) as refusal:
+                    self.finalize_at(
+                        self.WINDOW_NOW, observed_at="2026-07-28T12:10:01Z",
+                        opened_at=opened_at,
+                    )
+                self.assert_outside_the_run_window(
+                    refusal, "2026-07-28T12:10:01Z",
+                    f"the current time {self.WINDOW_NOW}",
+                    *((f"opened_at {opened_at}",) if opened_at else ()),
+                )
+                self.assertEqual(before, self._table_snapshot())
+
+    def test_an_observed_at_after_the_supplied_recorded_at_is_refused(self):
+        # The observation is still in the past, but it postdates the write
+        # the caller says recorded it.
+        before = self._table_snapshot()
+        with self.assertRaises(DiscoveryFinalizationError) as refusal:
+            self.finalize_at(
+                self.WINDOW_NOW, observed_at="2026-07-28T12:05:01Z",
+                recorded_at="2026-07-28T12:05:00Z", opened_at=RECORDED,
+            )
+        self.assert_outside_the_run_window(
+            refusal, "2026-07-28T12:05:01Z", f"opened_at {RECORDED}",
+            "the supplied recorded_at 2026-07-28T12:05:00Z",
+        )
+        self.assertEqual(before, self._table_snapshot())
+
+    def test_empty_observations_are_not_bounded_by_the_run_window(self):
+        # An honest empty result stores nothing, so it is not bounded.
+        for observed_at in ("2026-07-28T11:59:59Z", "2026-07-28T12:10:01Z"):
+            with self.subTest(observed_at=observed_at):
+                result = self.finalize_at(
+                    self.WINDOW_NOW, observed_at=observed_at, opened_at=RECORDED,
+                    observations=[], evidence=[],
+                )
+                self.assertEqual("NOT_SAVED", result.status)
+                self.assertEqual("NO_REUSABLE_KNOWLEDGE", result.reason_code)
+
+    def open_after_the_observation(self, payload):
+        # One second after the payload's observed_at, a value the payload
+        # never carries: the refusal can only come from the marker.
+        return begin_discovery(
+            self.root, payload["target"], payload["capability"],
+            run_id=payload["provenance"]["run_id"], opened_at="2026-07-28T12:00:01Z",
+        )
+
+    def test_cli_refuses_an_observed_at_before_the_marker_opened(self):
+        payload = self.payload()
+        del payload["recorded_at"]
+        opened = self.open_after_the_observation(payload)
+        before = self._table_snapshot()
+        result = self.run_cli(payload)
+        self.assertEqual(2, result.returncode, result.stdout)
+        body = json.loads(result.stderr)
+        self.assertEqual("NOT_SAVED", body["status"])
+        self.assertEqual("OPEN", body["run_state"])
+        self.assertEqual(PROVENANCE, body["reason_code"])
+        self.assertIn(f"provenance.observed_at {RECORDED}", body["reason"])
+        self.assertIn(f"opened_at {opened['opened_at']}", body["reason"])
+        self.assertIn("the current time", body["reason"])
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertEqual(before, self._table_snapshot())
+        self.assertEqual(
+            [opened["run_id"]],
+            [item["run_id"] for item in list_open_discoveries(self.root)],
+        )
+
+    def test_validate_refuses_an_observed_at_outside_the_run_window(self):
+        # The check runs before any write, so --validate reports it too. The
+        # payload omits recorded_at: a supplied one earlier than the marker is
+        # a recorded_at refusal of its own.
+        payload = self.payload()
+        del payload["recorded_at"]
+        opened = self.open_after_the_observation(payload)
+        before = self._table_snapshot()
+        result = self.run_cli(payload, "--validate")
+        self.assertEqual(2, result.returncode, result.stdout)
+        body = json.loads(result.stderr)
+        self.assertEqual("NOT_SAVED", body["status"])
+        self.assertEqual("OPEN", body["run_state"])
+        self.assertEqual(PROVENANCE, body["reason_code"])
+        self.assertIn(f"opened_at {opened['opened_at']}", body["reason"])
+        self.assertIn("the current time", body["reason"])
+        self.assertEqual(before, self._table_snapshot())
+        self.assertEqual(
+            [opened["run_id"]],
+            [item["run_id"] for item in list_open_discoveries(self.root)],
+        )
 
     def test_cli_reports_a_locked_operational_memory(self):
         # A concurrent CaravelaWeb process holding the database used to give
