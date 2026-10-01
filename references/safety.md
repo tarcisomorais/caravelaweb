@@ -20,7 +20,7 @@ AUTHENTICATE            log in / restore session — not equivalent to account m
 ACCOUNT_MUTATION        change profile/password/settings, create/delete account — requires explicit authorization; never performed just to understand a site
 TRANSACTION             purchase, payment, bid, financial transfer — high consequence; never inferred from broader navigation authority
 EXTERNAL_COMMUNICATION  send message/proposal/comment/ticket — drafting content is not the same as sending it; preserve that distinction
-CONSENT                 accept terms/policies/legal declarations — an "Accept" button existing is not authorization
+CONSENT                 accept terms/policies/legal declarations; any control on cookie and consent banners (accept, reject, settings, dismiss) — an "Accept" button existing is not authorization
 ```
 
 Operational knowledge and execution authority are separate dimensions: a profile saying `application_submission: OPERATIONAL` means "CaravelaWeb knows how this works," never "CaravelaWeb may use it now."
@@ -64,8 +64,10 @@ The model never chooses or changes identity. It adds no `User-Agent` header
 `--user-agent` or `AGENT_BROWSER_USER_AGENT`, no stealth launch argument such
 as `--disable-blink-features=AutomationControlled`, no `--headed` to avoid
 headless detection, and no `--proxy`, `--profile`, or `--auto-connect` to
-borrow another identity. A caller-supplied identity (an acquisition policy in
-the task) is used from the first request of the run and never changed.
+borrow another identity. Blanking is setting: `curl -A ''` or an empty
+`User-Agent` header chooses an identity as surely as a spoofed one.
+A caller-supplied identity (an acquisition policy in the task) is
+used from the first request of the run and never changed.
 
 Moving along the `DIRECT_READ -> LIGHTPANDA -> CHROME` ladder, each transport
 with its own default identity, is not an identity change. After a block,
@@ -98,7 +100,7 @@ Don't automatically follow external links (ads, user-posted contact info, unrela
 
 ## Target Blocking
 
-CAPTCHA, Cloudflare-style challenges, rate limits, regional gates: record as a target constraint and stop (with learning disabled, report it; nothing is recorded). Do not add stealth, evasion, or anti-bot bypass behavior as routine behavior — that decision sits outside this skill. A blocked capability may simply remain unsupported; that's an acceptable, honest outcome, not a failure to fix.
+Rate limits and regional gates at any tier, and CAPTCHA or Cloudflare-style challenges still standing on the last available tier (SKILL.md step 5): record as a target constraint and stop (with learning disabled, report it; nothing is recorded). Do not add stealth, evasion, or anti-bot bypass behavior as routine behavior — that decision sits outside this skill. A blocked capability may simply remain unsupported; that's an acceptable, honest outcome, not a failure to fix.
 
 Routing around the block is the same decision as bypassing it. Reaching the content through a web-search tool, an external index, a cached or mirrored copy, or a third-party republisher does not observe the target and is not a CaravelaWeb transport. Report the block instead, and keep the reported claim inside what the reached surfaces actually showed.
 

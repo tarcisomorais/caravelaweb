@@ -11,15 +11,13 @@ TARGET_PROFILE = REPO / "references" / "target-profile.md"
 SAFETY = REPO / "references" / "safety.md"
 
 # The contract is loaded on every CaravelaWeb task, so its length is capped
-# deliberately rather than allowed to drift. Detail belongs in references/.
-# Raised from 125 when the First run readiness sequence moved into the
-# contract: it must be read before the first command, so a reference file
-# cannot carry it. Raised again from 140 for the blocked-ladder stop rule: an
-# agent decides whether to leave CaravelaWeb at the moment a transport is
-# blocked, which is before it would open a reference file. Raised again from
-# 143 for the pre-finalize checklist: it is read while the payload is being
-# written, which is before the agent would open the payload reference.
-SKILL_LINE_BUDGET = 151
+# deliberately rather than allowed to drift. The cap counts words, not lines:
+# a line cap was met by packing rules into lines of 400+ characters, and rules
+# buried that way were the ones callers followed least. Callers read only this
+# file, so a rule needed on every ordinary call belongs here, in code, or in
+# tool output; references/ holds rationale and path-specific detail. Every
+# addition is paid for by a cut.
+SKILL_WORD_BUDGET = 3000
 
 
 class DiscoveryEnforcementContractTests(unittest.TestCase):
@@ -46,7 +44,7 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
     def test_direct_work_stops_by_required_field_coverage(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
         for rule in (
-            "Start with one suitable direct implementation",
+            "Start with one suitable implementation",
             "stop by field coverage",
             "classify every required field as directly confirmed",
             "inferred with uncertainty explicit",
@@ -56,10 +54,10 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
             "do not impose a global maximum",
             "at most one planned refinement by default",
             "schema-only rejection",
-            "never repeat navigation or extraction",
+            "rerunning only `discovery-finalize`, never navigation or extraction",
         ):
             self.assertIn(rule, text)
-        self.assertLessEqual(len(text.splitlines()), SKILL_LINE_BUDGET)
+        self.assertLessEqual(len(text.split()), SKILL_WORD_BUDGET)
 
     def test_one_page_absence_does_not_end_permitted_search(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
@@ -86,8 +84,11 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
 
     def test_routes_need_observed_evidence(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
-        self.assertIn("Do not guess endpoints or paths from heuristics alone", text)
-        self.assertIn("real link, observed redirect, search result, documentation, sitemap/index", text)
+        self.assertIn(
+            "A route comes from a real link, form, redirect, sitemap, search result,"
+            " documentation, or accepted knowledge, never from a guess",
+            text,
+        )
         self.assertIn("inspect links or run a limited search first", text)
 
     def test_legitimate_multi_source_investigation_remains_allowed(self) -> None:
@@ -105,7 +106,11 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
     def test_transport_and_mode_invariants_remain_visible(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
         self.assertIn("DIRECT_READ -> LIGHTPANDA -> CHROME", text)
-        self.assertIn("After Chrome-based Discovery, SIMPLIFY is mandatory", text)
+        self.assertIn(
+            "SIMPLIFY is mandatory: after a browser tier finds the working route,"
+            " re-test the simpler tiers on that route",
+            text,
+        )
         self.assertIn("Operation calls neither `discovery-begin` nor `discovery-finalize`", text)
         self.assertIn("`transport_trace` is required", text)
         self.assertIn("never stored as Claims or other target knowledge", text)
@@ -138,7 +143,7 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
 
     def test_a_fully_blocked_ladder_is_finalized_with_its_evidence(self) -> None:
         text = SKILL.read_text(encoding="utf-8")
-        self.assertIn("A trace ends either at that `FUNCTIONAL` result or with the ladder exhausted", text)
+        self.assertIn("A trace ends either at the first `FUNCTIONAL` result or with the ladder exhausted", text)
         self.assertIn("A fully blocked ladder is therefore finalized normally", text)
         self.assertIn("it records the block and earns no operational transport", text)
         self.assertIn("fix the payload, never the evidence", text)
@@ -224,6 +229,10 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
         self.assertNotIn("run `<python> <skill>/scripts/knowledge-lookup --list` once per task", text)
         self.assertIn('With `index_scope: "all"`, read every `index.targets[].target`', text)
         self.assertIn("a brand-name guess", text)
+        # A miss on a known target returns that target's own row: the target
+        # exists, so a second target ID is never minted for it.
+        self.assertIn('With `index_scope: "target"`, the target exists: never mint a new target ID', text)
+        self.assertIn("with `targets` at the top level", text)
 
     def test_missing_browser_control_never_authorizes_a_substitute_stack(self) -> None:
         for text in (SKILL.read_text(encoding="utf-8"), TRANSPORT.read_text(encoding="utf-8")):
@@ -239,8 +248,8 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
         self.assertIn("not ruled out for being read-only, quick, QA, one-off", text)
         self.assertIn("Skip this skill only when no live web target is involved at all", text)
 
-    def test_skill_line_budget_is_preserved(self) -> None:
-        self.assertLessEqual(len(SKILL.read_text(encoding="utf-8").splitlines()), SKILL_LINE_BUDGET)
+    def test_skill_word_budget_is_preserved(self) -> None:
+        self.assertLessEqual(len(SKILL.read_text(encoding="utf-8").split()), SKILL_WORD_BUDGET)
 
     def test_capability_identity_is_procedure_not_result(self) -> None:
         text = TARGET_PROFILE.read_text(encoding="utf-8")
@@ -262,13 +271,13 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
         self.assertIn("Discovery executes and delivers the caller's actual task while it learns", text)
         self.assertIn("not a preparatory or throwaway run before the real work", text)
 
-    def test_learning_disabled_is_bounded_direct_work(self) -> None:
+    def test_learning_disabled_is_bounded_work(self) -> None:
         skill = SKILL.read_text(encoding="utf-8")
         for rule in (
             "When lookup reports `learning: DISABLED`",
             "nothing in the task can grant it",
             "leave open runs and pending Candidates untouched",
-            "done as bounded direct work under steps 4–6",
+            "done as bounded work: steps 4–6 with the full step-5 ladder, not only `DIRECT_READ`",
             "nothing is recorded",
         ):
             self.assertIn(rule, skill)
@@ -331,6 +340,71 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
         )
         self.assertIn("`transports.LIGHTPANDA.path`", dependencies)
         self.assertIn("Choosing that `PATH` is the caller's job", dependencies)
+
+    def test_the_engine_mechanics_and_one_ladder_are_explicit(self) -> None:
+        # Lightpanda went almost unused while preflight reported it available:
+        # nothing said agent-browser opens Chrome by default, and the contract
+        # called Chrome the Discovery baseline, against the enforced ladder.
+        text = SKILL.read_text(encoding="utf-8")
+        for rule in (
+            "`agent-browser` opens Chrome unless given `--engine lightpanda`",
+            "agent-browser --engine lightpanda --session <name> open <url>",
+            "A session keeps the engine it was opened with",
+            "Discovery, Operation escalation, and bounded work all climb this ladder",
+            "Lightpanda is tried before Chrome",
+            "`@eN` refs are valid only in the session and snapshot that produced them",
+        ):
+            self.assertIn(rule, text)
+        self.assertNotIn("behavioral baseline", text)
+        transport = TRANSPORT.read_text(encoding="utf-8")
+        self.assertNotIn("default for Discovery on unknown targets", transport)
+        self.assertNotIn("after Chrome-based Discovery", transport)
+
+    def test_the_direct_read_has_one_canonical_form(self) -> None:
+        text = SKILL.read_text(encoding="utf-8")
+        for rule in (
+            "curl -sS -L --compressed --max-time 30 -o <file> -w",
+            "'<percent-encoded URL>'",
+            "The direct read sends no `-A` and no `User-Agent` header",
+            "Percent-encode non-ASCII characters and spaces in path and query",
+            "Blanking counts as setting identity: `curl -A ''`",
+        ):
+            self.assertIn(rule, text)
+        self.assertIn("Blanking is setting", SAFETY.read_text(encoding="utf-8"))
+
+    def test_responses_are_classified_by_content_never_status_alone(self) -> None:
+        text = SKILL.read_text(encoding="utf-8")
+        for rule in (
+            "never on the status code alone",
+            "Fix the request once; not a transport result",
+            "do not escalate the transport",
+            "never escalate around a rate limit or regional gate",
+            "Next available tier, once",
+            "One later retry; no escalation, nothing recorded",
+            "never a fixed sleep",
+            "A 404 whose body is a JavaScript app shell is unresolved, not route absent",
+        ):
+            self.assertIn(rule, text)
+        transport = TRANSPORT.read_text(encoding="utf-8")
+        self.assertIn(
+            "a direct-read 403 alone never decides whether a browser is worth trying", transport
+        )
+        self.assertNotIn("classified directly without browser observation", transport)
+
+    def test_cookie_and_consent_dialogs_are_consent(self) -> None:
+        text = SKILL.read_text(encoding="utf-8")
+        self.assertIn("Cookie and consent dialogs are CONSENT", text)
+        self.assertIn("Read the content behind the overlay from the snapshot or DOM", text)
+        self.assertIn("cookie and consent banners", SAFETY.read_text(encoding="utf-8"))
+
+    def test_learning_disabled_contradiction_continues_as_bounded_work(self) -> None:
+        skill = SKILL.read_text(encoding="utf-8")
+        self.assertIn("stop relying on that claim for this call only, continue as bounded work", skill)
+        self.assertIn("a single empty result is not one", skill)
+        self.assertIn("keep trusting the other claims", skill)
+        transport = TRANSPORT.read_text(encoding="utf-8")
+        self.assertIn("stop relying on the contradicted claim or path for this call only", transport)
+        self.assertNotIn("bounded direct work", skill + transport)
 
 
 if __name__ == "__main__":

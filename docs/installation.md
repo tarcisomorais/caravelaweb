@@ -238,7 +238,7 @@ With it set, no public command writes to the Knowledge Root.
 Operational Memory write transaction or database creation. `preflight` and
 `knowledge-lookup` keep working and report `READY` when the installation is
 ready, with `"learning": "DISABLED"` beside it; the executor then does the
-task as bounded direct work with no Discovery. Set up the Knowledge Root
+task as bounded work with no Discovery. Set up the Knowledge Root
 before such calls: root creation is refused too.
 
 The guarantee covers every public CaravelaWeb command. A model with shell

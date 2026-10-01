@@ -8,7 +8,7 @@
 
 Discovery does not expand authority — see `safety.md`. When a question can't be answered within current authority, record it `UNKNOWN` and stop; don't cross the boundary to complete the profile.
 
-Discovery executes and delivers the caller's actual task while it learns — it is not a preparatory or throwaway run before the real work. With learning disabled (`learning: DISABLED` in lookup), no Discovery happens: the task is delivered as bounded direct work and nothing is learned; see SKILL.md step 3.
+Discovery executes and delivers the caller's actual task while it learns — it is not a preparatory or throwaway run before the real work. With learning disabled (`learning: DISABLED` in lookup), no Discovery happens: the task is delivered as bounded work -- the same transport ladder, with every write withheld -- and nothing is learned; see SKILL.md step 3.
 
 After caller authorization and before the first target read, call
 `discovery-begin` for the selected target and capability. Its `run_id` follows
@@ -21,7 +21,7 @@ knowledge, and concurrent Discoveries have separate run IDs.
 1. **IDENTIFY** — canonical origin, actual entrypoint, requested capability, initial access state, immediate blockers. Don't explore unrelated sections yet.
 2. **INSPECT** — the smallest surface needed for the capability (search entrypoint + query behavior + result structure for a search capability; direct-URL behavior + key fields for a detail capability). Prefer semantics (route, role, label, heading, URL, field meaning) over deep CSS selectors or DOM position.
 3. **MAP** — describe how the capability works, small and declarative (`GET /projects?q={term}` → listing → `/project/{slug}` detail → `?page={n}` pagination), never an imperative click-script. Map only what the requested capability needs — not unrelated billing/messaging/settings pages.
-4. **SIMPLIFY (mandatory)** — after Chrome-based Discovery, actively test: does DIRECT_READ satisfy the capability? If not, does LIGHTPANDA? Only fall back to "Chrome remains necessary" once both are checked and fail. Don't force simplification — a "simpler" path must actually preserve the required semantics, not just return 200 once.
+4. **SIMPLIFY (mandatory)** — Discovery climbs the same `DIRECT_READ -> LIGHTPANDA -> CHROME` ladder as every other mode; it has no Chrome baseline. A browser tier often finds the working route (a real link, an API call, a rendered-page URL) that the first direct read lacked. Once one does, re-test the simpler tiers on that route: does DIRECT_READ satisfy the capability there? If not, and Chrome found it, does LIGHTPANDA? Record the simplest tier that preserves the capability. Chrome remains a valid permanent choice when both simpler tiers are checked and fail. Don't force simplification — a "simpler" path must actually preserve the required semantics, not just return 200 once.
 5. **VALIDATE** — confirm the discovered path is strong enough to become reusable knowledge: entrypoint works, query produces expected results, required fields present, completion condition observable, no exploratory recovery was needed, caller authority preserved. Proportional to capability/consequence — not exhaustive whole-site testing.
 6. **FINALIZE (mandatory)** — before declaring the Discovery complete, call `<python> <skill>/scripts/discovery-finalize` with reusable operational observations, evidence, and the `run_id` returned by begin. Report only `SAVED`, `ALREADY_EXISTS`, or `NOT_SAVED`; the response's `run_state` says whether that run closed. `SAVED`, `ALREADY_EXISTS`, and a terminal `NOT_SAVED` close it; `TRANSPORT_POLICY_UNPROVEN`, `FAILURE_UNCLASSIFIED`, and payload or infrastructure errors leave it open for a corrected resubmission under the same `run_id`. `--validate` predicts the result without persisting anything. Successful knowledge is available to the next lookup immediately. Do not send task results, raw logs, or HTML to Operational Memory. `references/discovery-payload-examples.md` has complete, tested payloads to copy.
 
@@ -79,7 +79,7 @@ claim nothing about one that does not.
 
 - **DIRECT_READ** — preferred whenever readable HTML/Markdown/`llms.txt`/a stable endpoint/an appropriate API satisfies the capability without JS execution. Lowest overhead, easiest reproducibility. Not used merely because it's possible — only when it preserves the required information. A successful HTTP response alone doesn't validate it.
 - **LIGHTPANDA** — preferred once validated for the specific required capability. Good fits: public search/listings/detail pages, predictable navigation, DOM extraction. Never assumed equivalent to Chrome — a target can be Lightpanda-operational for search/listing/detail while still needing Chrome for login/upload/complex account flows.
-- **CHROME** — default for Discovery on unknown targets (avoids confusing "site behavior" with "engine limitation"), authenticated/persistent-profile workflows, proven Lightpanda incompatibility. A valid *permanent* choice, not an architecture failure — the goal is avoiding unnecessary Chrome dependence, not eliminating Chrome altogether.
+- **CHROME** — the last tier, reached only after the available simpler tiers fail for the capability; common fits are authenticated/persistent-profile workflows and proven Lightpanda incompatibility. Discovery reaches it through the same ladder, never as a starting point. A valid *permanent* choice, not an architecture failure — the goal is avoiding unnecessary Chrome dependence, not eliminating Chrome altogether.
 
 ### Escalation / de-escalation
 
@@ -114,25 +114,34 @@ UNKNOWN               → stop escalating; preserve evidence; request bounded Di
 
 Lifecycle mutation follows the *cause*, not the symptom — e.g. a Lightpanda 404 is not automatically `TARGET_CHANGED` until classified.
 
-With learning disabled, every action above that records, degrades, or enters Discovery (`SITE_BLOCKING`, `TARGET_CHANGED`, `PROFILE_INCORRECT`, `UNKNOWN`) becomes: report the class and stop. Nothing is written, and each later blocked acquisition of that capability walks the bounded ladder again — the accepted cost of this mode.
+With learning disabled, every action above that records, degrades, or enters Discovery changes, and nothing is written:
+
+- For `SITE_BLOCKING` and `UNKNOWN`, the action becomes: report the class and stop.
+- For `PROFILE_INCORRECT` and `TARGET_CHANGED`, it becomes: report the class, stop relying on the contradicted claim or path for this call only, and continue as bounded work (SKILL.md step 3). Only a direct observation in this call that is incompatible with a specific accepted claim counts; a transient failure, a block, or a single empty result does not, and the doubt never extends to other claims.
+
+Each later blocked acquisition of that capability walks the bounded ladder again — the accepted cost of this mode.
 
 ### Bot-protection-flavored 403 handling
 
-A DIRECT_READ request may return HTTP 403 with a bot-protection-looking page (e.g. Cloudflare "Just a moment..."). This response is **evidence of possible bot protection, not yet a final failure classification** — the ambiguity is real: the same 403 page can precede either an auto-resolving JavaScript challenge or an interactive CAPTCHA / Turnstile / human-verification gate.
+The response table in SKILL.md step 5 is authoritative; this section gives its
+rationale and must never be read as an exception to it.
+
+A DIRECT_READ request may return HTTP 403 with a bot-protection-looking page (e.g. Cloudflare "Just a moment..."). This response is **evidence of possible bot protection, not yet a final failure classification** — the ambiguity is real: the same 403 page can precede either an auto-resolving JavaScript challenge or an interactive CAPTCHA / Turnstile / human-verification gate. A direct read cannot tell which, so a direct-read 403 alone never decides whether a browser is worth trying.
 
 Decision rule when authority permits ordinary browser observation:
 
-1. **Observe once** through an appropriate browser transport (Lightpanda or Chrome, per the transport hierarchy) and classify based on the actual outcome.
-2. If the browser passes transparently and the capability works → classify based on the **capability outcome** (e.g. `ENGINE_INCOMPATIBILITY` for DIRECT_READ if the content is JS-rendered, not `SITE_BLOCKING`).
-3. If an interactive CAPTCHA / Turnstile / human-verification challenge appears → classify `SITE_BLOCKING`, record the evidence, and stop.
-4. **Never interact with or bypass human-verification controls** merely to complete Discovery — that stays outside this skill regardless of how convenient it would be.
-5. **Stopping means stopping.** Once the ladder is exhausted, do not continue the same investigation through a web-search tool, an external index, a cached or mirrored copy, or a third-party republisher. None of them is a transport in this hierarchy, and none observes the target. Report the block. A limited search may still locate a route to try through the hierarchy; the search output is a lead, never evidence about the target.
+1. **Read the body first.** A login, paywall, or consent-or-pay wall is `AUTH_REQUIRED` or `AUTHORITY_BOUNDARY` (stop unless the caller authorized crossing it), and a rate limit (429, `Retry-After`, "too many requests") or a regional gate (451, a regional notice) is `SITE_BLOCKING` at any tier: a browser cannot change either, so stop. Any other challenge page, block page, JavaScript shell, or 401/403/405 is unresolved at this tier.
+2. **Observe once at the next available tier** — Lightpanda when preflight reports it `AVAILABLE`, then Chrome — and classify based on the actual outcome. "Once" is one observation with a bounded wait on the completion condition or for the challenge to clear, never a fixed sleep.
+3. If the browser passes transparently and the capability works → classify based on the **capability outcome** (e.g. `ENGINE_INCOMPATIBILITY` for DIRECT_READ if the content is JS-rendered, not `SITE_BLOCKING`).
+4. If an interactive CAPTCHA / Turnstile / human-verification challenge appears in Lightpanda, Chrome still gets one observation -- observation, not interaction -- because a challenge shown to one engine may not be shown to another. If it appears on the last available tier → classify `SITE_BLOCKING`, record the evidence, and stop.
+5. **Never interact with or bypass human-verification controls** merely to complete Discovery — that stays outside this skill regardless of how convenient it would be.
+6. **Stopping means stopping.** Once the ladder is exhausted, do not continue the same investigation through a web-search tool, an external index, a cached or mirrored copy, or a third-party republisher. None of them is a transport in this hierarchy, and none observes the target. Report the block. A limited search may still locate a route to try through the hierarchy; the search output is a lead, never evidence about the target.
 
-This is not a generic "every 403 requires Chrome" rule. Classification remains evidence-driven and capability-scoped — a 403 from a genuinely blocked endpoint (rate limit, geo-restriction, permanent ban) should be classified directly without browser observation. The browser observation step applies specifically when the 403 page content suggests an auto-resolvable challenge rather than a hard block.
+This is not a generic "every 403 requires Chrome" rule. Classification remains evidence-driven and capability-scoped: an unresolved 403 earns one observation at the next available tier, which is Lightpanda before Chrome, while a rate limit or regional gate stops at the tier that showed it, because escalating around either is circumvention.
 
 ## Upstream Dependency Boundary
 
-CaravelaWeb selects engines and interprets results; it does not implement them. `agent-browser` is the browser-operation interface; Lightpanda and Chrome are engines it spawns (`--engine lightpanda`, or Chrome by default). CaravelaWeb does not fork, vendor, or duplicate their command references — use current upstream docs for exact invocation syntax. Every compatibility claim should record the exact versions actually observed (agent-browser / engine versions), not versions inferred from documentation.
+CaravelaWeb selects engines and interprets results; it does not implement them. `agent-browser` is the browser-operation interface; Lightpanda and Chrome are engines it spawns (`--engine lightpanda`, or Chrome by default). CaravelaWeb does not fork, vendor, or duplicate their command references — beyond the canonical forms in SKILL.md step 5, use current upstream docs for exact invocation syntax. Every compatibility claim should record the exact versions actually observed (agent-browser / engine versions), not versions inferred from documentation.
 
 `agent-browser` is a shell CLI, not a registered agent tool/MCP entry. Never conclude "Chrome/Lightpanda unavailable" from an empty tool/MCP registry search — that only checks whether the host agent has a native browser tool, not whether the runtime dependency exists. Check the shell directly (e.g. `agent-browser --version`) before recording a browser transport as unavailable.
 
@@ -154,6 +163,7 @@ An `agent-browser` session holds navigation state, open pages, cookies, and othe
 
 - **Concurrent or unrelated workflows must use distinct sessions.** Different targets, different capabilities, or parallel agent investigations each get their own `--session <name>`. Do not share a session across independent Discoveries or Operations merely for convenience.
 - **A single bounded workflow may intentionally reuse its own session** when continuity is part of that workflow. Example: a multi-step authenticated flow on the same target where cookies and navigation state must persist across steps. The session name is consistent across the workflow's steps; it is not shared with other workflows.
+- **Each engine gets its own session.** A session keeps the engine it was opened with, so a workflow that moves from Lightpanda to Chrome opens a second, separately named session rather than reusing the first. Element refs (`@eN`) are valid only in the session and snapshot that produced them.
 
 ### DIRECT_READ is unaffected
 

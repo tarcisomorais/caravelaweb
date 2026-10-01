@@ -26,6 +26,34 @@ All notable changes to CaravelaWeb will be documented in this file.
   then can a target ID be minted. Every `knowledge-lookup` reply now
   prints `status` first, then `target` and `capability`, then the other
   keys in sorted order, so a reply cut short still shows its status.
+- SKILL.md step 5 now states the ladder's mechanics: `agent-browser`
+  opens Chrome unless given `--engine lightpanda`, Lightpanda is tried
+  before Chrome whenever preflight reports it `AVAILABLE` in Discovery,
+  Operation escalation and bounded work alike, and each engine gets its
+  own session. The wording that made Chrome the Discovery baseline is gone
+  from SKILL.md and `references/transport-and-modes.md`; SIMPLIFY now means
+  re-testing the simpler tiers on the route a browser tier found.
+- SKILL.md step 5 gives one canonical direct read (`curl` with no `-A` and
+  no `User-Agent` header, on a percent-encoded URL) and a
+  response-to-action table: classify by the page's content, never by the
+  status code alone; a malformed request is fixed once; a 404 is a route
+  problem, not a reason to open a browser; a login, paywall or
+  consent-or-pay wall stops; a rate limit or regional gate stops at any
+  tier; an unresolved challenge, block page or JavaScript shell takes the
+  next available tier once, with a bounded wait instead of a fixed sleep;
+  verification is never touched, and stops the ladder on its last tier.
+- With learning disabled, the task is "bounded work" (it was "bounded
+  direct work"), which climbs the full ladder. A direct observation that
+  contradicts a specific accepted claim is reported as `PROFILE_INCORRECT`
+  (or `TARGET_CHANGED`), and the call stops relying on that claim for
+  itself only and continues; nothing is written. SKILL.md and
+  `references/transport-and-modes.md` previously disagreed on this.
+- Cookie and consent dialogs are CONSENT: their accept, reject, settings
+  and dismiss controls are never clicked without caller authority, and the
+  content behind the overlay is read instead. Blanking the User-Agent
+  (`curl -A ''`) counts as setting identity.
+- The SKILL.md size test is a 3,000-word budget instead of a 151-line
+  budget; duplicates in step 7 were cut to pay for the additions.
 
 ## 0.3.0 - 2026-09-28
 

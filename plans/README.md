@@ -165,6 +165,35 @@ Checked read-only on a copy of `~/.local/share/caravelaweb/knowledge-root`:
   Bash commands in `disperta-scratch/slice3/{w2,v2w,r3,v3}/raw/*.jsonl`.
   Name the engine flag and Chrome-as-default in step 5 within the
   151-line budget, then re-measure in the same call shape. Effort S.
+  ABSORBED by plan 011 change 3 (the budget became 3,000 words).
+- **CORRECTNESS-07** `transport_policy.next_transport` halts when preflight
+  reports Lightpanda `UNAVAILABLE` (agent-browser present, the `lightpanda`
+  binary missing) while Chrome is `AVAILABLE`: only `PLATFORM_UNSUPPORTED`
+  lets the ladder pass to Chrome, so such a machine can never finalize a
+  Chrome-backed Discovery, and SKILL.md says nothing about the case. Found
+  while writing plan 011's contract; pre-existing and out of its scope.
+  Needs a contract decision (treat UNAVAILABLE like PLATFORM_UNSUPPORTED,
+  or report incomplete coverage and stop). Effort S.
+- **CORRECTNESS-08** A Discovery that meets a rate limit, regional gate,
+  or login/consent-or-pay wall at Lightpanda cannot finalize. SKILL.md step
+  5 says to stop at any tier (escalating around a rate limit is
+  circumvention), but the finalizer treats an untried available Chrome as
+  an unproven ladder: DIRECT_READ INSUFFICIENT then LIGHTPANDA FAILED with
+  an `OBSERVED` `SITE_BLOCKING` (429) and Chrome `AVAILABLE` returns
+  `TRANSPORT_POLICY_UNPROVEN` and the run stays open; the only ways to
+  close it are forbidden. At DIRECT_READ the same stop saves. Found by plan
+  011's review; the tension predates it, the explicit table sharpens it.
+  Needs a contract decision: let the finalizer end the ladder at an
+  observed rate-limit, regional or authority stop, or say in SKILL.md what
+  such a run finalizes. Effort S–M.
+- **CORRECTNESS-09** A SIMPLIFY result cannot be recorded in the Discovery
+  that found it. After DIRECT_READ FAILED on route A and Lightpanda
+  FUNCTIONAL, a DIRECT_READ FUNCTIONAL on route B is either a
+  `CONFLICT_OR_AMBIGUITY` (terminal `NOT_SAVED`) or, appended to the trace,
+  a `TRANSPORT_TRACE` refusal ("each transport only once"). Plan 011 scoped
+  SIMPLIFY to Discovery but did not change this. Needs a decision on the
+  finalize shape for a SIMPLIFY result (a second run, or a trace that may
+  revisit a tier on a new route), with a payload example. Effort M.
 
 ## Findings considered and rejected
 

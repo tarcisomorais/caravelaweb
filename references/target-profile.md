@@ -122,6 +122,13 @@ the installation and the exact index, so the executor needs no separate
   `unavailable` carries no `index`: no index is available on this path (the
   diagnostic legacy path, or an index read that failed).
 
+The scope follows the target reference, never the capability. A reference
+that resolves gets scope `target` whether the capability was found or not, so
+a guessed capability ID still shows that target's existing capability keys;
+only a reference that resolves to no target gets scope `all`. Every reply
+prints `status` first, then `target` and `capability`, so a reply cut short
+still shows its answer.
+
 `--list` and a bare `--target` keep their existing shape. `--list` returns an
 exact index of every target with its hosts and capability keys, with no
 `--target`, and is available on its own for browsing the index.
@@ -147,7 +154,10 @@ semantic, so a later run with a new ID may enrich an earlier pending Candidate.
 Operation creates no marker. `knowledge-lookup` lists pending Candidates under
 `pending_candidates`, beside accepted `current` knowledge, never merged into
 it; a `CONFLICT_OR_AMBIGUITY` refusal names the accepted or pending Claims
-that block the write.
+that block the write. Re-running the same pending Claim set without new
+material returns `NOT_SAVED`; a later run that adds the missing Validation,
+evidence, contradiction, or transport-trace material completes that exact
+Candidate, which is then promoted atomically.
 
 Local Operational Memory is writable by the installation's normal policy, unless the caller disables learning for the call (`CARAVELAWEB_LEARNING=disabled`), and is separate from web-action authority. Saving local knowledge never authorizes source-control publication, project-file changes, or external state changes. A successful, directly observed Discovery is available to the next lookup immediately; ambiguous or invalid knowledge is not used operationally. Diagnostic compatibility and repair procedures are not executor input.
 
