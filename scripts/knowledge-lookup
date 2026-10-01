@@ -19,20 +19,40 @@ from readiness import readiness_status
 
 configure_utf8_stdio()
 
+LEADING_KEYS = ("status", "target", "capability")
+# The bulky values go last, so a cut reply still shows every small field the
+# executor branches on (`index_scope`, `learning`, `readiness`, ...).
+TRAILING_KEYS = ("index", "operational_context", "markdown_projection")
+
 def emit(status: str, **fields: object) -> None:
     # A caller that disabled learning is told so in the one call the executor
     # always makes; learning-enabled output stays exactly as it was.
     if learning_mode() == "DISABLED":
         fields["learning"] = "DISABLED"
-    print(json.dumps({"status": status, **fields}, ensure_ascii=False, sort_keys=True))
+    # The answer leads, then the reference it answers, then the small fields
+    # in sorted order, then the bulky ones, so a reply cut short still shows
+    # its status and scope. Every value keeps its own sorted keys, so the
+    # bytes stay deterministic.
+    payload = {"status": status, **fields}
+    keys = [key for key in LEADING_KEYS if key in payload]
+    keys += sorted(key for key in payload if key not in LEADING_KEYS + TRAILING_KEYS)
+    keys += [key for key in TRAILING_KEYS if key in payload]
+    members = (
+        f"{json.dumps(key)}: {json.dumps(payload[key], ensure_ascii=False, sort_keys=True)}"
+        for key in keys
+    )
+    print("{" + ", ".join(members) + "}")
 
 def index_fields(boundary: KnowledgeLookupBoundary, target_id: str | None) -> dict[str, object]:
     """Index view for a combined call.
 
-    A resolved target gets its own `--list` row. A miss gets the whole
-    `--list` payload, so the executor sees every exact target ID before it
-    mints one and cannot create a duplicate by naming. The legacy path has
-    no index at all, and says so rather than failing the lookup.
+    A resolved target gets its own `--list` row, whether the capability hit
+    or missed: the executor already holds the canonical ID, and the row
+    shows which capability keys that target has. Only an unresolved
+    reference gets the whole `--list` payload, because only then can the
+    executor mint a target ID, and it must see every exact ID first so it
+    cannot create a duplicate by naming. The legacy path has no index at
+    all, and says so rather than failing the lookup.
     """
     try:
         rows = boundary.list_index(target_id=target_id)
@@ -89,25 +109,29 @@ def main() -> int:
     if result.pending_candidates:
         visibility["pending_candidates"] = result.pending_candidates
 
-    def combined_fields(resolved: bool) -> dict[str, object]:
-        """Readiness on every combined call; the index where one exists."""
+    def combined_fields() -> dict[str, object]:
+        """Readiness on every combined call; the index where one exists.
+
+        The index scope follows the target reference, never the capability:
+        a miss on a resolved target still gets only that target's row.
+        """
         if not combined:
             return {}
         if result.source == "legacy":
             return {**readiness, "index_scope": "unavailable"}
-        return {**readiness, **index_fields(boundary, result.resolved_target if resolved else None)}
+        return {**readiness, **index_fields(boundary, result.resolved_target)}
 
     if result.source == "legacy":
         if result.profile_path is None:
-            emit("not_found", source="legacy", target=args.target, **visibility, **combined_fields(False))
+            emit("not_found", source="legacy", target=args.target, **visibility, **combined_fields())
             return 0
-        emit("found", source="legacy", profile=result.profile_path, target=args.target, **visibility, **combined_fields(True))
+        emit("found", source="legacy", profile=result.profile_path, target=args.target, **visibility, **combined_fields())
         return 0
     if result.operational_context is None:
-        emit("not_found", source="operational-memory", target=args.target, **visibility, **combined_fields(False))
+        emit("not_found", source="operational-memory", target=args.target, **visibility, **combined_fields())
         return 0
     if result.capability:
-        emit("found", source="operational-memory", target=args.target, capability=result.capability, operational_context=result.operational_context, markdown_projection=result.markdown_projection, lifecycle=result.operational_context["lifecycle"], **visibility, **combined_fields(True))
+        emit("found", source="operational-memory", target=args.target, capability=result.capability, operational_context=result.operational_context, markdown_projection=result.markdown_projection, lifecycle=result.operational_context["lifecycle"], **visibility, **combined_fields())
     else:
         emit("found", source="operational-memory", target=args.target, capability=result.capability, operational_context=result.operational_context, markdown_projection=result.markdown_projection, **visibility)
     return 0

@@ -2,6 +2,19 @@
 
 All notable changes to CaravelaWeb will be documented in this file.
 
+## Unreleased
+
+### Changed
+
+- A `knowledge-lookup` miss on a target that resolved (a known URL or
+  hostname with an unknown capability ID) now returns
+  `"index_scope": "target"` with that target's own index row, the
+  capability IDs it already has, instead of the whole index. Only an
+  unresolved reference still gets `"index_scope": "all"`, because only
+  then can a target ID be minted. Every `knowledge-lookup` reply now
+  prints `status` first, then `target` and `capability`, then the other
+  keys in sorted order, so a reply cut short still shows its status.
+
 ## 0.3.0 - 2026-09-28
 
 Caller guarantees for bounded acquisition. A caller can now forbid every

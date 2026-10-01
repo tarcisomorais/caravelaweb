@@ -471,12 +471,33 @@ class CombinedLookupIndexTests(unittest.TestCase):
         self.assertEqual(0, finalize.returncode, finalize.stderr)
         self.assertEqual("SAVED", json.loads(finalize.stdout)["status"])
 
+    def _seed_pending(self, target: str, capability: str) -> None:
+        """A Candidate proposed for ``target`` and never accepted."""
+        target_id, capability_id = f"tgt:{target}", f"cap:{target}:{capability}"
+        claim_id = f"clm:{target}:{capability}:transport:direct"
+        db = self.root / ".caravelaweb/operational_memory.db"
+        with SQLiteOperationalMemory(db, knowledge_root=self.root) as memory:
+            with memory.write_transaction() as writer:
+                writer.capability({"id": capability_id, "target_id": target_id, "key": capability})
+                writer.claim({
+                    "id": claim_id, "target_id": target_id, "capability_id": capability_id,
+                    "family": "transport", "epistemic": "OBSERVED",
+                    "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"},
+                    "recorded_at": RECORDED,
+                })
+                writer.proposal({
+                    "id": f"prop:{target}:{capability}:pending", "target_id": target_id,
+                    "capability_id": capability_id, "recorded_at": RECORDED,
+                    "claim_ids": [claim_id],
+                })
+
+    def _raw(self, *arguments: str) -> str:
+        result = run(LOOKUP, "--knowledge-root", str(self.root), *arguments, env=self.env)
+        self.assertEqual(0, result.returncode, result.stderr)
+        return result.stdout
+
     def _lookup(self, reference: str, capability: str = "public-homepage") -> dict:
-        result = run(
-            LOOKUP, "--knowledge-root", str(self.root), "--target", reference,
-            "--capability", capability, env=self.env,
-        )
-        return json.loads(result.stdout)
+        return json.loads(self._raw("--target", reference, "--capability", capability))
 
     def _standalone_list(self) -> dict:
         result = run(LOOKUP, "--knowledge-root", str(self.root), "--list", env=self.env)
@@ -515,6 +536,70 @@ class CombinedLookupIndexTests(unittest.TestCase):
                 self.assertEqual("found", payload["status"])
                 self.assertEqual("target", payload["index_scope"])
                 self.assertEqual("gtolab", payload["index"]["target"])
+
+    def test_an_unknown_capability_on_a_known_target_returns_only_its_row(self) -> None:
+        """A guessed capability ID must not bury the target's accepted keys.
+
+        The reference resolved, so no target ID can be minted; the whole
+        index would only push this target's keys out of a truncated reply.
+        """
+        for reference in ("gtolab.com", "https://www.gtolab.com/path"):
+            with self.subTest(reference=reference):
+                raw = self._raw("--target", reference, "--capability", "search-results")
+                payload = json.loads(raw)
+                self.assertEqual("not_found", payload["status"])
+                self.assertEqual("target", payload["index_scope"])
+                self.assertEqual("gtolab", payload["index"]["target"])
+                self.assertEqual(
+                    ["public-homepage"],
+                    [row["capability"] for row in payload["index"]["capabilities"] if row["accepted"]],
+                )
+                self.assertNotIn("targets", payload["index"])
+                self.assertNotIn("sky-news-world", raw)
+                self.assertNotIn("news.example", raw)
+
+    def test_a_pending_only_capability_on_a_known_target_returns_its_row(self) -> None:
+        self._seed_pending("gtolab", "site-search")
+        payload = self._lookup("gtolab.com", "site-search")
+        self.assertEqual("not_found", payload["status"])
+        self.assertEqual(
+            ["prop:gtolab:site-search:pending"],
+            [candidate["proposal_id"] for candidate in payload["pending_candidates"]],
+        )
+        self.assertEqual("target", payload["index_scope"])
+        self.assertEqual("gtolab", payload["index"]["target"])
+        rows = {row["capability"]: row for row in payload["index"]["capabilities"]}
+        self.assertEqual(
+            (False, 1), (rows["site-search"]["accepted"], rows["site-search"]["pending_proposals"]),
+        )
+
+    def test_status_leads_every_reply(self) -> None:
+        """A reader that cuts a long reply short still sees its status."""
+        cases = {
+            "found": (("--target", "gtolab", "--capability", "public-homepage"),
+                      ["status", "target", "capability"]),
+            "not_found, target scope": (("--target", "gtolab.com", "--capability", "search-results"),
+                                        ["status", "target"]),
+            "not_found, all scope": (("--target", "sky-news", "--capability", "public-homepage"),
+                                     ["status", "target"]),
+            "list": (("--list",), ["status"]),
+            "bare target": (("--target", "gtolab"), ["status", "target", "capability"]),
+        }
+        for name, (arguments, leading) in cases.items():
+            with self.subTest(name):
+                raw = self._raw(*arguments)
+                self.assertTrue(raw.startswith('{"status": '), raw[:80])
+                keys = list(json.loads(raw))
+                self.assertEqual(leading, keys[:len(leading)])
+                bulky = [key for key in ("index", "operational_context", "markdown_projection") if key in keys]
+                middle = keys[len(leading):len(keys) - len(bulky)]
+                self.assertEqual(sorted(middle), middle)
+                self.assertEqual(bulky, keys[len(keys) - len(bulky):], "bulky values go last")
+                if "index_scope" in keys and "index" in keys:
+                    self.assertLess(keys.index("index_scope"), keys.index("index"))
+                self.assertEqual(raw, self._raw(*arguments), "the same call must print the same bytes")
+        unresolved = run(LOOKUP, "--target", "gtolab", "--capability", "public-homepage", env=self.env)
+        self.assertTrue(unresolved.stdout.startswith('{"status": "unresolved", "target": "gtolab", '))
 
     def test_an_unresolved_root_reports_readiness_and_no_index(self) -> None:
         result = run(LOOKUP, "--target", "gtolab", "--capability", "public-homepage", env=self.env)
