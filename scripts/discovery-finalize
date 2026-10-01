@@ -128,6 +128,13 @@ def main() -> int:
         "--validate", action="store_true",
         help="predict the finalize result without persisting anything; leaves the run open",
     )
+    parser.add_argument(
+        "--authorize-replacement", metavar="CLAIM_ID",
+        help=(
+            "let a PROFILE_INCORRECT contradiction supersede this accepted Claim; "
+            "pass only when the caller explicitly authorized replacing it"
+        ),
+    )
     parser.add_argument("--operational-memory-db", help="diagnostic DB override for tests; not part of the supported interface")
     args = parser.parse_args()
     try:
@@ -158,6 +165,7 @@ def main() -> int:
                     transport_trace=payload.get("transport_trace"),
                     opened_at=record["opened_at"],
                     dry_run=args.validate,
+                    authorized_replacement=args.authorize_replacement,
                 )
         except (DatabaseOpenError, sqlite3.OperationalError) as exc:
             cause = unavailable_sqlite_cause(exc)

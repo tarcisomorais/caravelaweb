@@ -202,8 +202,8 @@ the caller supplied.
    A schema-only rejection is corrected by rerunning only `discovery-finalize`, never navigation or extraction.
    A later Discovery uses a new `run_id` and may enrich the same Candidate with new material -- run identity is never knowledge identity.
 
-   `--validate` is optional. Use it for a payload with a `transport_trace`, a contradiction, or a replacement, because a terminal `NOT_SAVED` closes the run.
-   It runs the identical write path, rolls back, and leaves the run open; `VALID` appears only under `--validate`.
+   Use `--validate` for `transport_trace` or contradiction payloads: a terminal `NOT_SAVED` closes the run; `--validate` runs the identical write path and rolls back, leaving it open.
+   Unlike `TARGET_CHANGED`, `PROFILE_INCORRECT` replaces an accepted claim only with `--authorize-replacement <claim-id>` on explicit caller authorization; never relabel it.
 
    Report only `SAVED`, `ALREADY_EXISTS`, or `NOT_SAVED` to the normal user flow.
    `ALREADY_EXISTS` means no duplicate was created; `NOT_SAVED` means nothing was added to accepted knowledge.

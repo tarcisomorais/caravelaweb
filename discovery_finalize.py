@@ -1252,10 +1252,104 @@ def _host_plan(
     return mapped, created
 
 
+# New-side outcomes that can stand in for a Claim recorded wrongly: a working
+# transport, or a directly observed limitation or constraint.
+_PROFILE_INCORRECT_NEW_OUTCOMES = frozenset({"FUNCTIONAL", "OBSERVED"})
+
+
+def _replacement_cause_proven(
+    old_validation: Mapping[str, Any], validation: Mapping[str, Any],
+    replaced_claim_id: str, authorized_replacement: str | None,
+) -> bool:
+    """Decide whether the contradiction's cause may supersede the accepted Claim.
+
+    `TARGET_CHANGED` replaces automatically: the old path failed and a new one
+    works. `PROFILE_INCORRECT` says the accepted Claim was wrong when it was
+    recorded. One disagreeing run must not overturn accepted knowledge by
+    itself, so it replaces only the exact Claim the caller authorized.
+    """
+    if old_validation.get("outcome") != "FAILED":
+        return False
+    cause = old_validation.get("failure_class")
+    if cause == "TARGET_CHANGED":
+        return validation.get("outcome") == "FUNCTIONAL"
+    if cause == "PROFILE_INCORRECT":
+        return (
+            authorized_replacement == replaced_claim_id
+            and validation.get("outcome") in _PROFILE_INCORRECT_NEW_OUTCOMES
+        )
+    return False
+
+
+def _check_replacement_authorization(
+    memory: SQLiteOperationalMemory, target: str, capability: str,
+    delta: Sequence[Mapping[str, Any]],
+    replacement_ids: tuple[str, ...] | None,
+    pending_proposal_id: str | None,
+    authorized_replacement: str | None,
+) -> None:
+    """Refuse, before any write, an authorization this payload cannot use.
+
+    The refusal leaves the run open, so the caller can correct the payload or
+    the authorization instead of closing the run on an unrelated NOT_SAVED.
+    """
+    if authorized_replacement is None:
+        return
+    item = delta[0] if len(delta) == 1 else {}
+    contradiction = item.get("contradiction") or {}
+    old_validation = contradiction.get("validation") or {}
+    if old_validation.get("failure_class") != "PROFILE_INCORRECT":
+        raise DiscoveryFinalizationError(
+            "--authorize-replacement applies only to a payload whose one new "
+            "observation contradicts an accepted Claim with failure_class "
+            "PROFILE_INCORRECT; TARGET_CHANGED needs no authorization",
+            code=PAYLOAD_VALUE,
+        )
+    if old_validation.get("outcome") != "FAILED":
+        raise DiscoveryFinalizationError(
+            "a PROFILE_INCORRECT contradiction.validation.outcome must be FAILED",
+            code=PAYLOAD_VALUE,
+        )
+    outcome = (item.get("validation") or {}).get("outcome")
+    if outcome not in _PROFILE_INCORRECT_NEW_OUTCOMES:
+        raise DiscoveryFinalizationError(
+            f"a PROFILE_INCORRECT replacement's validation.outcome is {outcome}; "
+            "accepted: " + ", ".join(sorted(_PROFILE_INCORRECT_NEW_OUTCOMES)),
+            code=PAYLOAD_VALUE,
+        )
+    if replacement_ids is None:
+        try:
+            pending = memory.get_pending_candidates(target, capability)
+        except KeyError:
+            pending = []
+        competing = sorted(
+            entry["proposal_id"] for entry in pending
+            if entry["proposal_id"] != pending_proposal_id
+        )
+        detail = (
+            "pending Candidates compete with it: " + ", ".join(competing)
+            + "; resolve them before replacing"
+            if competing else
+            "its prior_value matches no single accepted OBSERVED Claim of "
+            "this family and host"
+        )
+        raise DiscoveryFinalizationError(
+            f"--authorize-replacement names {authorized_replacement}, but {detail}",
+            code=PAYLOAD_VALUE,
+        )
+    if replacement_ids != (authorized_replacement,):
+        raise DiscoveryFinalizationError(
+            f"--authorize-replacement names {authorized_replacement}, but this "
+            f"contradiction matches {', '.join(replacement_ids)}",
+            code=PAYLOAD_VALUE,
+        )
+
+
 def _replacement_plan(
     memory: SQLiteOperationalMemory, target: str, capability: str,
     delta: Sequence[Mapping[str, Any]], host_ids: Mapping[str, str],
     pending_proposal_id: str | None = None,
+    authorized_replacement: str | None = None,
 ) -> tuple[tuple[str, ...] | None, bool, str | None]:
     try:
         pending = memory.get_pending_candidates(target, capability)
@@ -1292,10 +1386,8 @@ def _replacement_plan(
     if len(candidates) != 1:
         return None, False, None
     old_validation = contradiction["validation"]
-    if (
-        validation.get("outcome") != "FUNCTIONAL"
-        or old_validation.get("outcome") != "FAILED"
-        or old_validation.get("failure_class") != "TARGET_CHANGED"
+    if not _replacement_cause_proven(
+        old_validation, validation, candidates[0], authorized_replacement
     ):
         return tuple(candidates), False, None
     new_evidence = set(validation.get("evidence", ()))
@@ -1476,6 +1568,7 @@ def finalize_discovery(
     recorded_at: str | None = None,
     opened_at: str | None = None,
     dry_run: bool = False,
+    authorized_replacement: str | None = None,
 ) -> DiscoveryFinalization:
     """Finalize Discovery into local OM, accepting only direct observations.
 
@@ -1489,6 +1582,11 @@ def finalize_discovery(
     the run window ``provenance.observed_at`` must fall inside.
     `scripts/discovery-finalize` always passes it; a library caller that
     omits it still gets the upper bound.
+
+    ``authorized_replacement`` is the accepted Claim ID the caller explicitly
+    authorized a `PROFILE_INCORRECT` contradiction to supersede. Every other
+    replacement check still applies; an authorization the payload cannot use
+    is refused before any write.
     """
     if not isinstance(target, str) or not target.strip():
         raise DiscoveryFinalizationError(
@@ -1708,6 +1806,11 @@ def finalize_discovery(
     replacement_ids, replacement_ready, replacement_refusal = _replacement_plan(
         memory, target, capability, delta, host_ids,
         pending_proposal_id=proposal_id if pending_match else None,
+        authorized_replacement=authorized_replacement,
+    )
+    _check_replacement_authorization(
+        memory, target, capability, delta, replacement_ids,
+        proposal_id if pending_match else None, authorized_replacement,
     )
     has_conflict = _has_conflict(memory, target, capability, delta, host_ids)
     # A contradiction is a durable replacement, not ordinary new knowledge: it
@@ -1888,6 +1991,17 @@ def finalize_discovery(
                 "Conflicts: " + json.dumps(has_conflict[:10], ensure_ascii=False, sort_keys=True)
                 + " A pending Claim is not accepted knowledge; a later run may enrich it, "
                 "or it can be discarded (see knowledge-resolve)."
+            )
+        elif reason_code == "REPLACEMENT_UNPROVEN" and replacement_ids and any(
+            ((item.get("contradiction") or {}).get("validation") or {}).get("failure_class")
+            == "PROFILE_INCORRECT"
+            for item in delta
+        ):
+            reason = (
+                "A PROFILE_INCORRECT contradiction never replaces accepted knowledge "
+                f"by itself. It supersedes {replacement_ids[0]} only with "
+                f"--authorize-replacement {replacement_ids[0]}, passed when the "
+                "caller explicitly authorized replacing that Claim."
             )
         else:
             reason = "Conflicting or unconfirmed information blocked validation of a reusable path."

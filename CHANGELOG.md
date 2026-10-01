@@ -2,6 +2,22 @@
 
 All notable changes to CaravelaWeb will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- An accepted Claim that was wrong when recorded can now be replaced.
+  `discovery-finalize --authorize-replacement <claim-id>` lets a
+  contradiction whose `failure_class` is `PROFILE_INCORRECT` supersede that
+  exact Claim, when the caller explicitly authorized it. Every other
+  replacement check still applies: one new observation, no competing
+  pending Candidate, the same material context, and evidence on each side
+  that shares no locator with the other. The new side must be `FUNCTIONAL`
+  or `OBSERVED`. Without the flag the result stays `REPLACEMENT_UNPROVEN`,
+  and its reason now names the flag and the Claim. An authorization the
+  payload cannot use is refused with `PAYLOAD_VALUE` before any write, and
+  the run stays open. `TARGET_CHANGED` replacement stays automatic.
+
 ## 0.4.0 - 2026-10-01
 
 Narrows the gaps Disperta's access evidence exposed. A lookup miss on a

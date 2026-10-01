@@ -61,7 +61,10 @@ class ContinuousLearningTests(unittest.TestCase):
             for table in self._SNAPSHOT_TABLES
         }
 
-    def finalize(self, observation, *, at=T1, run="001", evidence=None, dry_run=False):
+    def finalize(
+        self, observation, *, at=T1, run="001", evidence=None, dry_run=False,
+        authorized=None,
+    ):
         transport_trace = None
         validation = observation.get("validation", {})
         contradiction = observation.get("contradiction", {})
@@ -111,6 +114,7 @@ class ContinuousLearningTests(unittest.TestCase):
             recorded_at=at,
             transport_trace=transport_trace,
             dry_run=dry_run,
+            authorized_replacement=authorized,
         )
 
     @staticmethod
@@ -139,13 +143,14 @@ class ContinuousLearningTests(unittest.TestCase):
         context=None, failure_class="TARGET_CHANGED", prior_transport="DIRECT_READ",
         new_transport="CHROME", old_engine=None, new_engine=None,
         old_javascript=False, new_javascript=False, new_evidence=None,
-        old_evidence=None,
+        old_evidence=None, new_outcome="FUNCTIONAL",
     ):
         item = self.observed(
             new_transport, family=family, value=new_value, host=host,
             context=context, engine=new_engine, javascript=new_javascript,
             evidence=new_evidence if new_evidence is not None else [NEW_EVIDENCE],
         )
+        item["validation"]["outcome"] = new_outcome
         item["contradiction"] = {
             "prior_value": prior_value or {
                 "transport": prior_transport, "outcome": "FUNCTIONAL",
@@ -262,6 +267,152 @@ class ContinuousLearningTests(unittest.TestCase):
         self.assert_change_stays_pending(
             self.replacement(prior_transport="LIGHTPANDA")
         )
+
+    # A limitation recorded wrongly from the start: the site never changed, so
+    # TARGET_CHANGED would be false and PROFILE_INCORRECT is the honest cause.
+    WRONG_LIMITATION = {"kind": "QUERY_SHAPE", "condition": "two-term queries return none"}
+    FIXED_LIMITATION = {
+        "kind": "QUERY_SHAPE",
+        "condition": "the contiguous two-term query tried returned results",
+    }
+
+    def wrong_limitation_accepted(self):
+        self.assertEqual("SAVED", self.finalize(self.observed(
+            "DIRECT_READ", family="limitation", value=self.WRONG_LIMITATION,
+        )).status)
+        return self.memory.get_current("example", "search")["accepted_claim_ids"][0]
+
+    def profile_incorrect(self, **overrides):
+        arguments = {
+            "family": "limitation", "prior_value": self.WRONG_LIMITATION,
+            "new_value": self.FIXED_LIMITATION, "failure_class": "PROFILE_INCORRECT",
+            "prior_transport": "DIRECT_READ", "new_transport": "DIRECT_READ",
+            "new_outcome": "OBSERVED",
+        }
+        return self.replacement(**{**arguments, **overrides})
+
+    def current_limitation(self):
+        return self.memory.get_current("example", "search")["accepted_claims"][0]["value"]
+
+    def test_profile_incorrect_without_authorization_stays_pending(self):
+        old_id = self.wrong_limitation_accepted()
+        result = self.finalize(self.profile_incorrect(), at=T2, run="002")
+        self.assertEqual("NOT_SAVED", result.status)
+        self.assertEqual("REPLACEMENT_UNPROVEN", result.reason_code)
+        self.assertIn(f"--authorize-replacement {old_id}", result.reason)
+        self.assertEqual(self.WRONG_LIMITATION, self.current_limitation())
+
+    def test_authorized_profile_incorrect_supersedes_only_that_claim(self):
+        old_id = self.wrong_limitation_accepted()
+        before = self._table_snapshot()
+        predicted = self.finalize(
+            self.profile_incorrect(), at=T2, run="002", dry_run=True,
+            authorized=old_id,
+        )
+        self.assertEqual("SAVED", predicted.status)
+        self.assertEqual(before, self._table_snapshot())
+
+        result = self.finalize(
+            self.profile_incorrect(), at=T2, run="002", authorized=old_id,
+        )
+        self.assertEqual("SAVED", result.status)
+        current = self.memory.get_current("example", "search")
+        self.assertNotIn(old_id, current["accepted_claim_ids"])
+        self.assertEqual(self.FIXED_LIMITATION, self.current_limitation())
+        actions = {
+            row["action"]: row["claim_id"] for row in self.memory._conn.execute(
+                """SELECT d.action, dc.claim_id FROM decisions d
+                   JOIN decision_claims dc ON dc.decision_id=d.id
+                   WHERE d.recorded_at=?""", (T2,),
+            )
+        }
+        self.assertEqual(old_id, actions["SUPERSEDE"])
+        self.assertIn("ACCEPT_SUPERSEDE", actions)
+        # The audit trail keeps the honest cause and the replaced Claim.
+        causes = {
+            json.loads(row["context_json"]).get("failure_class")
+            for row in self.memory._conn.execute(
+                "SELECT context_json FROM validations WHERE recorded_at=?", (T2,)
+            )
+        }
+        self.assertIn("PROFILE_INCORRECT", causes)
+        self.assertNotIn("TARGET_CHANGED", causes)
+        history = self.memory.get_history("example", "search")["events"]
+        self.assertIn(old_id, {event["id"] for event in history})
+
+    def test_authorization_naming_another_claim_is_refused_before_writing(self):
+        self.wrong_limitation_accepted()
+        before = self._table_snapshot()
+        with self.assertRaises(DiscoveryFinalizationError) as raised:
+            self.finalize(
+                self.profile_incorrect(), at=T2, run="002",
+                authorized="clm:example:search:discovery-other",
+            )
+        self.assertEqual("PAYLOAD_VALUE", raised.exception.code)
+        self.assertIn("clm:example:search:discovery-other", str(raised.exception))
+        self.assertEqual(before, self._table_snapshot())
+
+    def test_authorization_does_not_apply_to_target_changed(self):
+        self.finalize(self.observed("DIRECT_READ"))
+        old_id = self.memory.get_current("example", "search")["accepted_claim_ids"][0]
+        before = self._table_snapshot()
+        with self.assertRaises(DiscoveryFinalizationError) as raised:
+            self.finalize(self.replacement(), at=T2, run="002", authorized=old_id)
+        self.assertEqual("PAYLOAD_VALUE", raised.exception.code)
+        self.assertIn("PROFILE_INCORRECT", str(raised.exception))
+        self.assertEqual(before, self._table_snapshot())
+
+    def test_profile_incorrect_refuses_a_failing_new_side(self):
+        old_id = self.wrong_limitation_accepted()
+        before = self._table_snapshot()
+        for outcome in ("FAILED", "INSUFFICIENT"):
+            with self.subTest(outcome=outcome):
+                with self.assertRaises(DiscoveryFinalizationError) as raised:
+                    self.finalize(
+                        self.profile_incorrect(new_outcome=outcome),
+                        at=T2, run="002", authorized=old_id,
+                    )
+                self.assertEqual("PAYLOAD_VALUE", raised.exception.code)
+                self.assertEqual(before, self._table_snapshot())
+
+    def test_authorized_profile_incorrect_keeps_separate_evidence(self):
+        old_id = self.wrong_limitation_accepted()
+        result = self.finalize(
+            self.profile_incorrect(old_evidence=[NEW_EVIDENCE]),
+            at=T2, run="002", authorized=old_id,
+        )
+        self.assertEqual("NOT_SAVED", result.status)
+        self.assertEqual("INSUFFICIENT_BILATERAL_EVIDENCE", result.reason_code)
+        self.assertEqual(self.WRONG_LIMITATION, self.current_limitation())
+
+    def test_authorized_profile_incorrect_keeps_same_conditions(self):
+        old_id = self.wrong_limitation_accepted()
+        result = self.finalize(
+            self.profile_incorrect(
+                context={"authentication": "PUBLIC", "environment": "STAGING"}
+            ),
+            at=T2, run="002", authorized=old_id,
+        )
+        self.assertEqual("NOT_SAVED", result.status)
+        self.assertEqual("INCOMPARABLE_MATERIAL_CONTEXT", result.reason_code)
+        self.assertEqual(self.WRONG_LIMITATION, self.current_limitation())
+
+    def test_authorized_profile_incorrect_refuses_a_competing_pending_candidate(self):
+        old_id = self.wrong_limitation_accepted()
+        self.assertEqual("NOT_SAVED", self.finalize(
+            self.profile_incorrect(), at=T2, run="002"
+        ).status)
+        pending = self.memory.get_pending_candidates("example", "search")
+        self.assertEqual(1, len(pending))
+        other = {"kind": "QUERY_SHAPE", "condition": "a different correction"}
+        with self.assertRaises(DiscoveryFinalizationError) as raised:
+            self.finalize(
+                self.profile_incorrect(new_value=other),
+                at="2026-07-30T12:00:00Z", run="003", authorized=old_id,
+            )
+        self.assertEqual("PAYLOAD_VALUE", raised.exception.code)
+        self.assertIn(pending[0]["proposal_id"], str(raised.exception))
+        self.assertEqual(self.WRONG_LIMITATION, self.current_limitation())
 
     def test_concurrent_proposal_stays_pending(self):
         self.finalize(self.observed("DIRECT_READ"))

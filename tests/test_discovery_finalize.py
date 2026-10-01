@@ -1297,6 +1297,21 @@ class DiscoveryFinalizeTests(unittest.TestCase):
             for table in ("claims", "proposals", "decisions", "evidence")
         ))
 
+    def test_cli_refuses_an_authorization_the_payload_cannot_use(self):
+        # The flag reaches the finalizer, and a refusal leaves the run open
+        # instead of closing it on an unrelated NOT_SAVED.
+        payload = self.payload()
+        self.open_payload(payload)
+        result = self.run_cli(
+            payload, "--authorize-replacement", "clm:example-news:topic-search:x",
+        )
+        self.assertEqual(2, result.returncode, result.stdout)
+        body = json.loads(result.stderr)
+        self.assertEqual(PAYLOAD_VALUE, body["reason_code"])
+        self.assertEqual("OPEN", body["run_state"])
+        self.assertIn("PROFILE_INCORRECT", body["reason"])
+        self.assertEqual(1, len(list_open_discoveries(self.root)))
+
     def test_unproven_replacement_is_never_automatically_promoted(self):
         # An operational proof is exempt from the family conflict gate, so only
         # the contradiction gate keeps an unproven replacement out of the

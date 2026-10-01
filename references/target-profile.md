@@ -214,6 +214,30 @@ different closed list, also of eleven values: `NO_REUSABLE_KNOWLEDGE`,
 `REPLACEMENT_UNPROVEN`, `INSUFFICIENT_BILATERAL_EVIDENCE`,
 `INSUFFICIENT_MATERIAL_BASELINE`, and `INCOMPARABLE_MATERIAL_CONTEXT`.
 
+An observation's `contradiction` is `{prior_value, validation}`: the exact
+accepted value it contradicts, and the validation whose `outcome` is
+`FAILED` and whose `failure_class` names the cause. It supersedes that
+accepted Claim only as one new observation, with no other pending
+Candidate, under the same material context as the Claim's own validation,
+and with evidence on each side that shares no locator with the other.
+The cause then decides:
+
+- `TARGET_CHANGED` -- the target moved, so the old path stopped working.
+  The new side must be `FUNCTIONAL`, and replacement is automatic.
+- `PROFILE_INCORRECT` -- the accepted Claim was wrong when recorded. The
+  new side must be `FUNCTIONAL` or `OBSERVED`, and replacement needs
+  `discovery-finalize --authorize-replacement <claim-id>` naming that exact
+  Claim, passed only when the caller explicitly authorized replacing it.
+  Without it the result is `REPLACEMENT_UNPROVEN` and the new Claim stays
+  pending. An authorization the payload cannot use -- another Claim, another
+  cause, a failing new side, or a competing pending Candidate -- is refused
+  with `PAYLOAD_VALUE` before any write, and the run stays open.
+
+Any other cause leaves the new Claim pending. Never relabel a wrong Claim as
+`TARGET_CHANGED` to make it replace automatically: the stored cause is the
+audit trail. A replacement closes the old Claim with `SUPERSEDE` and accepts
+the new one with `ACCEPT_SUPERSEDE`; both stay in history.
+
 A browser-backed result also carries the run-scoped `transport_trace` defined in
 `SKILL.md`; the finalizer validates its preflight availability and evidenced
 attempt order before writing, then discards it rather than storing runtime
