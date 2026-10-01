@@ -136,6 +136,22 @@ available transports on it before finalizing a durable path. The finalizer
 enforces that sequence at the write boundary; it does not persist the trace
 or preflight availability as target knowledge.
 
+## Where a rule lives
+
+Callers reliably read `SKILL.md` and little else, so placement decides
+whether a rule takes effect:
+
+- Anything required for correct behavior on every ordinary call is in
+  `SKILL.md`, enforced by code, or surfaced by tool output.
+- `references/` is not reliably read. It holds rationale, examples, and detail
+  needed only on a path the model knows it is on, such as building a
+  Discovery payload.
+- Prefer code, then tool output, then `SKILL.md`: a check the runtime makes
+  cannot be skipped, and a message printed at the moment of failure is read
+  when it matters.
+- `SKILL.md` has a hard word budget enforced by
+  `tests/test_discovery_enforcement.py`; every addition is paid for by a cut.
+
 ## Fail-closed behavior
 
 - Invalid authority markers are errors.

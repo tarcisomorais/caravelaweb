@@ -39,6 +39,21 @@ Add the smallest regression test that proves a non-trivial behavior change.
 Preserve Linux and native-Windows behavior, UTF-8 output, SQLite safety,
 fail-closed authority, and the public CLI contract.
 
+## Where a rule lives
+
+Callers reliably read `SKILL.md` and little else. Before adding or moving a
+rule:
+
+- Anything required for correct behavior on every ordinary call must be in
+  `SKILL.md`, be enforced by code, or be surfaced by tool output.
+- `references/` is not reliably read. It holds rationale, examples, and
+  detail needed only on a path the model knows it is on, such as building a
+  Discovery payload.
+- Prefer code, then tool output, then `SKILL.md`.
+- `SKILL.md` has a hard word budget enforced by tests. Pay for every addition
+  with a cut, and prefer a short copyable form (an exact command, a table) to
+  a prohibition inside a long paragraph.
+
 ## Pull requests
 
 - Keep one coherent change per pull request.
