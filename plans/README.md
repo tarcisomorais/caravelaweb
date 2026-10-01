@@ -146,6 +146,22 @@ Checked read-only on a copy of `~/.local/share/caravelaweb/knowledge-root`:
   should be refused with `PROVENANCE`; if not, they are legitimate. Kept
   out of the uncoded-refusals hotfix because no downstream failure was
   demonstrated; needs an explicit maintainer decision.
+- **CORRECTNESS-06** Bounded direct work skips or reorders the Lightpanda
+  tier. `SKILL.md:69-77` names `DIRECT_READ -> LIGHTPANDA -> CHROME` but
+  not how to reach Lightpanda: `agent-browser open` without
+  `--engine lightpanda` launches Chrome, and that flag is stated only in
+  `references/transport-and-modes.md:135`. With learning disabled no
+  finalizer trace check catches the skip. In Disperta's v0.3.0 runs
+  (Sonnet 5.5 medium, `learning: DISABLED`, preflight
+  `LIGHTPANDA=AVAILABLE`), 11 of 17 browser-using calls opened Chrome
+  with no Lightpanda attempt (9) or before it (2), on Le Monde, WSJ and
+  Stuff; one delivered a Chrome `rendered_dom` without trying Lightpanda.
+  Each of the 6 compliant calls looked up the engine flag first
+  (`agent-browser --help` or the reference). Evidence:
+  `new-disperta/plans/probes/slice-3-acquisition.md` (W2, W2b) and the
+  Bash commands in `disperta-scratch/slice3/{w2,v2w,r3,v3}/raw/*.jsonl`.
+  Name the engine flag and Chrome-as-default in step 5 within the
+  151-line budget, then re-measure in the same call shape. Effort S.
 
 ## Findings considered and rejected
 
@@ -166,6 +182,29 @@ Checked read-only on a copy of `~/.local/share/caravelaweb/knowledge-root`:
   documented uninstall removes it, and a test proves resolution ignores it.
 - **`${CLAUDE_PLUGIN_ROOT}` naming**: asserted in docs, cannot be verified
   offline; noted, not filed.
+- **`/tmp` staging during direct work** (Disperta, 2026-09-28): 10 of 23
+  calls on Disperta's W2b-and-later prompt used `/tmp` (7 wrote files
+  there, e.g. `/tmp/wsj.html` in 4 calls, `/tmp/p.html`, `/tmp/served.html`,
+  `/tmp/dom.json`; others ran browser steps from `cd /tmp`). No CaravelaWeb
+  text names `/tmp` or any staging location; the working-directory rule is
+  the caller's prompt contract. The 6 W2 calls, whose prompt allowed
+  scratch files in the working directory, wrote none. Model and caller
+  behavior, not CaravelaWeb's.
+- **Browser residue after a killed call** (Disperta `slice3/v2w` `c-kill`,
+  one call, Chrome up, ended by the caller's signal sweep):
+  `/tmp/agent-browser-chrome-<uuid>` (6.9 MB), one
+  `/tmp/org.chromium.Chromium.*`, and `.sock/.pid/.engine/.stream/.version`
+  in the namespace `run/` directory. Upstream agent-browser and Chrome
+  remove these only on a graceful `close`; two other killed calls (W2 `e`,
+  W2b `4c`) left only `.config`. `references/transport-and-modes.md:166-171`
+  already makes post-kill cleanup the caller's job and names
+  `AGENT_BROWSER_NAMESPACE` with `close --all`. Upstream, not CaravelaWeb's.
+- **`<session>.config` left after `close`** (agent-browser 0.33.0): a 16 B
+  `.config` per session, plus its namespace directory, survives a normal
+  `close` (at least 12 sessions in Disperta's W2, W2b, V2W and O3 runs).
+  Plan 010's own acceptance run left `ch1`, `cw-lp-1` and `lp1.config`;
+  its "Leftover: none" counted processes only. Upstream, harmless in size,
+  and CaravelaWeb does not wrap agent-browser.
 
 ## Not audited
 
