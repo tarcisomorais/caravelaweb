@@ -23,7 +23,7 @@ in the backlog and rejection sections so it is not re-audited.
 | 008 | Correct stale public documentation claims | P2 | S | — | DONE (reviewed 2026-09-02; one commit on `advisor/plans-2026-09-02`) |
 | 009 | Reduce the Discovery ceremony cost (checklist, reason codes, aggregated diagnostics, derived claims, one lookup, multi-capability design) | P1–P3 | S–L | Step 0 re-measurement gate for changes 3–6 | DONE (closed 2026-09-04: changes 1, 2, 5 shipped in 0.2.1 `c0d7f77` and 0.2.2 `0130703`; changes 3, 4, 6 REJECTED by measurement, see the plan's status section; gate script `plans/measure-step0`) |
 | 010 | Caller guarantees for bounded, learning-disabled acquisition (`CARAVELAWEB_LEARNING=disabled`, session close, identity policy, PATH note, live acceptance) | P1–P2 | S–M | Owner decision OD-1 before change 4 | DONE (2026-09-28 on branch `learning-disabled-mode`: `51dbc04`, `d19ec37`, `d8cf0fa`, `f94a4c7`, `a377312`; 402 tests OK; change 6 acceptance run passed A–H in Disperta's call shape, see the plan's status section; not merged or released) |
-| 011 | Close the gaps the Disperta access evidence exposed (target-scoped lookup, run-window timestamps, runtime contract, claim scope, frozen baseline/candidate experiment) | P1 | S each + experiment | — | IN PROGRESS (branch `plan-011`) |
+| 011 | Close the gaps the Disperta access evidence exposed (target-scoped lookup, run-window timestamps, runtime contract, claim scope, frozen baseline/candidate experiment) | P1 | S each + experiment | — | DONE (2026-10-01 on branch `plan-011`: `4d4add6`, `e6bf35c`, `53bbef3`, `30f4912`, `907f295`, gate follow-ups `932517b`, `9f254a1`; 422 tests OK; release gate passed on the frozen rubric, done-gate misses filed as DIRECTION-10, CORRECTNESS-10, DIRECTION-11; see the plan's execution record; not merged or released) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale)
 
@@ -207,6 +207,41 @@ Checked read-only on a copy of `~/.local/share/caravelaweb/knowledge-root`:
   SIMPLIFY to Discovery but did not change this. Needs a decision on the
   finalize shape for a SIMPLIFY result (a second run, or a trace that may
   revisit a tier on a new route), with a payload example. Effort M.
+- **DIRECTION-10** Decide whether to build a `direct-read` helper. Opened
+  by plan 011's gate: T3 and T4 missed their done gates in P1 and P2, T3
+  again in P3. Residuals after the SKILL.md canonical command: one raw
+  non-ASCII URL per run (HTTP 400, fixed on the retry); a 403 escalated
+  with the body never read (P2 twice, P3 once); a direct-read "Human
+  Verification" page taken as final with no browser tier (P1, La Croix),
+  which may be wording, since step 4 forbids touching verification and
+  step 5 sends a challenge to the next tier. A helper would wrap curl,
+  stdlib only, with no identity option: percent-encode the URL, always
+  keep the body, print status, title and final URL. Its own plan weighs it
+  against a new script, tests, and replacing step 5's canonical command.
+  Evidence: plan 011's execution record and the coding tables. Effort M.
+- **CORRECTNESS-10** An unresolved lookup prints the whole index. A
+  combined lookup whose `--target` resolves to nothing (`err.ee`,
+  `postimees.ee`) answers `index_scope: "all"` with every target (about
+  23 KB here; 69 KB together with preflight in one P3 command). Callers
+  batch lookups with preflight; the harness kept a 2 KB preview, and in
+  plan 011's P1 that hid France 24's row (the one K1 miss). The model
+  then greps hosts out of the dump. Needs a decision on a compact miss
+  shape (target names and hosts only, or nothing beyond a hint to run
+  `--list`) that keeps `--list` unchanged. Effort S.
+- **DIRECTION-11** A target-scoped miss lists capability IDs, not their
+  verdicts. In plan 011's P3 the model obeyed step 2 and looked Le Monde's
+  listed `site-search` up, but in the same command as its first request
+  to `/recherche`, a route accepted knowledge records as `SITE_BLOCKING` on
+  every tier; it read the record only afterwards. Wording has been tried
+  once (`9f254a1`). A deterministic option is to carry each listed
+  capability's blocking class in the target row, which changes the index
+  row shape; needs a decision. Effort S.
+- **DEBT-09** `test_optional_browser_states_do_not_change_core_ready`
+  asserts nothing about browser states: it replaces `_browser_diagnostics`
+  in the dict `runpy.run_path` returns, a copy of the module globals, so
+  `build_report` still calls the real probe. Patch the function through
+  `build_report.__globals__` or test the helper directly, as plan 011's
+  preflight test does. Found while writing that test. Effort S.
 
 ## Findings considered and rejected
 

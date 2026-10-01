@@ -4,6 +4,14 @@ All notable changes to CaravelaWeb will be documented in this file.
 
 ## Unreleased
 
+Closes the gaps Disperta's access evidence exposed. A lookup miss on a
+known target answers with that target's own row, Discovery refuses an
+observation time outside its run, and the rules every call needs now live
+in SKILL.md. Operational Memory written by earlier versions is not
+re-validated or repaired: a claim broader than its evidence, or an
+`observed_at` outside its run, stays until a caller-authorized
+re-Discovery replaces it.
+
 ### Fixed
 
 - `discovery-finalize` now refuses a `provenance.observed_at` outside the
@@ -25,7 +33,9 @@ All notable changes to CaravelaWeb will be documented in this file.
   unresolved reference still gets `"index_scope": "all"`, because only
   then can a target ID be minted. Every `knowledge-lookup` reply now
   prints `status` first, then `target` and `capability`, then the other
-  keys in sorted order, so a reply cut short still shows its status.
+  keys in sorted order, and the bulky `index`, `operational_context` and
+  `markdown_projection` last, so a reply cut short still shows its
+  status.
 - SKILL.md step 5 now states the ladder's mechanics: `agent-browser`
   opens Chrome unless given `--engine lightpanda`, Lightpanda is tried
   before Chrome whenever preflight reports it `AVAILABLE` in Discovery,

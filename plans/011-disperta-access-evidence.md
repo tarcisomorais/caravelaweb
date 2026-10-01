@@ -165,4 +165,104 @@ re-Discovery after release.
 
 ## Execution record
 
-(filled in as the plan runs)
+Run 2026-09-30 to 2026-10-01 (UTC). The real Knowledge Root was not
+written: its newest file predates the session, and every call ran on a
+fresh copy whose tree hash the driver checked against the frozen one.
+
+**Commits** (`plan-011`, linear from `7a97e61`): `2f2c703` backlog,
+`6f967a1` this plan, `4d4add6` change 1, `e6bf35c` change 2, `53bbef3`
+change 3, `30f4912` change 4, `907f295` change 5 (the P1/P2 candidate),
+then the two follow-ups the gates opened: `932517b` preflight browser
+commands, `9f254a1` step-2 lookup-before-acting (the P3 candidate). Each
+was verified with the full suite in a clean worktree: 421 tests OK at
+`907f295`, 422 at `9f254a1`.
+
+**Deviations, with their evidence.**
+
+1. Change 2 refuses a malformed `observed_at` with `PROVENANCE` (the field
+   is provenance), and a supplied `recorded_at` earlier than `opened_at`
+   with `PAYLOAD_VALUE` naming `recorded_at`: then no `observed_at` could
+   pass, so the fault is `recorded_at`. Found by the independent review.
+2. Change 3: "skip a tier recorded as failed" holds outside Discovery only;
+   a Discovery trace skips none before its first `FUNCTIONAL` tier, as the
+   finalizer enforces. SIMPLIFY is scoped to Discovery. A claimed 15 s
+   default wait was dropped as unverified. Same review.
+3. Two gate-opened follow-ups were implemented (see Gates) and measured
+   together in one rerun, P3, so their effects are not separable.
+4. Kit: `tools/score.py` (final `59d64cc9abffad93`) was not in the frozen
+   table; `rubric-addendum.md` (final `50c86bfdcaf0a831`) holds four B0
+   pilot clarifications made before any counted run and one scorer fix
+   found on P1 (T3 judges only the literal URL part before `$`), applied
+   to every run alike. All frozen hashes still match. B0 dropped no site.
+5. Coding: one Opus coder agent coded B1, P1 and P2 from the frozen rubric
+   and the addendum; the lead coded P3 with the coder's conventions. Tables
+   in `disperta-scratch/caravelaweb-011/coding/`.
+
+**Runs** (sequential, one window): B0 pilot; P1, B1, P2 at `907f295`
+versus `7a97e61`; L on each arm; P3 at `9f254a1`. About $1.05 per run of
+four search calls; $6.01 in all.
+
+| Metric | B1 | P1 | P2 | P3 |
+|---|---|---|---|---|
+| S1 / S2a / S3 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
+| K1 (of 3 anchors) | 2 | 2 | 3 | 3 |
+| K2 (of 3 anchors) | 1 | 3 | 2 | 2 |
+| T1 conforming / browser entries | 0 / 9 | 4 / 5 | 7 / 8 | 6 / 7 |
+| T2 identity flags | 4 | 0 | 0 | 0 |
+| T3 raw direct-read URLs | 7 | 1 | 1 | 1 |
+| T4, frozen rubric | 64.3% | 85.0% | 82.6% | 87.5% |
+| T4, Lightpanda skip scored in T1 only | 92.9% | 90.0% | 87.0% | 87.5% |
+| AMBIG-STOP / ROUTE-BROWSER | 0 / 0 | 2 / 0 | 0 / 0 | 0 / 0 |
+| T5 | 1 | 0 | 2 | 1 |
+| R1 | — | 0 | 0 | 0 |
+
+K2 counts France 24 by the rubric's letter (a country-wide tag page). P3's
+T4 is 93.8% if one uninspected Postimees 200 followed by Lightpanda is read
+leniently. P3's one T1 miss is a Lightpanda open whose own output showed
+the challenge title, with no read command before Chrome; no P3 entry
+opened Chrome without Lightpanda (P1 and P2 one each).
+
+Diagnostics. Ukrinform's accepted limitation ("one or two distinctive
+terms") was contradicted by an empty two-term query in P1, P2 and P3 and
+never reported: Disperta's reply schema has no field for it on an `ok`
+Source. The P1 learning call wrote an `observed_at` five minutes ahead; the
+run window refused it with `PROVENANCE`, the model re-read the clock with
+`date -u` and saved a limitation scoped to the queries it ran, citing both
+URLs and claiming no selectors. The B1 learning call finalized an empty
+payload (`NO_REUSABLE_KNOWLEDGE`) carrying an `observed_at` 20 minutes
+ahead, which 0.3.0 does not check.
+
+**Gates.**
+
+- **Release gate: PASS** on the frozen rubric in P1, P2 and P3: S1–S3 = 0,
+  R1 = 0, D1 pass, K1, K2, T2, T3 no worse than B1, T1 and T4 above it.
+  T4 is convention-sensitive: the frozen rubric expects Lightpanda before
+  Chrome after an ambiguous direct read, so its gain is the ladder order
+  that T1 also counts. Scored on response handling alone, every candidate
+  run is one or two events below B1 (87.0–90.0% against 92.9%). Response
+  handling did not measurably improve.
+- **Done gates missed:** K1 and K2 (5/6 each over P1+P2), T1 (2 misses),
+  T3 (1 per run), T4 (below 90% in every run; two AMBIG-STOPs in P1), T5
+  (2 in P2). These are follow-ups, not release blockers.
+- **Browser-invocation hint gate: OPENED** (T1 2 misses) and acted on:
+  `932517b`, rerun P3 as above.
+- **K2 wording** (P2 retried Le Monde `/recherche` on all three tiers
+  without looking up the listed `site-search`): `9f254a1`. In P3 the model
+  looked it up but in the same command as its first request, then stopped
+  on the record's `SITE_BLOCKING` with no browser retry: improved, still a
+  K2 miss by the letter. Backlog DIRECTION-11.
+- **K1:** P1's France 24 miss came from whole-index output, not wording.
+  Backlog CORRECTNESS-10. Not implemented.
+- **`direct-read` gate: OPENED** (T3 and T4 missed in both P1 and P2; T3
+  again in P3). Its own plan decides; nothing was built. Backlog
+  DIRECTION-10.
+- **DIRECTION-09 gate: not opened.** The learning call's claim stayed
+  inside its evidence, no second accepted claim caused a failure, and
+  `direct-read` was not built.
+
+**Left for the caller.** Correcting the Ukrinform record in the
+maintainer's Knowledge Root is a separately authorized re-Discovery after
+release; it was not touched. Disperta needs a reply field for a
+contradicted claim if it wants `PROFILE_INCORRECT` back. Release notes must
+say Operational Memory written by earlier versions is not re-validated or
+repaired.
