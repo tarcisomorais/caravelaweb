@@ -218,8 +218,9 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
         self.assertIn("which is not exhaustion", transport)
         self.assertIn("describe this run or this machine, so they save nothing", transport)
 
-    def test_one_lookup_call_per_capability_reaches_the_targets_knowledge(self) -> None:
-        """One mandated call; a miss on a known target carries its profile."""
+    def test_one_lookup_call_per_capability_then_the_listed_id(self) -> None:
+        """One mandated call; a miss on a known target names its IDs, and the
+        listed equivalent ID is looked up before acting."""
         text = SKILL.read_text(encoding="utf-8")
         self.assertIn("run this once per capability you selected", text)
         self.assertNotIn(
@@ -230,17 +231,20 @@ class DiscoveryEnforcementContractTests(unittest.TestCase):
         # Disperta passed its own Source IDs; seven of fifteen were not
         # target IDs, and their accepted search routes were never read.
         self.assertIn("when it has one, never a caller's own ID", text)
-        # A miss on a known target carries every capability's record, so a
-        # guessed capability ID needs no second lookup, and a recorded block
-        # is in the same reply (plan 011's P2 retried Le Monde's).
+        # A miss on a known target returns that target's own row: the target
+        # exists, so a second target ID is never minted for it.
         self.assertIn('With `index_scope: "target"`, the target exists: never mint a new target ID', text)
-        self.assertIn("`markdown_projection` holds every capability's accepted record", text)
-        self.assertIn("it may be a block", text)
-        self.assertNotIn("look its ID up before acting", text)
+        # A listed equivalent capability may hold a recorded block: P2 of plan
+        # 011 retried Le Monde's blocked search because it never looked it up.
+        # Plan 012's profile on a miss, meant to replace this lookup, never
+        # reached a batching caller and was reverted.
+        self.assertIn("look its ID up before acting: its record may be a block", text)
+        self.assertNotIn("markdown_projection", text)
         # An unresolved reference carries no index; minting reads --list.
         self.assertNotIn('index_scope: "all"', text)
         self.assertIn('With `index_scope: "none"`, no target matches', text)
-        self.assertIn("mint an ID only after `--list` shows no exact one to reuse", text)
+        self.assertIn("unless you passed the task's URL or hostname, retry with it", text)
+        self.assertIn("Mint an ID only if `--list` shows no exact one", text)
         self.assertIn("a brand-name guess", text)
         self.assertIn("with `targets` at the top level", text)
 

@@ -55,16 +55,6 @@ def documented_example(name: str, *, target: str, capability: str, host: str) ->
     raise LookupError(f"no documented example for {name}")
 
 
-def profile_sections(markdown: str) -> dict[str, str]:
-    """Each capability's lines in a Markdown target profile, by capability key."""
-    sections: dict[str, str] = {}
-    for chunk in markdown.split("\n## ")[1:]:
-        heading, _, body = chunk.partition("\n")
-        if heading.startswith("Capability: "):
-            sections[heading.removeprefix("Capability: ")] = body.strip()
-    return sections
-
-
 def israel_hayom_search_payload() -> dict:
     """The shape of the record Disperta's reproduction never read: a search
     route proven in Lightpanda after a failed direct read."""
@@ -509,13 +499,14 @@ class TargetIdentityCrossProcessTests(unittest.TestCase):
 
 
 class CombinedLookupIndexTests(unittest.TestCase):
-    """One lookup call per capability answers with what the executor can use.
+    """One lookup call per capability, small enough to survive a batched caller.
 
-    The executor names a capability before it has seen the target's names,
-    so a resolved target always brings its whole accepted profile, hit or
-    miss. A reference that resolves to nothing gets no index: the whole
-    ``--list`` payload outgrew any reply a model reads and hid the answer
-    when cut short. ``--list`` itself is unchanged.
+    A miss on a resolved target carries only that target's index row; the
+    record arrives through a second lookup by the listed ID. A reference that
+    resolves to nothing gets no index. Plan 012 measured a caller batching
+    21 lookups and cutting each reply at 1,800 bytes: the whole index (220
+    KB) and a whole-target profile on a miss (routes 2.2-3.7 KB in) were
+    both lost that way. ``--list`` itself is unchanged.
     """
 
     def setUp(self) -> None:
@@ -620,6 +611,14 @@ class CombinedLookupIndexTests(unittest.TestCase):
         self.assertEqual(0, finalized.returncode, finalized.stderr)
         self.assertEqual("SAVED", json.loads(finalized.stdout)["status"])
 
+    def _write_and_save(self, payload: dict) -> None:
+        """Finalize ``payload`` in the run its provenance already names."""
+        path = self.root.parent / f"{payload['target']}-{payload['capability']}.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        finalized = run(FINALIZER, "--knowledge-root", str(self.root), "--input", str(path), env=self.env)
+        self.assertEqual(0, finalized.returncode, finalized.stderr)
+        self.assertEqual("SAVED", json.loads(finalized.stdout)["status"])
+
     def _seed_newsdesk(self) -> None:
         """One target with an OPERATIONAL, a blocked and a plain capability."""
         self._save(documented_example(
@@ -673,14 +672,13 @@ class CombinedLookupIndexTests(unittest.TestCase):
                 self.assertEqual("target", payload["index_scope"])
                 self.assertEqual("gtolab", payload["index"]["target"])
 
-    def test_an_unknown_capability_on_a_known_target_carries_its_profile(self) -> None:
-        """A guessed capability ID still reaches the target's accepted knowledge.
+    def test_an_unknown_capability_on_a_known_target_returns_only_its_row(self) -> None:
+        """A guessed capability ID gets the target's IDs and nothing bulky.
 
-        The reference resolved, so no target ID can be minted. The reply
-        carries that target's row and its whole profile, byte-equal to the
-        profile a hit carries, and nothing about any other target.
+        The reference resolved, so no target ID can be minted. The reply is
+        that target's row: no profile, no context, nothing about any other
+        target.
         """
-        hit = self._lookup("gtolab")
         for reference in ("gtolab", "gtolab.com", "https://www.gtolab.com/path"):
             with self.subTest(reference=reference):
                 raw = self._raw("--target", reference, "--capability", "search-results")
@@ -693,18 +691,17 @@ class CombinedLookupIndexTests(unittest.TestCase):
                     [row["capability"] for row in payload["index"]["capabilities"] if row["accepted"]],
                 )
                 self.assertNotIn("targets", payload["index"])
-                self.assertNotIn("operational_context", payload)
-                self.assertEqual(hit["markdown_projection"], payload["markdown_projection"])
-                self.assertIn("## Capability: public-homepage", payload["markdown_projection"])
-                self.assertIn('"transport":"DIRECT_READ"', payload["markdown_projection"])
+                for absent in ("markdown_projection", "operational_context"):
+                    self.assertNotIn(absent, payload)
                 self.assertNotIn("sky-news-world", raw)
                 self.assertNotIn("news.example", raw)
 
-    def test_a_miss_shows_every_capability_with_its_verdict(self) -> None:
-        """An OPERATIONAL record and a recorded block both reach the executor.
+    def test_a_miss_lists_every_capability_and_its_id_returns_the_record(self) -> None:
+        """The row names an OPERATIONAL and a blocked capability; the second
+        lookup by each listed ID returns its record, block included.
 
         Plan 011's P2 retried Le Monde's blocked search on every tier because
-        the miss listed ``site-search`` without its record (DIRECTION-11).
+        it never made that second lookup (DIRECTION-11, still open).
         """
         self._seed_newsdesk()
         payload = self._lookup("https://newsdesk.example/", "search-results")
@@ -713,18 +710,28 @@ class CombinedLookupIndexTests(unittest.TestCase):
         self.assertEqual(
             {"article-read": "OPERATIONAL", "read-homepage-stories": None, "site-search": None}, rows,
         )
-        sections = profile_sections(payload["markdown_projection"])
-        self.assertEqual(["article-read", "read-homepage-stories", "site-search"], list(sections))
-        self.assertIn("- **lifecycle** [OBSERVED]: OPERATIONAL", sections["article-read"])
-        self.assertIn("https://newsdesk.example/articles/{id}", sections["article-read"])
-        self.assertIn("**blocking**", sections["site-search"])
-        self.assertIn("SITE_BLOCKING", sections["site-search"])
-        self.assertNotIn("lifecycle", sections["site-search"])
-        self.assertIn('"transport":"DIRECT_READ"', sections["read-homepage-stories"])
+        self.assertNotIn("markdown_projection", payload)
 
-    def test_a_miss_is_never_larger_than_a_hit_on_the_same_target(self) -> None:
+        operational = self._lookup("https://newsdesk.example/", "article-read")
+        self.assertEqual(("found", "OPERATIONAL"), (operational["status"], operational["lifecycle"]))
+        proof = operational["operational_context"]["current"]["validation"][0]["value"]["operational_proof"]
+        self.assertEqual("https://newsdesk.example/articles/{id}", proof["entrypoint"])
+
+        blocked = self._lookup("https://newsdesk.example/", "site-search")
+        self.assertEqual(("found", None), (blocked["status"], blocked["lifecycle"]))
+        block = blocked["operational_context"]["current"]["blocking"][0]["value"]
+        self.assertEqual("SITE_BLOCKING", block["failure_class"])
+
+    def test_a_miss_stays_within_one_cut_reply(self) -> None:
+        """A target-scoped miss fits the ~1.5 KB a batching caller reads.
+
+        Plan 012's candidate put the target's profile on a miss; a caller
+        cutting each reply at 1,800 bytes never reached its routes, and 21
+        such replies (36.4 KB) were persisted behind a 2 KB preview.
+        """
         self._seed_newsdesk()
         miss = self._raw("--target", "newsdesk.example", "--capability", "search-results")
+        self.assertLess(len(miss.encode("utf-8")), 1024)
         for capability in ("article-read", "read-homepage-stories", "site-search"):
             with self.subTest(capability=capability):
                 hit = self._raw("--target", "newsdesk.example", "--capability", capability)
@@ -754,22 +761,34 @@ class CombinedLookupIndexTests(unittest.TestCase):
     def test_a_caller_source_id_misses_and_the_website_hostname_reaches_the_route(self) -> None:
         """The Disperta failure, end to end on synthetic data.
 
-        ``israelhayom`` is a caller's Source ID, not a target ID; the
-        website hostname resolves, and a guessed capability ID still
-        delivers the accepted search route and its working tier.
+        ``israelhayom`` is a caller's Source ID, not a target ID, and gets a
+        compact ``none``. The website hostname resolves; a guessed capability
+        ID lists ``search-articles``, and looking that ID up returns the
+        accepted route and its working tier.
         """
         self._save(israel_hayom_search_payload())
-        by_source_id = self._lookup("israelhayom", "search-results")
-        self.assertEqual(("not_found", "none"), (by_source_id["status"], by_source_id["index_scope"]))
-        self.assertNotIn("markdown_projection", by_source_id)
-        by_website = self._lookup("https://www.israelhayom.co.il/", "search-results")
-        self.assertEqual(("not_found", "target"), (by_website["status"], by_website["index_scope"]))
-        self.assertEqual("israel-hayom-he", by_website["index"]["target"])
-        search = profile_sections(by_website["markdown_projection"])["search-articles"]
-        self.assertIn("https://www.israelhayom.co.il/search?hdyQ={percent-encoded-query}", search)
-        self.assertIn('{"outcome":"FUNCTIONAL","transport":"LIGHTPANDA"}', search)
-        self.assertIn('{"outcome":"FAILED","transport":"DIRECT_READ"}', search)
-        self.assertIn("- **lifecycle** [OBSERVED]: OPERATIONAL", search)
+        by_source_id = self._raw("--target", "israelhayom", "--capability", "search-results")
+        self.assertEqual("none", json.loads(by_source_id)["index_scope"])
+        self.assertLess(len(by_source_id.encode("utf-8")), 512)
+        website = "https://www.israelhayom.co.il/"
+        listed = self._lookup(website, "search-results")
+        self.assertEqual(("not_found", "target"), (listed["status"], listed["index_scope"]))
+        self.assertEqual("israel-hayom-he", listed["index"]["target"])
+        self.assertEqual(
+            [("search-articles", "OPERATIONAL")],
+            [(row["capability"], row["lifecycle"]) for row in listed["index"]["capabilities"]],
+        )
+        record = self._lookup(website, "search-articles")
+        self.assertEqual(("found", "OPERATIONAL"), (record["status"], record["lifecycle"]))
+        current = record["operational_context"]["current"]
+        self.assertEqual(
+            "https://www.israelhayom.co.il/search?hdyQ={percent-encoded-query}",
+            current["validation"][0]["value"]["operational_proof"]["entrypoint"],
+        )
+        self.assertEqual(
+            {("LIGHTPANDA", "FUNCTIONAL"), ("DIRECT_READ", "FAILED")},
+            {(claim["value"]["transport"], claim["value"]["outcome"]) for claim in current["transport"]},
+        )
 
     def test_a_new_source_discovery_still_mints_and_cannot_duplicate_a_known_host(self) -> None:
         """Dropping the whole index from a miss opens no duplicate path.
@@ -783,7 +802,9 @@ class CombinedLookupIndexTests(unittest.TestCase):
         self._seed("brand-new", "brand-new.example", "read-homepage-stories")
         found = self._lookup("https://brand-new.example/", "search-results")
         self.assertEqual(("target", "brand-new"), (found["index_scope"], found["index"]["target"]))
-        self.assertIn("## Capability: read-homepage-stories", found["markdown_projection"])
+        self.assertEqual(
+            ["read-homepage-stories"], [row["capability"] for row in found["index"]["capabilities"]],
+        )
 
         self.assertEqual("none", self._lookup("sky-news")["index_scope"])
         self.assertEqual("sky-news-world", self._lookup("https://news.example/")["index"]["target"])
@@ -795,6 +816,38 @@ class CombinedLookupIndexTests(unittest.TestCase):
         self.assertNotEqual(0, refused.returncode, refused.stdout)
         self.assertEqual("HOST_SCOPE", json.loads(refused.stderr)["reason_code"])
         self.assertEqual("none", self._lookup("sky-news")["index_scope"])
+        self.assertNotIn("sky-news", [row["target"] for row in self._standalone_list()["targets"]])
+
+    def test_a_target_saved_without_a_host_is_found_by_id_and_in_the_list(self) -> None:
+        """A new target with no host association: its hostname misses compactly.
+
+        Such a target cannot be found by URL, so the ``none`` row sends an
+        executor about to mint an ID to ``--list``, which still shows it.
+        Eleven targets in the maintainer's Knowledge Root are in this state.
+        """
+        begun = run(
+            BEGIN, "--knowledge-root", str(self.root), "--target", "hostless",
+            "--capability", "public-homepage", env=self.env,
+        )
+        self.assertEqual(0, begun.returncode, begun.stderr)
+        opened = json.loads(begun.stdout)
+        self._write_and_save({
+            "target": "hostless", "capability": "public-homepage",
+            "observations": [{
+                "family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FUNCTIONAL"},
+            }],
+            "evidence": [{"kind": "direct-read-validation", "locator": "https://hostless.example/"}],
+            "provenance": {"run_id": opened["run_id"], "observed_at": opened["opened_at"]},
+            "recorded_at": opened["opened_at"],
+        })
+        by_host = self._raw("--target", "https://hostless.example/", "--capability", "public-homepage")
+        self.assertEqual("none", json.loads(by_host)["index_scope"])
+        self.assertLess(len(by_host.encode("utf-8")), 512)
+        by_id = self._lookup("hostless")
+        self.assertEqual(("found", "target"), (by_id["status"], by_id["index_scope"]))
+        self.assertEqual([], by_id["index"]["hosts"])
+        listed = {row["target"]: row["hosts"] for row in self._standalone_list()["targets"]}
+        self.assertEqual([], listed["hostless"])
 
     def test_a_pending_only_capability_on_a_known_target_returns_its_row(self) -> None:
         self._seed_pending("gtolab", "site-search")
@@ -810,10 +863,7 @@ class CombinedLookupIndexTests(unittest.TestCase):
         self.assertEqual(
             (False, 1), (rows["site-search"]["accepted"], rows["site-search"]["pending_proposals"]),
         )
-        # A pending Candidate is not accepted knowledge: its section is empty.
-        sections = profile_sections(payload["markdown_projection"])
-        self.assertEqual("", sections["site-search"])
-        self.assertIn('"transport":"DIRECT_READ"', sections["public-homepage"])
+        self.assertNotIn("markdown_projection", payload)
 
     def test_status_leads_every_reply(self) -> None:
         """A reader that cuts a long reply short still sees its status."""
@@ -856,11 +906,7 @@ class CombinedLookupIndexTests(unittest.TestCase):
         self.assertEqual("found", payload["status"])
         for added in ("readiness", "index", "index_scope"):
             self.assertNotIn(added, payload)
-        self.assertEqual(
-            self._lookup("gtolab", "search-results")["markdown_projection"],
-            payload["markdown_projection"],
-            "the bare call and a miss show one and the same profile",
-        )
+        self.assertIn("## Capability: public-homepage", payload["markdown_projection"])
 
 
 if __name__ == "__main__":
