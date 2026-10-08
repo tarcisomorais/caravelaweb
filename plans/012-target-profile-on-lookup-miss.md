@@ -16,9 +16,17 @@
   comparison is the cost.
 - **Branch**: `plan-012`, from `7b08c1e` (0.4.1).
 - **Closes**: CORRECTNESS-10 (an unresolved lookup prints the whole
-  index). **Supersedes**: DIRECTION-11 (a target-scoped miss lists IDs,
-  not verdicts).
+  index). **DIRECTION-11 stays open**: the change meant to supersede it
+  was reverted (below).
 - **Progress**: see "Execution record" at the end.
+
+> **Outcome (2026-10-08).** Change 1, the target profile on a lookup
+> miss, **failed live acceptance although every unit test passed**, and
+> was reverted in `35b3d29` on the owner's decision. The unit tests
+> asserted what CaravelaWeb prints; the live call showed what the model
+> receives: a caller that batches lookups and cuts each reply never saw
+> the profile's routes, and the larger batch hid even the index rows.
+> Change 2 (`index_scope: "none"`) and the step-2 identity rule ship.
 
 ## Evidence
 
@@ -68,7 +76,8 @@ JSON, so it never exceeds a hit on the same target.
 
 ## Changes
 
-1. **Profile on a resolved miss.** A combined `--target`/`--capability`
+1. **REVERTED in `35b3d29` (failed live acceptance).** **Profile on a
+   resolved miss.** A combined `--target`/`--capability`
    lookup whose reference resolves carries that target's
    `markdown_projection` whether the capability is found or not. A hit
    already carries it (`integration_bridge.py`, `render_markdown(target)`
@@ -224,8 +233,9 @@ maintenance (host-less targets), the release and its tag.
 ## Execution record
 
 **Commits** (branch `plan-012`): `26dce07` plan, `0c0b1ae` changes 1-3
-with tests and contract (436 tests OK; the new tests fail on `7b08c1e`).
-Nothing released or tagged.
+with tests and contract (436 tests OK; the new tests fail on `7b08c1e`),
+`bcab165` this record's acceptance part, `35b3d29` the revert of change 1
+(437 tests OK). Nothing released or tagged.
 
 **Harness.** Kit at `disperta-scratch/caravelaweb-012/`: Disperta
 `88d21f7` exported and built into `target/`; its `open --discovery 000004
@@ -293,9 +303,44 @@ live, because every hostname resolved.
    drops long constraints (ynet's fill-and-Enter), so the name-specific
    hit stays useful. It is a new projection and is not built.
 
-**Recommendation (owner decision).** Keep change 2 (`index_scope:
+**Recommendation.** Keep change 2 (`index_scope:
 "none"`, closing CORRECTNESS-10) and the step-2 identity rule; revert
 change 1 (profile on a miss) and restore the target row's instruction to
 look the listed equivalent ID up before acting. Keep DIRECTION-11 open
 with findings 1 and 4 and a reopening condition: a hostname-resolved
 anchor whose second lookup is skipped in a live call.
+
+**Owner decision and revert (2026-10-08).** The owner approved the
+recommendation: revert change 1 only, keep change 2 and the identity
+rule, restore the mandatory second lookup, keep DIRECTION-11 open with the
+observed limits, build no compact projection, and make no further paid
+call. `35b3d29` did that:
+
+- A target-scoped miss again carries only the index row. On the KR
+  snapshot the 21 hostname misses of the captured call are byte-identical
+  to 0.4.1: 12,708 bytes in all, 746 at most (the reverted candidate:
+  66,530 and 4,488). An unresolved reference stays at about 150 bytes
+  (0.4.1: about 222,800 for each of `israelhayom`, `alhaya`, `kikar`).
+- SKILL.md's `target` row is 0.4.1's again, including "look its ID up
+  before acting: its record may be a block"; the `none` row says to retry
+  with the task's URL or hostname and to mint an ID only if `--list` shows
+  no exact one. 3,000 words.
+- New and rewritten tests: a target-scoped miss with no profile and under
+  1 KB for a three-capability target; each listed capability's record,
+  OPERATIONAL and blocked, returned by its own ID; the Disperta case
+  reaching its route through that second lookup; a target saved without a
+  host missing by hostname in under 512 bytes while found by ID and in
+  `--list`; a duplicate of a known host refused with `HOST_SCOPE` and
+  absent from `--list`. Four of them fail on `7b08c1e` and four on
+  `0c0b1ae`, so either regression is caught.
+- Discovery: no new duplicate path. A known host still resolves its
+  target, and the finalizer still refuses a known host for a new target.
+  A host-less target is reachable only by ID or `--list`, as before; the
+  whole index used to show it only to a caller that read 220 KB.
+
+Spend: pair 1 only, $3.02 ($1.74 baseline, $1.28 candidate).
+
+**Lesson.** A unit test of a reply's content cannot see a caller's read
+budget. Any future change to what a lookup returns is accepted only on a
+live call in a consumer's real shape, scored from the tool results the
+model received.

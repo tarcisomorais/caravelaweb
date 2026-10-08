@@ -25,7 +25,7 @@ in the backlog and rejection sections so it is not re-audited.
 | 010 | Caller guarantees for bounded, learning-disabled acquisition (`CARAVELAWEB_LEARNING=disabled`, session close, identity policy, PATH note, live acceptance) | P1–P2 | S–M | Owner decision OD-1 before change 4 | DONE (2026-09-28 on branch `learning-disabled-mode`: `51dbc04`, `d19ec37`, `d8cf0fa`, `f94a4c7`, `a377312`; 402 tests OK; change 6 acceptance run passed A–H in Disperta's call shape, see the plan's status section; not merged or released) |
 | 011 | Close the gaps the Disperta access evidence exposed (target-scoped lookup, run-window timestamps, runtime contract, claim scope, frozen baseline/candidate experiment) | P1 | S each + experiment | — | DONE (2026-10-01 on branch `plan-011`: `4d4add6`, `e6bf35c`, `53bbef3`, `30f4912`, `907f295`, gate follow-ups `932517b`, `9f254a1`; 422 tests OK; release gate passed on the frozen rubric, done-gate misses filed as DIRECTION-10, CORRECTNESS-10, DIRECTION-11; see the plan's execution record; not merged or released) |
 
-| 012 | Return the accepted target profile on a lookup miss and drop the whole index from an unresolved one (CORRECTNESS-10, supersedes DIRECTION-11) | P1 | S + acceptance | — | STOPPED at acceptance R1 (2026-10-08, branch `plan-012`: `26dce07`, `0c0b1ae`; 436 tests OK; pair 1 tied the baseline 16/16 and the profile never reached the model, see the plan's execution record; owner decision pending: keep the `none` scope, revert the profile on a miss) |
+| 012 | Return the accepted target profile on a lookup miss and drop the whole index from an unresolved one (CORRECTNESS-10; DIRECTION-11 stays open) | P1 | S + acceptance | — | DONE in part (2026-10-08, branch `plan-012`: `26dce07`, `0c0b1ae`, `bcab165`, `35b3d29`; 437 tests OK): the profile on a miss FAILED live acceptance although its unit tests passed (pair 1 tied the baseline 16/16; the profile never reached the model) and was reverted in `35b3d29`; the `none` reply and the URL-or-hostname rule ship; not merged or released |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale)
 
@@ -229,7 +229,11 @@ Checked read-only on a copy of `~/.local/share/caravelaweb/knowledge-root`:
   plan 011's P1 that hid France 24's row (the one K1 miss). The model
   then greps hosts out of the dump. Needs a decision on a compact miss
   shape (target names and hosts only, or nothing beyond a hint to run
-  `--list`) that keeps `--list` unchanged. Effort S.
+  `--list`) that keeps `--list` unchanged. Effort S. DONE by plan 012
+  (`0c0b1ae`, kept by `35b3d29`): an unresolved reference answers
+  `index_scope: "none"` with no index, about 150 bytes instead of about
+  222 KB on the 549-target root; SKILL.md says to pass the URL or
+  hostname and to mint an ID only if `--list` shows no exact one.
 - **DIRECTION-11** A target-scoped miss lists capability IDs, not their
   verdicts. In plan 011's P3 the model obeyed step 2 and looked Le Monde's
   listed `site-search` up, but in the same command as its first request
@@ -237,7 +241,49 @@ Checked read-only on a copy of `~/.local/share/caravelaweb/knowledge-root`:
   every tier; it read the record only afterwards. Wording has been tried
   once (`9f254a1`). A deterministic option is to carry each listed
   capability's blocking class in the target row, which changes the index
-  row shape; needs a decision. Effort S.
+  row shape; needs a decision. Effort S. OPEN after plan 012
+  (2026-10-08). The new evidence: a Disperta IL/PS search improvised
+  routes for Sources whose search is OPERATIONAL; its second lookup ran
+  only where the Source ID happened to be a target ID. Plan 012 tried the
+  whole Markdown profile on a target-scoped miss, and live acceptance
+  rejected it although its unit tests passed: the agent batched 21
+  lookups with `head -c 1800`, every route sat 2.2-3.7 KB into its miss,
+  and the 36.4 KB batch was persisted behind a 2 KB preview; reverted in
+  `35b3d29`. With Disperta's hostname fix (new-disperta `88d21f7`) the
+  0.4.1 baseline reused 16/16 routes in that pair through second lookups.
+  **Observed read budget for any future miss payload: about 1.5 KB per
+  reply and about 30 KB per batched command** (13.2 and 24 KB were
+  delivered; 30.4 and 36.4 KB persisted). Measured, not built: a compact
+  per-capability summary (lifecycle, working and failed tiers, entrypoint,
+  block class), median 421 bytes, p99 658, max 1,897 per target, 14.2 KB
+  for the 21-Source batch; it drops long constraints (ynet's
+  fill-and-Enter), so the second lookup stays useful. It is a new lookup
+  projection and needs the owner's approval. Plan a candidate when a live
+  call skips the second lookup for a hostname-resolved target that has an
+  accepted equivalent capability, and accept it only on a live call scored
+  from the tool results the model received (plan 012's kit,
+  `disperta-scratch/caravelaweb-012/`).
+- **CORRECTNESS-11** Eleven targets in the maintainer's Knowledge Root
+  have no host association and cannot be found by URL or hostname
+  (`bloomberg`, `euronews-pt`, `npr-org`, `politico-eu`,
+  `politico-europe`, `theguardian-com`, five `quintace-*`/`localhost`
+  targets). Some look like duplicates, each with one or two claims:
+  `npr-org` of `npr`, `theguardian-com` of `the-guardian`, `politico-eu`
+  and `politico-europe` of each other; `euronews-pt` may be a distinct
+  edition of `euronews`. The whole index did not prevent them, and with
+  it gone from the miss only `--list` shows them. Needs an owner decision
+  on Knowledge Root maintenance (associate hosts, retire duplicates); no
+  code. Found by plan 012.
+- **DX-06** `--list` is one 219 KB JSON line on the 549-target root. Both
+  plan 012 acceptance agents ran `knowledge-lookup --list | head -100`
+  before any lookup, which cuts nothing on a single line, so the harness
+  persisted it behind a 2 KB preview in each arm. SKILL.md does not
+  mandate it. Consider whether its mention in step 2 invites the call, or
+  a smaller `--list` shape. Effort S.
+- **DX-07** SKILL.md's only concrete capability ID is the step-7 payload
+  example `"capability":"search-results"`, the ID invented in 28 of 31
+  plan 011 lookups and by both plan 012 agents. Circumstantial priming;
+  a neutral example ID costs one token. Effort S.
 - **DEBT-09** `test_optional_browser_states_do_not_change_core_ready`
   asserts nothing about browser states: it replaces `_browser_diagnostics`
   in the dict `runpy.run_path` returns, a copy of the module globals, so
