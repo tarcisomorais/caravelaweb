@@ -223,4 +223,79 @@ maintenance (host-less targets), the release and its tag.
 
 ## Execution record
 
-(Filled in during execution.)
+**Commits** (branch `plan-012`): `26dce07` plan, `0c0b1ae` changes 1-3
+with tests and contract (436 tests OK; the new tests fail on `7b08c1e`).
+Nothing released or tagged.
+
+**Harness.** Kit at `disperta-scratch/caravelaweb-012/`: Disperta
+`88d21f7` exported and built into `target/`; its `open --discovery 000004
+--topic 3` search call captured by a wrapper that records and fails it
+(`capture/`), then replayed by `kit/run-call.sh` with only `--plugin-dir`
+changed. Each call: a fresh export of the arm's commit, a fresh copy of
+the KR snapshot (dump identical to the real root, `e5dee5a3...`),
+`CARAVELAWEB_LEARNING=disabled`, its own namespace, Disperta's `PATH` and
+1,200 s ceiling. Anchors frozen in `kit/anchors.json`; scored by
+`kit/score.py` from the tool results the model received.
+
+**Runs.** One pair, both calls started 2026-10-08T16:55:40Z. The owner
+stopped pairs 2 and 3 once pair 1 and a deterministic measurement had
+settled the R1 question (below). A CPU-bound job unrelated to the probe
+held about 7 of 8 cores during the pair; both arms shared it.
+
+| Metric | baseline `7b08c1e` (p1-a) | candidate `0c0b1ae` (p1-b) |
+|---|---|---|
+| E1 exposure before first request | 16/16 | 16/16 |
+| E2 recorded route first | 16/16 | 16/16 |
+| E3 recorded tier first | 16/16 | 16/16 |
+| E4 premature navigation | 0 | 0 |
+| E5 improvised requests | 0 | 0 |
+| block anchors seen before a request | 1/2 (curled Sky search first) | 2/2 |
+| lookup commands / cut by the command / persisted | 6 / 6 / 1 | 5 / 5 / 2 |
+| first batched lookup reply received | 13.2 KB, every row visible | 36.4 KB persisted, 2 KB preview (one row) |
+| Sources ok / no_route | 18 / 4 | 20 / 2 |
+| tool calls, duration, cost | 63, 972 s, $1.74 | 46, 857 s, $1.28 |
+| KR unchanged, leftover sessions, plugin-dir writes | yes, none, none | yes, none, none |
+
+**Mechanism.** Both agents ran `--list | head -100` (one 219 KB line,
+persisted), then one loop over all 21 hostnames with the invented
+`search-results` and `head -c 1800` per reply, then name-specific lookups
+built from the index rows, which hit. Every anchor was exposed by those
+hits, in both arms. The candidate's profile never reached the model: on
+the snapshot each anchor's route sits 2,218-3,673 bytes into its miss
+reply, beyond the 1,800-byte cut for all 18 anchors, and the loop's 21
+replies summed to 36.4 KB, which the harness persisted. The candidate's
+second-round extractor did fall back to `markdown_projection` on a miss,
+but every lookup it made was a hit, so the fallback never ran. Source
+outcome differences (Sky News, Al-Quds) are search effort, not knowledge
+reuse.
+
+**Gates.** G1 holds by the letter (16/16) but not by its intent: the
+change did not expose the knowledge; the agent's second lookups did, as
+in the baseline. G2: candidate equals baseline on E1-E5. G3 passes. R1
+therefore triggers: **STOP, reassess the response design; no wording
+added.** Unresolved references (`index_scope: "none"`) were not exercised
+live, because every hostname resolved.
+
+**Findings for the reassessment.**
+
+1. The agent's read budget is about 1.5-1.8 KB per reply and about 30 KB
+   per batched command (13.2 and 24 KB were delivered, 30.4 and 36.4 KB
+   persisted). A miss payload that must work in a batch has to put its
+   decision facts in the first ~1.5 KB and stay near 1 KB per target.
+2. The full Markdown profile (median 2.0 KB, routes 2.2-3.7 KB in) cannot
+   meet that budget, and in a batch it hid even the index rows.
+3. With Disperta's hostname fix, the baseline reached every record by the
+   second lookup this run. This morning's skipped second lookup followed
+   first replies dominated by whole-index dumps for unresolved Source IDs.
+4. A compact per-capability summary (lifecycle, working and failed tiers,
+   entrypoint, block class) measures median 421 bytes, p99 658, max 1,897
+   per target on the snapshot, and 14.2 KB for the 21-Source batch. It
+   drops long constraints (ynet's fill-and-Enter), so the name-specific
+   hit stays useful. It is a new projection and is not built.
+
+**Recommendation (owner decision).** Keep change 2 (`index_scope:
+"none"`, closing CORRECTNESS-10) and the step-2 identity rule; revert
+change 1 (profile on a miss) and restore the target row's instruction to
+look the listed equivalent ID up before acting. Keep DIRECTION-11 open
+with findings 1 and 4 and a reopening condition: a hostname-resolved
+anchor whose second lookup is skipped in a live call.
