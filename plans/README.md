@@ -25,6 +25,8 @@ in the backlog and rejection sections so it is not re-audited.
 | 010 | Caller guarantees for bounded, learning-disabled acquisition (`CARAVELAWEB_LEARNING=disabled`, session close, identity policy, PATH note, live acceptance) | P1–P2 | S–M | Owner decision OD-1 before change 4 | DONE (2026-09-28 on branch `learning-disabled-mode`: `51dbc04`, `d19ec37`, `d8cf0fa`, `f94a4c7`, `a377312`; 402 tests OK; change 6 acceptance run passed A–H in Disperta's call shape, see the plan's status section; not merged or released) |
 | 011 | Close the gaps the Disperta access evidence exposed (target-scoped lookup, run-window timestamps, runtime contract, claim scope, frozen baseline/candidate experiment) | P1 | S each + experiment | — | DONE (2026-10-01 on branch `plan-011`: `4d4add6`, `e6bf35c`, `53bbef3`, `30f4912`, `907f295`, gate follow-ups `932517b`, `9f254a1`; 422 tests OK; release gate passed on the frozen rubric, done-gate misses filed as DIRECTION-10, CORRECTNESS-10, DIRECTION-11; see the plan's execution record; not merged or released) |
 
+| 012 | Return the accepted target profile on a lookup miss and drop the whole index from an unresolved one (CORRECTNESS-10, supersedes DIRECTION-11) | P1 | S + acceptance | — | IN PROGRESS (branch `plan-012`) |
+
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale)
 
 All eight plans landed on branch `advisor/plans-2026-09-02` (worktree
