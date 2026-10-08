@@ -33,7 +33,7 @@ the caller supplied.
    Skip this skill only when no live web target is involved at all.
 
 2. Before minting a target or capability ID, run this once per capability you selected.
-   Pass the task's URL or hostname as `<target-id>` when it has one; host resolution is exact.
+   Pass the task's URL or hostname as `<target-id>` when it has one, never a caller's own ID.
 
    ```text
    <python> <skill>/scripts/knowledge-lookup --target <target-id> --capability <capability>
@@ -46,8 +46,8 @@ the caller supplied.
    | Result | Next action |
    | --- | --- |
    | `found` | Read the returned accepted capability context. |
-   | `not_found` | With `index_scope: "target"`, the target exists: never mint a new target ID. Its `index` row lists its capability IDs with lifecycle; reuse one only under the equivalence rule (a headlines list does not serve a search task), and look its ID up before acting: its record may be a block. Otherwise enter Discovery if authorized, or do bounded work when learning is disabled. |
-   | `not_found` | With `index_scope: "all"`, read every `index.targets[].target` and its `hosts` before minting an ID: reuse an exact ID only under the equivalence rule, never by resemblance or a brand-name guess. Then enter bounded Discovery if authorized. |
+   | `not_found` | With `index_scope: "target"`, the target exists: never mint a new target ID. `markdown_projection` holds every capability's accepted record: use one only under the equivalence rule (a headlines list does not serve a search task), in step 3 under its own ID; it may be a block. Otherwise the capability is absent (step 3). |
+   | `not_found` | With `index_scope: "none"`, no target matches: retry with the task's URL or hostname if you passed anything else. Otherwise mint an ID only after `--list` shows no exact one to reuse, never by resemblance or a brand-name guess; then enter bounded Discovery if authorized. |
    | `unresolved` | Run **First run** once and retry; if still `unresolved`, stop: accepted knowledge could not be consulted. |
    | `bridge_error` | Stop: accepted knowledge could not be consulted. |
 

@@ -2,6 +2,28 @@
 
 All notable changes to CaravelaWeb will be documented in this file.
 
+## Unreleased
+
+### Changed
+
+- A combined `knowledge-lookup --target <ref> --capability <cap>` whose
+  reference resolves now carries the target's whole accepted profile,
+  `markdown_projection`, on a miss as well as a hit. A capability ID
+  guessed before the executor saw the target's names (`search-results`
+  for an accepted `search-articles`) used to return only that target's
+  capability IDs, and reuse depended on a second lookup the executor often
+  skipped. The profile is the one a hit and the bare `--target` call
+  already return, so a miss is never larger than a hit. `status` stays
+  `not_found`; no capability ID is matched, aliased, or stemmed.
+- A combined lookup whose reference resolves to no target now answers
+  `"index_scope": "none"` with no `index`, instead of `"all"` with the
+  whole `--list` payload, which had grown to hundreds of KB and hid the
+  answer when a reader cut it short. `--list` is unchanged; an executor
+  about to mint a target ID checks it first.
+- SKILL.md step 2 says to pass the task's URL or hostname, never a
+  caller's own ID for the site, and to act on an equivalent capability
+  from `markdown_projection` without a second lookup.
+
 ## 0.4.1 - 2026-10-01
 
 Lets a caller correct an accepted claim that was wrong when it was

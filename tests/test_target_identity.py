@@ -11,8 +11,10 @@ target data.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -24,6 +26,7 @@ SKILL = REPO
 sys.path.insert(0, str(SKILL))
 
 from discovery_finalize import DiscoveryFinalizationError, finalize_discovery
+from discovery_runs import begin_discovery
 from integration_bridge import KnowledgeLookupBoundary
 from operational_memory import SQLiteOperationalMemory, TargetIdentityError
 from operational_memory.core import (
@@ -38,6 +41,82 @@ INIT = SKILL / "scripts" / "init-knowledge-root"
 LOOKUP = SKILL / "scripts" / "knowledge-lookup"
 BEGIN = SKILL / "scripts" / "discovery-begin"
 FINALIZER = SKILL / "scripts" / "discovery-finalize"
+EXAMPLES = SKILL / "references" / "discovery-payload-examples.md"
+
+
+def documented_example(name: str, *, target: str, capability: str, host: str) -> dict:
+    """A tested payload from the reference, moved onto ``target`` and ``host``."""
+    text = EXAMPLES.read_text(encoding="utf-8")
+    for block in re.findall(r"```json\n(.*?)\n```", text, re.S):
+        if json.loads(block)["target"] == name:
+            moved = json.loads(block.replace(f"{name}.example", host).replace(f'"{name}"', f'"{target}"'))
+            moved["capability"] = capability
+            return moved
+    raise LookupError(f"no documented example for {name}")
+
+
+def profile_sections(markdown: str) -> dict[str, str]:
+    """Each capability's lines in a Markdown target profile, by capability key."""
+    sections: dict[str, str] = {}
+    for chunk in markdown.split("\n## ")[1:]:
+        heading, _, body = chunk.partition("\n")
+        if heading.startswith("Capability: "):
+            sections[heading.removeprefix("Capability: ")] = body.strip()
+    return sections
+
+
+def israel_hayom_search_payload() -> dict:
+    """The shape of the record Disperta's reproduction never read: a search
+    route proven in Lightpanda after a failed direct read."""
+    host = "www.israelhayom.co.il"
+    direct = f"https://{host}/search?hdyQ=consulate"
+    rendered = f"https://{host}/search?hdyQ=consulate#rendered"
+    context = {"authentication": "PUBLIC", "environment": "PRODUCTION"}
+    lightpanda = {
+        "transport": "LIGHTPANDA", "engine": "lightpanda", "javascript": True,
+        "context": context, "evidence": [rendered],
+    }
+    return {
+        "target": "israel-hayom-he",
+        "capability": "search-articles",
+        "observations": [
+            {
+                "family": "transport", "value": {"transport": "DIRECT_READ", "outcome": "FAILED"},
+                "host": host,
+                "validation": {
+                    "transport": "DIRECT_READ", "outcome": "FAILED", "engine": None,
+                    "javascript": False, "context": context, "evidence": [direct],
+                },
+            },
+            {
+                "family": "transport", "value": {"transport": "LIGHTPANDA", "outcome": "FUNCTIONAL"},
+                "host": host, "validation": {**lightpanda, "outcome": "FUNCTIONAL"},
+            },
+            {"family": "authentication", "value": {"access_model": "PUBLIC"}},
+            {
+                "family": "validation",
+                "value": {"operational_proof": {
+                    "entrypoint": f"https://{host}/search?hdyQ={{percent-encoded-query}}",
+                    "required_output": {"field_paths": {"url": "items[].url"}},
+                    "completion_condition": "the results page lists /article/ links",
+                    "critical_constraints": [],
+                }},
+                "host": host, "validation": {**lightpanda, "outcome": "SUCCESS"},
+            },
+        ],
+        "evidence": [
+            {"kind": "transport-validation", "locator": direct, "scope": "TARGET_SURFACE"},
+            {"kind": "bounded-browser-validation", "locator": rendered, "scope": "TARGET_SURFACE"},
+        ],
+        "transport_trace": {
+            "availability": {"LIGHTPANDA": "AVAILABLE", "CHROME": "AVAILABLE"},
+            "attempts": [
+                {"transport": "DIRECT_READ", "outcome": "FAILED", "host": host, "evidence": [direct]},
+                {"transport": "LIGHTPANDA", "outcome": "FUNCTIONAL", "host": host, "evidence": [rendered]},
+            ],
+        },
+        "provenance": {"run_id": "<from discovery-begin>", "observed_at": "2026-08-14T12:00:00Z"},
+    }
 
 
 def run(script: Path, *arguments: str, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -430,11 +509,13 @@ class TargetIdentityCrossProcessTests(unittest.TestCase):
 
 
 class CombinedLookupIndexTests(unittest.TestCase):
-    """One lookup call per capability still shows every exact target ID.
+    """One lookup call per capability answers with what the executor can use.
 
-    A miss used to be answered by a separate ``--list`` call. Dropping that
-    call must not drop the duplicate guard it provided: the combined
-    response carries the whole index whenever nothing resolved.
+    The executor names a capability before it has seen the target's names,
+    so a resolved target always brings its whole accepted profile, hit or
+    miss. A reference that resolves to nothing gets no index: the whole
+    ``--list`` payload outgrew any reply a model reads and hid the answer
+    when cut short. ``--list`` itself is unchanged.
     """
 
     def setUp(self) -> None:
@@ -510,6 +591,47 @@ class CombinedLookupIndexTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         return json.loads(result.stdout)
 
+    def _seed_many(self, count: int) -> None:
+        """``count`` more targets, each with a host, written directly."""
+        db = self.root / ".caravelaweb/operational_memory.db"
+        with SQLiteOperationalMemory(db, knowledge_root=self.root) as memory:
+            with memory.write_transaction() as writer:
+                for number in range(count):
+                    target = f"filler-{number:02d}"
+                    writer.target({"id": f"tgt:{target}", "name": target})
+                    writer.host({
+                        "id": f"host:{target}:1", "target_id": f"tgt:{target}",
+                        "hostname": f"{target}.example",
+                    })
+
+    def _finalize(self, payload: dict) -> subprocess.CompletedProcess[str]:
+        """Finalize ``payload`` in a run opened at its own ``observed_at``."""
+        opened = begin_discovery(
+            self.root, payload["target"], payload["capability"],
+            opened_at=payload["provenance"]["observed_at"],
+        )
+        payload["provenance"]["run_id"] = opened["run_id"]
+        path = self.root.parent / f"{payload['target']}-{payload['capability']}.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return run(FINALIZER, "--knowledge-root", str(self.root), "--input", str(path), env=self.env)
+
+    def _save(self, payload: dict) -> None:
+        finalized = self._finalize(payload)
+        self.assertEqual(0, finalized.returncode, finalized.stderr)
+        self.assertEqual("SAVED", json.loads(finalized.stdout)["status"])
+
+    def _seed_newsdesk(self) -> None:
+        """One target with an OPERATIONAL, a blocked and a plain capability."""
+        self._save(documented_example(
+            "example-operational", target="newsdesk", capability="article-read",
+            host="newsdesk.example",
+        ))
+        self._save(documented_example(
+            "example-blocked-ladder", target="newsdesk", capability="site-search",
+            host="newsdesk.example",
+        ))
+        self._seed("newsdesk", "newsdesk.example", "read-homepage-stories")
+
     def test_a_known_target_returns_its_own_index_row(self) -> None:
         payload = self._lookup("gtolab")
         self.assertEqual("found", payload["status"])
@@ -518,22 +640,30 @@ class CombinedLookupIndexTests(unittest.TestCase):
         self.assertEqual("gtolab", payload["index"]["target"])
         self.assertEqual(["gtolab.com"], payload["index"]["hosts"])
 
-    def test_an_unknown_brand_guess_returns_the_whole_index(self) -> None:
-        payload = self._lookup("sky-news")
-        listed = self._standalone_list()
+    def test_an_unresolved_reference_gets_no_index(self) -> None:
+        """A reference no target answers to gets a small, constant reply.
+
+        Disperta passed its own Source IDs (``israelhayom`` for
+        ``israel-hayom-he``) and each miss printed 222 KB of index, which
+        the agent cut to 1.5 KB and never read.
+        """
+        arguments = ("--target", "sky-news", "--capability", "public-homepage")
+        raw = self._raw(*arguments)
+        payload = json.loads(raw)
         self.assertEqual("not_found", payload["status"])
-        self.assertEqual("all", payload["index_scope"])
-        self.assertEqual(listed["count"], payload["index"]["count"])
-        self.assertEqual(
-            json.dumps(listed["targets"], sort_keys=True),
-            json.dumps(payload["index"]["targets"], sort_keys=True),
-            "a miss must show exactly what the standalone --list call shows",
-        )
-        self.assertIn(
-            "sky-news-world",
-            [row["target"] for row in payload["index"]["targets"]],
-            "the exact ID a brand-name guess would duplicate must be visible",
-        )
+        self.assertEqual("none", payload["index_scope"])
+        self.assertEqual("READY", payload["readiness"])
+        for absent in ("index", "markdown_projection", "operational_context"):
+            self.assertNotIn(absent, payload)
+        for other in ("gtolab", "sky-news-world", "news.example"):
+            self.assertNotIn(other, raw)
+        self.assertLess(len(raw.encode("utf-8")), 512)
+        self._seed_many(30)
+        self.assertEqual(raw, self._raw(*arguments), "the reply must not grow with the index")
+        # --list still shows every exact ID for an executor about to mint one.
+        listed = [row["target"] for row in self._standalone_list()["targets"]]
+        self.assertIn("sky-news-world", listed)
+        self.assertEqual(32, len(listed))
 
     def test_a_hostname_reference_resolves_without_returning_the_whole_index(self) -> None:
         for reference in ("gtolab.com", "https://www.gtolab.com/path"):
@@ -543,13 +673,15 @@ class CombinedLookupIndexTests(unittest.TestCase):
                 self.assertEqual("target", payload["index_scope"])
                 self.assertEqual("gtolab", payload["index"]["target"])
 
-    def test_an_unknown_capability_on_a_known_target_returns_only_its_row(self) -> None:
-        """A guessed capability ID must not bury the target's accepted keys.
+    def test_an_unknown_capability_on_a_known_target_carries_its_profile(self) -> None:
+        """A guessed capability ID still reaches the target's accepted knowledge.
 
-        The reference resolved, so no target ID can be minted; the whole
-        index would only push this target's keys out of a truncated reply.
+        The reference resolved, so no target ID can be minted. The reply
+        carries that target's row and its whole profile, byte-equal to the
+        profile a hit carries, and nothing about any other target.
         """
-        for reference in ("gtolab.com", "https://www.gtolab.com/path"):
+        hit = self._lookup("gtolab")
+        for reference in ("gtolab", "gtolab.com", "https://www.gtolab.com/path"):
             with self.subTest(reference=reference):
                 raw = self._raw("--target", reference, "--capability", "search-results")
                 payload = json.loads(raw)
@@ -561,8 +693,108 @@ class CombinedLookupIndexTests(unittest.TestCase):
                     [row["capability"] for row in payload["index"]["capabilities"] if row["accepted"]],
                 )
                 self.assertNotIn("targets", payload["index"])
+                self.assertNotIn("operational_context", payload)
+                self.assertEqual(hit["markdown_projection"], payload["markdown_projection"])
+                self.assertIn("## Capability: public-homepage", payload["markdown_projection"])
+                self.assertIn('"transport":"DIRECT_READ"', payload["markdown_projection"])
                 self.assertNotIn("sky-news-world", raw)
                 self.assertNotIn("news.example", raw)
+
+    def test_a_miss_shows_every_capability_with_its_verdict(self) -> None:
+        """An OPERATIONAL record and a recorded block both reach the executor.
+
+        Plan 011's P2 retried Le Monde's blocked search on every tier because
+        the miss listed ``site-search`` without its record (DIRECTION-11).
+        """
+        self._seed_newsdesk()
+        payload = self._lookup("https://newsdesk.example/", "search-results")
+        self.assertEqual(("not_found", "target"), (payload["status"], payload["index_scope"]))
+        rows = {row["capability"]: row["lifecycle"] for row in payload["index"]["capabilities"]}
+        self.assertEqual(
+            {"article-read": "OPERATIONAL", "read-homepage-stories": None, "site-search": None}, rows,
+        )
+        sections = profile_sections(payload["markdown_projection"])
+        self.assertEqual(["article-read", "read-homepage-stories", "site-search"], list(sections))
+        self.assertIn("- **lifecycle** [OBSERVED]: OPERATIONAL", sections["article-read"])
+        self.assertIn("https://newsdesk.example/articles/{id}", sections["article-read"])
+        self.assertIn("**blocking**", sections["site-search"])
+        self.assertIn("SITE_BLOCKING", sections["site-search"])
+        self.assertNotIn("lifecycle", sections["site-search"])
+        self.assertIn('"transport":"DIRECT_READ"', sections["read-homepage-stories"])
+
+    def test_a_miss_is_never_larger_than_a_hit_on_the_same_target(self) -> None:
+        self._seed_newsdesk()
+        miss = self._raw("--target", "newsdesk.example", "--capability", "search-results")
+        for capability in ("article-read", "read-homepage-stories", "site-search"):
+            with self.subTest(capability=capability):
+                hit = self._raw("--target", "newsdesk.example", "--capability", capability)
+                self.assertEqual("found", json.loads(hit)["status"])
+                self.assertLess(len(miss), len(hit))
+
+    def test_learning_mode_changes_no_lookup_answer_and_writes_nothing(self) -> None:
+        self._seed_newsdesk()
+        db = self.root / ".caravelaweb/operational_memory.db"
+        before = hashlib.sha256(db.read_bytes()).hexdigest()
+        disabled = {**self.env, "CARAVELAWEB_LEARNING": "disabled"}
+        for arguments in (
+            ("--target", "newsdesk.example", "--capability", "search-results"),
+            ("--target", "newsdesk", "--capability", "article-read"),
+            ("--target", "sky-news", "--capability", "public-homepage"),
+        ):
+            with self.subTest(arguments=arguments):
+                enabled = json.loads(self._raw(*arguments))
+                result = run(LOOKUP, "--knowledge-root", str(self.root), *arguments, env=disabled)
+                self.assertEqual(0, result.returncode, result.stderr)
+                withheld = json.loads(result.stdout)
+                self.assertEqual("DISABLED", withheld.pop("learning"))
+                self.assertNotIn("learning", enabled)
+                self.assertEqual(enabled, withheld)
+        self.assertEqual(before, hashlib.sha256(db.read_bytes()).hexdigest())
+
+    def test_a_caller_source_id_misses_and_the_website_hostname_reaches_the_route(self) -> None:
+        """The Disperta failure, end to end on synthetic data.
+
+        ``israelhayom`` is a caller's Source ID, not a target ID; the
+        website hostname resolves, and a guessed capability ID still
+        delivers the accepted search route and its working tier.
+        """
+        self._save(israel_hayom_search_payload())
+        by_source_id = self._lookup("israelhayom", "search-results")
+        self.assertEqual(("not_found", "none"), (by_source_id["status"], by_source_id["index_scope"]))
+        self.assertNotIn("markdown_projection", by_source_id)
+        by_website = self._lookup("https://www.israelhayom.co.il/", "search-results")
+        self.assertEqual(("not_found", "target"), (by_website["status"], by_website["index_scope"]))
+        self.assertEqual("israel-hayom-he", by_website["index"]["target"])
+        search = profile_sections(by_website["markdown_projection"])["search-articles"]
+        self.assertIn("https://www.israelhayom.co.il/search?hdyQ={percent-encoded-query}", search)
+        self.assertIn('{"outcome":"FUNCTIONAL","transport":"LIGHTPANDA"}', search)
+        self.assertIn('{"outcome":"FAILED","transport":"DIRECT_READ"}', search)
+        self.assertIn("- **lifecycle** [OBSERVED]: OPERATIONAL", search)
+
+    def test_a_new_source_discovery_still_mints_and_cannot_duplicate_a_known_host(self) -> None:
+        """Dropping the whole index from a miss opens no duplicate path.
+
+        A new target is minted after a ``none`` miss and found by its
+        hostname afterwards. A brand-name guess for a known target misses,
+        its URL resolves, and a finalize that would give the known host to
+        a second target is refused.
+        """
+        self.assertEqual("none", self._lookup("brand-new.example", "read-homepage-stories")["index_scope"])
+        self._seed("brand-new", "brand-new.example", "read-homepage-stories")
+        found = self._lookup("https://brand-new.example/", "search-results")
+        self.assertEqual(("target", "brand-new"), (found["index_scope"], found["index"]["target"]))
+        self.assertIn("## Capability: read-homepage-stories", found["markdown_projection"])
+
+        self.assertEqual("none", self._lookup("sky-news")["index_scope"])
+        self.assertEqual("sky-news-world", self._lookup("https://news.example/")["index"]["target"])
+        duplicate = documented_example(
+            "example-operational", target="sky-news", capability="public-homepage",
+            host="news.example",
+        )
+        refused = self._finalize(duplicate)
+        self.assertNotEqual(0, refused.returncode, refused.stdout)
+        self.assertEqual("HOST_SCOPE", json.loads(refused.stderr)["reason_code"])
+        self.assertEqual("none", self._lookup("sky-news")["index_scope"])
 
     def test_a_pending_only_capability_on_a_known_target_returns_its_row(self) -> None:
         self._seed_pending("gtolab", "site-search")
@@ -578,6 +810,10 @@ class CombinedLookupIndexTests(unittest.TestCase):
         self.assertEqual(
             (False, 1), (rows["site-search"]["accepted"], rows["site-search"]["pending_proposals"]),
         )
+        # A pending Candidate is not accepted knowledge: its section is empty.
+        sections = profile_sections(payload["markdown_projection"])
+        self.assertEqual("", sections["site-search"])
+        self.assertIn('"transport":"DIRECT_READ"', sections["public-homepage"])
 
     def test_status_leads_every_reply(self) -> None:
         """A reader that cuts a long reply short still sees its status."""
@@ -586,8 +822,8 @@ class CombinedLookupIndexTests(unittest.TestCase):
                       ["status", "target", "capability"]),
             "not_found, target scope": (("--target", "gtolab.com", "--capability", "search-results"),
                                         ["status", "target"]),
-            "not_found, all scope": (("--target", "sky-news", "--capability", "public-homepage"),
-                                     ["status", "target"]),
+            "not_found, none scope": (("--target", "sky-news", "--capability", "public-homepage"),
+                                      ["status", "target"]),
             "list": (("--list",), ["status"]),
             "bare target": (("--target", "gtolab"), ["status", "target", "capability"]),
         }
@@ -620,6 +856,11 @@ class CombinedLookupIndexTests(unittest.TestCase):
         self.assertEqual("found", payload["status"])
         for added in ("readiness", "index", "index_scope"):
             self.assertNotIn(added, payload)
+        self.assertEqual(
+            self._lookup("gtolab", "search-results")["markdown_projection"],
+            payload["markdown_projection"],
+            "the bare call and a miss show one and the same profile",
+        )
 
 
 if __name__ == "__main__":

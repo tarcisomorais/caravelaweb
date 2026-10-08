@@ -69,8 +69,10 @@ hyphens, so `Instructor List`, `instructor-list`, `instructor_list`, and
 invalid. Normalization never stems, singularizes, translates, removes words,
 or uses fuzzy matching.
 
-Before minting an ID, run target-only `knowledge-lookup --target <target-id>`
-and inspect its accepted capability IDs. Reuse one only when the actual
+Before minting an ID, run the combined lookup below with the task's URL or
+hostname. On a known target its reply carries every accepted capability's
+record, whatever capability ID was asked for; inspect those capability IDs
+and their records first. Reuse one only when the actual
 capability contract has the same reusable output or action, material scope,
 authority/access boundary, and completion condition. Semantic synonyms are
 never merged automatically: `instructors`, `coaches`, `team`, and
@@ -101,39 +103,58 @@ concrete interpreter and skill path reported by preflight:
 
 The first form is the one call a task needs. `--target` accepts the canonical
 ID, or a hostname or URL that resolves through a recorded target<->host
-association. Use `--knowledge-root` only for a caller-supplied override. The
-normal boundary returns accepted context for the requested capability:
+association. Pass the URL or hostname the task names: a caller's own key for a
+site (a source ID in the consuming project) is not a target ID, and when it
+differs from one it resolves to nothing. Use `--knowledge-root` only for a
+caller-supplied override. The normal boundary returns accepted context for
+the requested capability:
 
 - `found` — read the accepted capability context.
-- `not_found` — no accepted reusable knowledge exists for that capability.
+- `not_found` — no accepted reusable knowledge exists under that capability ID; on a known target, the reply still carries the target's other accepted records (below).
 - `unresolved` or `bridge_error` — accepted knowledge could not be consulted; stop rather than treating the target as checked.
 
 A `--target` call combined with `--capability` also carries the readiness of
-the installation and the exact index, so the executor needs no separate
-`preflight` or `--list` call before it decides:
+the installation, the target's index row, and its accepted profile, so the
+executor needs no separate `preflight`, `--list`, or second lookup before it
+decides:
 
 - `readiness` — `READY`, or the status `preflight` reports on the same root.
-- `index_scope` — `target`, `all`, or `unavailable`. The key is absent on an
+- `index_scope` — `target`, `none`, or `unavailable`. The key is absent on an
   `unresolved` or `bridge_error` response, where no Operational Memory
   boundary was reached at all.
-- `index` — with scope `target`, that target's single `--list` row; with
-  scope `all`, the whole `--list` payload (`count` and every `targets` row),
-  so a miss still shows every exact ID before a new one is minted. Scope
-  `unavailable` carries no `index`: no index is available on this path (the
-  diagnostic legacy path, or an index read that failed).
+- `index` — with scope `target`, that target's single `--list` row: its
+  hosts, and each capability ID with its lifecycle and pending count. Scopes
+  `none` and `unavailable` carry no `index`: `none` means the reference
+  resolved to no target; `unavailable` means no index is available on this
+  path (the diagnostic legacy path, or an index read that failed).
+- `markdown_projection` — with scope `target`, hit or miss, the target's whole
+  accepted profile: every capability with its accepted claims (transport
+  outcomes, entrypoint, constraints, limitations, blocks, lifecycle). It is
+  the same projection the bare `--target` call returns. It carries no claim
+  or evidence IDs; a capability-scoped hit carries those in
+  `operational_context`.
 
 The scope follows the target reference, never the capability. A reference
 that resolves gets scope `target` whether the capability was found or not, so
-a guessed capability ID still shows that target's existing capability keys;
-only a reference that resolves to no target gets scope `all`. Every reply
-prints `status` first, then `target` and `capability`, so a reply cut short
-still shows its answer.
+a capability ID guessed before the executor saw the target's names still
+reaches everything the target knows: the executor picks an equivalent
+capability from the profile under the equivalence rule and acts on its
+record under its own ID, with no second lookup. Nothing is matched for it:
+names are never stemmed, aliased, or fuzzy-matched. A reference that resolves
+to no target gets scope `none` and no index. Retry with the task's URL or
+hostname if another reference was passed; otherwise the target is new to this
+installation, and an executor about to mint its ID first checks `--list` for
+an exact ID to reuse. The finalizer independently refuses to give a hostname
+another target already owns to a new target. Every reply prints `status`
+first, then `target` and `capability`, then the small fields, and the bulky
+`index`, `operational_context`, and `markdown_projection` last.
 
 `--list` and a bare `--target` keep their existing shape. `--list` returns an
 exact index of every target with its hosts and capability keys, with no
-`--target`, and is available on its own for browsing the index.
+`--target`, and is available on its own for browsing the index. It grows with
+the installation, which is why a miss no longer carries it.
 
-Lookup is capability-scoped and performs no web action, transport selection, knowledge mutation, or publication. It does not silently fall back to historical knowledge.
+Lookup performs no web action, transport selection, knowledge mutation, or publication. It does not silently fall back to historical knowledge.
 
 ## Knowledge Boundary
 

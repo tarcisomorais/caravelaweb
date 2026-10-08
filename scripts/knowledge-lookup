@@ -48,18 +48,20 @@ def index_fields(boundary: KnowledgeLookupBoundary, target_id: str | None) -> di
 
     A resolved target gets its own `--list` row, whether the capability hit
     or missed: the executor already holds the canonical ID, and the row
-    shows which capability keys that target has. Only an unresolved
-    reference gets the whole `--list` payload, because only then can the
-    executor mint a target ID, and it must see every exact ID first so it
-    cannot create a duplicate by naming. The legacy path has no index at
-    all, and says so rather than failing the lookup.
+    shows which capability keys that target has. An unresolved reference
+    gets no index at all (`none`). The whole `--list` payload outgrew any
+    reply a model reads (hundreds of KB), hid the one useful answer when
+    cut short, and a call with learning disabled can mint nothing anyway;
+    `--list` stays available for the rare executor about to mint an ID.
+    The legacy path has no index at all, and says so rather than failing
+    the lookup.
     """
+    if target_id is None:
+        return {"index_scope": "none"}
     try:
         rows = boundary.list_index(target_id=target_id)
     except (BridgeError, MemoryError, KeyError):
         return {"index_scope": "unavailable"}
-    if target_id is None:
-        return {"index": {"count": len(rows), "targets": rows}, "index_scope": "all"}
     if not rows:
         return {"index_scope": "unavailable"}
     return {"index": rows[0], "index_scope": "target"}
@@ -128,7 +130,9 @@ def main() -> int:
         emit("found", source="legacy", profile=result.profile_path, target=args.target, **visibility, **combined_fields())
         return 0
     if result.operational_context is None:
-        emit("not_found", source="operational-memory", target=args.target, **visibility, **combined_fields())
+        # A miss on a resolved target carries its whole accepted profile.
+        profile = {"markdown_projection": result.markdown_projection} if result.markdown_projection else {}
+        emit("not_found", source="operational-memory", target=args.target, **visibility, **combined_fields(), **profile)
         return 0
     if result.capability:
         emit("found", source="operational-memory", target=args.target, capability=result.capability, operational_context=result.operational_context, markdown_projection=result.markdown_projection, lifecycle=result.operational_context["lifecycle"], **visibility, **combined_fields())

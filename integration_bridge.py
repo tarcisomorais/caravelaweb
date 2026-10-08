@@ -85,17 +85,24 @@ class KnowledgeLookupBoundary:
                     # A valid OM database with no such capability is an honest
                     # absence. Keep this catch around identity resolution only;
                     # query/schema/database failures remain bridge_error.
+                    #
+                    # The executor names a capability before it has seen this
+                    # target's names, so a miss on a resolved target still
+                    # carries the target's whole accepted profile, the same
+                    # projection a hit carries: reuse never waits on the name.
                     try:
                         memory.resolve_capability(target, capability)
                     except KeyError:
                         return LookupResult(
                             source="operational-memory", target=target, capability=capability,
+                            markdown_projection=memory.render_markdown(target),
                             resolved_target=target_id,
                         )
                     context = memory.render_operational_context(target, capability, caller_context)
                     if not any(context["current"].values()):
                         return LookupResult(
                             source="operational-memory", target=target, capability=capability,
+                            markdown_projection=memory.render_markdown(target),
                             pending_candidates=context["pending_candidates"] or None,
                             resolved_target=target_id,
                         )
