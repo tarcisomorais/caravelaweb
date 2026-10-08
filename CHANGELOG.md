@@ -2,23 +2,50 @@
 
 All notable changes to CaravelaWeb will be documented in this file.
 
-## Unreleased
+## 0.4.2 - 2026-10-08
 
-### Changed
+Fixes a lookup reply that hid its own answer. A `knowledge-lookup` whose
+target reference resolved to no target printed the whole index, about
+220 KB on a 549-target Knowledge Root; callers cut long replies short, so
+a caller that passed its own source IDs instead of hostnames never
+reached those targets' accepted routes. That reply is now about 150
+bytes. The fix is covered by tests and by measurement on a copy of a
+production Knowledge Root; the live acceptance comparison in Disperta's
+call shape resolved every target by hostname, so it did not exercise this
+reply. A miss on a known target is unchanged, byte for byte: it lists
+that target's capability IDs, and the executor looks the equivalent one
+up by its ID before acting. Carrying the target's whole profile on that
+miss was tried and measured in Disperta's call shape and was not shipped:
+the caller cut each reply before the profile's routes, and the larger
+batch hid even the index rows. The numbers are in
+`plans/012-target-profile-on-lookup-miss.md`.
+
+### Fixed
 
 - A combined `knowledge-lookup --target <ref> --capability <cap>` whose
   reference resolves to no target now answers `"index_scope": "none"`
   with no `index`, instead of `"all"` with the whole `--list` payload.
-  That payload had grown to about 220 KB, so callers cut it short and lost
-  the answer: Disperta's own Source IDs (`israelhayom` for
-  `israel-hayom-he`) each printed it, and the agent never saw those
-  targets again. The reply is now about 150 bytes whatever the index size.
-  `--list` is unchanged; an executor about to mint a target ID checks it
-  first. A miss on a resolved target still carries only that target's
-  index row.
+  The reply no longer grows with the index. `"all"` is no longer
+  produced; a caller that needs every exact target ID calls `--list`,
+  which is unchanged.
+
+### Changed
+
 - SKILL.md step 2 says to pass the task's URL or hostname, never a
-  caller's own ID for the site, and that an executor about to mint a
-  target ID checks `--list` for an exact ID first.
+  caller's own ID for the site; on an `index_scope: "none"` miss, to
+  retry with that URL or hostname, and to mint a target ID only if
+  `--list` shows no exact one.
+
+### Known limitations
+
+- Reusing an accepted capability under a different ID than the one the
+  executor asked for still depends on the executor's second lookup by
+  the listed ID. In the measured run it made that lookup for every
+  source; nothing in this release enforces it.
+- A target saved without a host association cannot be found by URL or
+  hostname: such a lookup answers `index_scope: "none"`, and the target
+  is reachable only by its ID or in `--list`. Associate its host through
+  a caller-authorized Discovery.
 
 ## 0.4.1 - 2026-10-01
 
